@@ -1,0 +1,318 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@700&display=swap');
+
+  /* ============================================================
+     VARIABLES GLOBALES
+  ============================================================ */
+  :root {
+    --navy:      #003366;
+    --accent:    #005BB9;
+    --bg:        #F8FAFC;
+    --card-bg:   #FFFFFF;
+    --text-main: #1E293B;
+    --text-muted:#64748B;
+    --border:    #E2E8F0;
+    --radius:    16px;
+    --success:   #10B981;
+    --danger:    #EF4444;
+  }
+
+  /* ============================================================
+     BASE
+  ============================================================ */
+  body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg);
+    margin: 0;
+    color: var(--text-main);
+    display: flex;
+    justify-content: center;
+    line-height: 1.5;
+  }
+
+  .main-canvas {
+    width: 100%;
+    max-width: 850px;
+    padding: 40px 20px;
+    animation: fadeIn 0.8s ease-out;
+  }
+
+  /* ============================================================
+     HEADER
+  ============================================================ */
+  .app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 35px;
+    padding: 0 5px;
+  }
+  .logo-area            { display: flex; align-items: center; gap: 18px; }
+  .logo-area img        { height: 32px; }
+  .v-divider            { width: 1.5px; height: 28px; background: #CBD5E1; }
+  .logo-area h1         { font-family: 'Montserrat', sans-serif; font-size: 19px; margin: 0; color: var(--navy); letter-spacing: -0.5px; }
+  .user-badge           { font-size: 11px; font-weight: 700; color: var(--accent); background: #E0F2FE; padding: 6px 14px; border-radius: 30px; text-transform: uppercase; }
+
+  /* ============================================================
+     BARRA DE DESCARGAS
+  ============================================================ */
+  .downloads-bar {
+    z-index: 100;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 12px;
+    padding: 10px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  }
+  .downloads-bar__label {
+    font-size: 12px; font-weight: 600; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.8px; white-space: nowrap;
+  }
+  .downloads-bar__btns  { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .downloads-bar__btn   { display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; color: white; text-decoration: none; transition: 0.2s ease; white-space: nowrap; }
+  .downloads-bar__btn:hover { opacity: 0.88; transform: translateY(-1px); }
+  .downloads-bar__btn.green { background: #16A34A; }
+  .downloads-bar__btn.navy  { background: #253150; }
+
+  /* ============================================================
+     SECCIONES (CARDS)
+  ============================================================ */
+  .glass-section {
+    background: var(--card-bg);
+    border-radius: var(--radius);
+    padding: 28px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+    border: 1px solid var(--border);
+    transition: transform 0.3s ease;
+  }
+  .section-title         { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; color: var(--navy); font-weight: 700; font-size: 15px; }
+  .section-title i       { color: var(--accent); font-size: 18px; }
+
+  #zonaPdfWrapper {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  #zonaPdfWrapper .drop-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* ============================================================
+     FORMULARIO
+  ============================================================ */
+  .form-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .full-width { margin-top: 20px; }
+
+  label {
+    display: block; font-size: 11px; font-weight: 700; margin-bottom: 8px;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  input, textarea {
+    width: 100%; padding: 13px 16px; border: 1.5px solid var(--border);
+    border-radius: 10px; box-sizing: border-box; font-size: 14px;
+    font-family: inherit; transition: all 0.2s ease; background: #F1F5F9;
+  }
+  input:focus, textarea:focus {
+    outline: none; border-color: var(--accent); background: white;
+    box-shadow: 0 0 0 4px rgba(0, 91, 185, 0.1);
+  }
+  textarea { resize: none; min-height: 90px; }
+
+  input[type="checkbox"] { width: 20px; height: 20px; margin-top: 3px; cursor: pointer; accent-color: var(--navy); }
+
+  /* ============================================================
+     DROP CARD (ZONA DE CARGA)
+  ============================================================ */
+  .drop-card {
+    width: 100%; max-width: 550px; margin: 0 auto;
+    border: 2px dashed #CBD5E1; padding: 25px; border-radius: 12px;
+    display: flex; align-items: center; gap: 20px;
+    cursor: pointer; transition: 0.3s; background: #FFFFFF;
+  }
+  .drop-card:hover         { border-color: var(--accent); background: #F0F9FF; transform: translateY(-2px); }
+  .drop-card.loaded        { border: 2px solid #16A34A; background: #F0FDF4; }
+  .drop-card.loaded .drop-icon.excel { background: #16A34A; color: white; }
+
+  .drop-icon.excel {
+    background: #DCFCE7; color: #16A34A; font-size: 26px;
+    width: 55px; height: 55px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .drop-info b    { display: block; font-size: 15px; color: var(--navy); }
+  .drop-info span { font-size: 12px; color: var(--text-muted); }
+
+  .drop-check              { display: none; color: #16A34A; font-size: 22px; margin-left: auto; flex-shrink: 0; }
+  .drop-card.loaded .drop-check { display: block; }
+
+  /* ============================================================
+     BOTÓN PRINCIPAL
+  ============================================================ */
+  .submit-area { margin-top: 20px; }
+  .btn-main {
+    width: 100%; padding: 18px; border-radius: var(--radius); border: none;
+    background: var(--navy); color: white; font-weight: 700; font-size: 16px;
+    cursor: pointer; transition: 0.3s; display: flex; justify-content: center;
+    align-items: center; gap: 10px; letter-spacing: 0.5px;
+  }
+  .btn-main:hover    { background: var(--accent); box-shadow: 0 10px 20px rgba(0, 51, 102, 0.2); }
+  .btn-main:disabled { background: #94A3B8; cursor: not-allowed; }
+
+  /* ============================================================
+     PANEL DE ERRORES
+  ============================================================ */
+  .result-box       { display: none; margin-top: 30px; padding: 25px; border-radius: var(--radius); }
+  .result-box.error { background: #FFF5F5; border: 1px solid #FED7D7; }
+
+  .table-container  { background: white; border-radius: 10px; overflow: hidden; border: 1px solid #FED7D7; margin-top: 15px; }
+  table             { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th                { background: #FEE2E2; padding: 14px; text-align: left; color: #991B1B; font-size: 11px; text-transform: uppercase; }
+  td                { padding: 14px; border-top: 1px solid #FEE2E2; }
+
+  /* ============================================================
+     MODAL DE CARGA
+  ============================================================ */
+  .modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(5px);
+    display: flex; justify-content: center; align-items: center; z-index: 1000;
+  }
+  .loader-card {
+    background: white; padding: 45px; border-radius: 24px; text-align: center;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  }
+  .custom-loader {
+    border: 4px solid #F1F5F9; border-top: 4px solid var(--navy);
+    border-radius: 50%; width: 45px; height: 45px;
+    animation: spin 1s linear infinite; margin: 0 auto 20px;
+  }
+
+  /* ============================================================
+     BARRA DE PROGRESO
+  ============================================================ */
+  .progress-bar-fill {
+    height: 6px; width: 0%;
+    background: linear-gradient(90deg, #253150, #005BB9);
+    border-radius: 999px;
+    animation: fillBar 20s ease-in-out forwards;
+  }
+  @keyframes fillBar {
+    0%   { width: 0%;  }
+    60%  { width: 75%; }
+    85%  { width: 88%; }
+    100% { width: 95%; }
+  }
+
+  /* ============================================================
+     ANIMACIONES GLOBALES
+  ============================================================ */
+  @keyframes spin    { 100% { transform: rotate(360deg); } }
+  @keyframes fadeIn  { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+
+  /* ============================================================
+     BARRA DE CONSULTA DE LOTES
+  ============================================================ */
+  .query-bar {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 24px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.04);
+  }
+  .query-bar__icon { color: var(--accent); flex-shrink: 0; }
+  .query-bar__input {
+    flex: 1; border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 11px 16px; font-size: 14px; font-family: inherit;
+    background: #F1F5F9; transition: .2s;
+  }
+  .query-bar__input:focus {
+    outline: none; border-color: var(--accent); background: white;
+    box-shadow: 0 0 0 4px rgba(0,91,185,.1);
+  }
+  .query-bar__btn {
+    padding: 11px 20px; background: var(--navy); color: white;
+    border: none; border-radius: 10px; font-weight: 700; font-size: 13px;
+    cursor: pointer; transition: .2s; white-space: nowrap;
+  }
+  .query-bar__btn:hover    { background: var(--accent); }
+  .query-bar__btn:disabled { background: #94A3B8; cursor: not-allowed; }
+
+  .lote-modal-bg {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(15,23,42,.6); backdrop-filter: blur(4px);
+    display: flex; align-items: flex-start; justify-content: center;
+    z-index: 2000; padding: 40px 16px; box-sizing: border-box;
+    overflow-y: auto;
+  }
+  .lote-modal {
+    background: white; border-radius: var(--radius); width: 100%;
+    max-width: 740px; overflow: hidden;
+    border: 1px solid var(--border); margin: auto;
+    animation: fadeIn .25s ease-out;
+  }
+  .lote-modal__head {
+    background: #253150; padding: 20px 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .lote-modal__title { margin: 0; font-size: 15px; font-weight: 700; color: white; }
+  .lote-modal__id    { font-family: monospace; font-size: 12px; color: rgba(255,255,255,.7); background: rgba(255,255,255,.12); padding: 4px 12px; border-radius: 20px; }
+  .lote-modal__close {
+    width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.15);
+    border: none; color: white; font-size: 16px; cursor: pointer; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .lote-modal__close:hover { background: rgba(255,255,255,.3); }
+  .lote-modal__summary {
+    padding: 14px 24px; background: #F8FAFC;
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 24px; flex-wrap: wrap;
+  }
+  .lote-sum__label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: .7px; display: block; margin-bottom: 2px; }
+  .lote-sum__val   { font-size: 14px; font-weight: 700; color: #253150; }
+  .lote-contracts  { padding: 16px 24px; display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto; }
+  .lote-contract-card {
+    background: #F8FAFC; border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 18px; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start;
+  }
+  .lcc-name { font-weight: 700; font-size: 14px; color: #253150; }
+  .lcc-meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+  .lote-badge { display: inline-flex; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
+  .lb-terminado  { background: #EAF3DE; color: #3B6D11; }
+  .lb-analisis   { background: #E6F1FB; color: #185FA5; }
+  .lb-radicado   { background: #FAEEDA; color: #854F0B; }
+  .lb-error      { background: #FCEBEB; color: #A32D2D; }
+  .lb-pendiente  { background: #EEEDFE; color: #3C3489; }
+  .lb-default    { background: #F1EFE8; color: #5F5E5A; }
+  .lote-empty    { text-align: center; padding: 40px 24px; color: var(--text-muted); font-size: 14px; }
+
+/* Forzar texto normal en TODO el documento excepto en los títulos que queremos mantener */
+body *:not(h1):not(h2):not(h3):not(label):not(.user-badge):not(.downloads-bar__label):not(th) {
+    text-transform: none !important;
+    letter-spacing: normal !important;
+}
+
+/* Ajuste específico para las notas dentro de las tarjetas de certificación */
+.opcion-card p, 
+.opcion-card span,
+.drop-info b,
+.drop-info span,
+.drop-card p {
+    text-transform: none !important;
+    letter-spacing: 0px !important;
+}
+
+
+</style>

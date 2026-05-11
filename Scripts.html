@@ -1,0 +1,417 @@
+<script>
+
+  // ============================================================
+  //  INICIALIZACIÓN DE ZONAS DE CARGA
+  // ============================================================
+
+  // FIX #5: setupDropZone ahora recibe subLabelId como parámetro
+  // para que cada zona actualice su propio texto de estado
+  function setupDropZone(zoneId, inputId, labelId, subLabelId) {
+    const zone  = document.getElementById(zoneId);
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(labelId);
+    if (!zone || !input) return;
+
+    zone.onclick     = () => input.click();
+    zone.ondragover  = (e) => { e.preventDefault(); zone.style.borderColor = '#0033a0'; zone.style.backgroundColor = 'rgba(0, 51, 160, 0.05)'; };
+    zone.ondragleave = ()  => { zone.style.borderColor = ''; zone.style.backgroundColor = ''; };
+    zone.ondrop      = (e) => {
+      e.preventDefault();
+      zone.style.borderColor = '';
+      zone.style.backgroundColor = '';
+      input.files = e.dataTransfer.files;
+      actualizarLabel(input, label, subLabelId, zoneId);
+    };
+    input.onchange = () => actualizarLabel(input, label, subLabelId, zoneId);
+  }
+
+  // FIX #5: actualizarLabel recibe subLabelId y zoneId explícitamente
+  // en vez de asumir siempre los del Excel
+  function actualizarLabel(input, label, subLabelId, zoneId) {
+    if (input && input.files[0]) {
+      const zona     = document.getElementById(zoneId);
+      const subLabel = subLabelId ? document.getElementById(subLabelId) : null;
+      label.innerHTML = `<b>${input.files[0].name}</b>`;
+      if (subLabel) subLabel.textContent = '✅ Archivo listo para procesar';
+      if (zona) zona.classList.add('loaded');
+    }
+  }
+
+  // Inicializar zona Excel — pasando sus IDs de subLabel y zone correctos
+  setupDropZone('dropZoneExcel', 'fileExcel', 'labelExcel', 'subLabelExcel');
+
+  // Inicializar zona PDF — pasando sus propios IDs (FIX #5)
+  setupDropZone('dropZonePdf', 'filePdf', 'labelPdf', 'subLabelPdf');
+
+
+  // ============================================================
+  //  PROCESAMIENTO Y ENVÍO
+  // ============================================================
+
+  async function procesarRadicacion() {
+    const btn   = document.getElementById('btnEnviar');
+    const modal = document.getElementById('loadingModal');
+
+    const poliza          = document.getElementById('poliza').value.trim();
+    const tasaNegociacion = document.getElementById('tasaNegociacion').value.trim();
+    const fileExcel       = document.getElementById('fileExcel').files[0];
+    const radioA          = document.getElementById('radioA');
+    const radioB          = document.getElementById('radioB');
+    const filePdf         = document.getElementById('filePdf').files[0];
+
+    // ── Validaciones previas ──
+    if (!poliza || !tasaNegociacion) {
+      Swal.fire('Campos incompletos', 'Por favor, ingresa la Póliza y la Tasa de Inducción.', 'warning');
+      return;
+    }
+    if (!fileExcel) {
+      Swal.fire('Archivo requerido', 'Debes cargar la planilla de inducción (Excel).', 'warning');
+      return;
+    }
+
+    // FIX #2: eliminada la referencia a certificadoCheck (variable inexistente).
+    // La validación del paz y salvo se hace con los radio buttons.
+    if (!radioA.checked && !radioB.checked) {
+      Swal.fire('Certificación requerida', 'Debes elegir una opción de paz y salvo para continuar.', 'warning');
+      return;
+    }
+    if (radioB.checked && !filePdf) {
+      Swal.fire('PDF requerido', 'Seleccionaste adjuntar el paz y salvo pero no has cargado ningún archivo PDF.', 'warning');
+      return;
+    }
+
+    // Activar interfaz de carga
+    btn.disabled  = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> PROCESANDO...';
+    if (modal) {
+      modal.style.display = 'flex';
+      const bar = document.getElementById('progressBarFill');
+      if (bar) {
+        bar.style.animation = 'none';
+        bar.offsetHeight; // fuerza reflow
+        bar.style.animation = 'fillBar 20s ease-in-out forwards';
+      }
+    }
+
+    try {
+      // FIX #1: todos los await se ejecutan ANTES de construir dataParaEnviar.
+      // Antes había dos declaraciones de dataParaEnviar: la primera (con tipoPazYSalvo)
+      // se construía antes del await del Excel y nunca se enviaba; la segunda
+      // (que sí se enviaba) no tenía tipoPazYSalvo ni pazYSalvoPdf.
+      const excelObj     = await archivoABase64(fileExcel);
+      const pazYSalvoObj = (radioB.checked && filePdf)
+        ? await archivoABase64(filePdf)
+        : null;
+
+      // Un único dataParaEnviar con todos los campos necesarios
+      const dataParaEnviar = {
+        poliza:           poliza,
+        tasaNegociacion:  tasaNegociacion,
+        observaciones:    document.getElementById('observaciones').value,
+        excel:            excelObj,
+        tipoPazYSalvo:    radioA.checked ? "checkbox" : "adjunto",
+        pazYSalvoPdf:     pazYSalvoObj
+      };
+
+      google.script.run
+        .withSuccessHandler((res) => { if (modal) modal.style.display = 'none'; alRecibirRespuesta(res); })
+        .withFailureHandler((err)  => { if (modal) modal.style.display = 'none'; alDarErrorGrave(err); })
+        .motorDeAuditoria(dataParaEnviar);
+
+    } catch (err) {
+      if (modal) modal.style.display = 'none';
+      resetBoton();
+      Swal.fire('Error', 'Problema al procesar el archivo. Verifica que sea un Excel válido.', 'error');
+    }
+  }
+
+
+  // ============================================================
+  //  MANEJO DE RESPUESTA DEL SERVIDOR
+  // ============================================================
+
+  function alRecibirRespuesta(res) {
+    resetBoton();
+    const panelErrores = document.getElementById('errorPanel');
+
+    if (res.status === "ERROR") {
+      mostrarErrores(res.detalles || res.errores || []);
+      Swal.fire({
+        title: 'Revisión Necesaria',
+        text: 'Se detectaron inconsistencias en el lote. Corrige el archivo y vuelve a intentarlo.',
+        icon: 'error',
+        confirmButtonColor: '#d32f2f'
+      });
+
+    } else if (res.status === "OK" || res.status === "success") {
+      if (panelErrores) panelErrores.style.display = 'none';
+
+      Swal.fire({
+        title: '¡Ingreso Exitoso!',
+        html: `
+          <div style="margin-top: 15px;">
+            <p>La información ha sido enviada al equipo de inducciones.</p>
+            <div style="background: #f1f8e9; padding: 20px; border-radius: 12px; border: 2px dashed #2e7d32; margin-top: 20px;">
+              <span style="font-size: 0.85em; color: #555; text-transform: uppercase; letter-spacing: 1px;">ID de Lote:</span><br>
+              <b style="font-family: 'Roboto Mono', monospace; font-size: 1.4em; color: #1b5e20;">${res.idLote}</b>
+            </div>
+          </div>`,
+        icon: 'success',
+        confirmButtonText: 'Finalizar',
+        confirmButtonColor: '#0033a0',
+        allowOutsideClick: false,
+        showClass: { popup: 'animate__animated animate__backInDown' }
+      }).then((result) => {
+        if (result.isConfirmed) {
+          document.getElementById('formInducciones').reset();
+          resetLabels();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      });
+    }
+  }
+
+  function alDarErrorGrave(error) {
+    resetBoton();
+    Swal.fire('Error Crítico', 'No se pudo conectar con el servidor: ' + (error.message || error), 'error');
+  }
+
+
+  // ============================================================
+  //  UTILIDADES DE INTERFAZ
+  // ============================================================
+
+  function mostrarErrores(lista) {
+    const panel = document.getElementById('errorPanel');
+    const tbody = document.getElementById('errorBody');
+    if (!tbody || !panel) return;
+
+    tbody.innerHTML = "";
+    lista.forEach(err => {
+      tbody.innerHTML += `
+        <tr class="animate__animated animate__fadeIn">
+          <td><span class="badge bg-danger">${err.fila || '-'}</span></td>
+          <td><b>${err.campo || 'General'}</b></td>
+          <td>${err.motivo || err.descripcion}</td>
+        </tr>`;
+    });
+
+    panel.style.display = 'block';
+    panel.classList.add('animate__animated', 'animate__headShake');
+    panel.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function resetBoton() {
+    const btn = document.getElementById('btnEnviar');
+    if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-bolt"></i> Revisar y envíar a radicación'; }
+  }
+
+  function resetLabels() {
+    const lblExcel = document.getElementById('labelExcel');
+    const subLbl   = document.getElementById('subLabelExcel');
+    const zona     = document.getElementById('dropZoneExcel');
+
+    if (lblExcel) lblExcel.innerHTML = 'Planilla de Inducción';
+    if (subLbl)   subLbl.textContent = 'Click para cargar Excel (.xlsx)';
+    if (zona)     zona.classList.remove('loaded');
+
+    // Resetear también la zona del PDF
+    resetDropPdf();
+
+    // Resetear radio buttons y ocultar zona PDF
+    const radioA  = document.getElementById('radioA');
+    const radioB  = document.getElementById('radioB');
+    const labelA  = document.getElementById('labelOpcionA');
+    const labelB  = document.getElementById('labelOpcionB');
+    const zonaPdf = document.getElementById('zonaPdfWrapper');
+
+    if (radioA)  radioA.checked          = false;
+    if (radioB)  radioB.checked          = false;
+    if (labelA)  { labelA.style.borderColor = '#e2e8f0'; labelA.style.background = 'white'; }
+    if (labelB)  { labelB.style.borderColor = '#e2e8f0'; labelB.style.background = 'white'; }
+    if (zonaPdf) zonaPdf.style.display   = 'none';
+  }
+
+  function seleccionarOpcion(opcion) {
+    const labelA  = document.getElementById('labelOpcionA');
+    const labelB  = document.getElementById('labelOpcionB');
+    const zonaPdf = document.getElementById('zonaPdfWrapper');
+    const radioA  = document.getElementById('radioA');
+    const radioB  = document.getElementById('radioB');
+
+    if (opcion === 'A') {
+      radioA.checked            = true;
+      labelA.style.borderColor  = '#BD0F14';
+      labelA.style.background   = '#FFF8F8';
+      labelB.style.borderColor  = '#e2e8f0';
+      labelB.style.background   = 'white';
+      zonaPdf.style.display     = 'none';
+      document.getElementById('filePdf').value = '';
+      resetDropPdf();
+    } else {
+      radioB.checked            = true;
+      labelB.style.borderColor  = '#BD0F14';
+      labelB.style.background   = '#FFF8F8';
+      labelA.style.borderColor  = '#e2e8f0';
+      labelA.style.background   = 'white';
+      zonaPdf.style.display     = 'block';
+    }
+  }
+
+  function resetDropPdf() {
+    const zona = document.getElementById('dropZonePdf');
+    const lbl  = document.getElementById('labelPdf');
+    const sub  = document.getElementById('subLabelPdf');
+    if (zona) zona.classList.remove('loaded');
+    if (lbl)  lbl.innerHTML   = 'Paz y Salvo (PDF)';
+    if (sub)  sub.textContent = 'Click para cargar o arrastra aquí';
+  }
+
+  function validarComa(input) {
+    input.value = input.value.replace(/\./g, ',').replace(/[^0-9,]/g, '');
+    const partes = input.value.split(',');
+    if (partes.length > 2) input.value = partes[0] + ',' + partes.slice(1).join('');
+  }
+
+  function archivoABase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload  = () => resolve({ bytes: reader.result, nombre: file.name, tipo: file.type });
+      reader.onerror = e  => reject(e);
+    });
+  }
+
+
+  // ============================================================
+  //  CONSULTA DE LOTES DESDE EL FRONT
+  // ============================================================
+
+  function consultarLoteDesdeUI() {
+    const idLote = document.getElementById('inputConsultaLote').value.trim();
+    if (!idLote) return;
+
+    const btn = document.getElementById('btnConsultaLote');
+    btn.disabled = true;
+    btn.textContent = 'Buscando...';
+
+    google.script.run
+      .withSuccessHandler(mostrarResultadoLote)
+      .withFailureHandler(() => {
+        btn.disabled = false;
+        btn.textContent = 'Consultar lote';
+        Swal.fire('Error', 'No se pudo consultar el lote.', 'error');
+      })
+      .consultarLote(idLote);
+  }
+
+  function getLoteBadgeClass(estado) {
+    const e = estado.toUpperCase();
+    if (e.includes('TERMINADO'))  return 'lb-terminado';
+    if (e.includes('ANÁLISIS'))   return 'lb-analisis';
+    if (e.includes('RADICADO'))   return 'lb-radicado';
+    if (e.includes('ERROR'))      return 'lb-error';
+    if (e.includes('PENDIENTE'))  return 'lb-pendiente';
+    return 'lb-default';
+  }
+
+  function mostrarResultadoLote(resultados) {
+    const btn = document.getElementById('btnConsultaLote');
+    btn.disabled = false;
+    btn.textContent = 'Consultar lote';
+
+    const container = document.getElementById('loteModalContainer');
+
+    if (!resultados || resultados.length === 0) {
+      container.innerHTML = `
+        <div class="lote-modal-bg" onclick="if(event.target===this) cerrarModalLote()">
+          <div class="lote-modal">
+            <div class="lote-modal__head">
+              <p class="lote-modal__title">Consulta de lote</p>
+              <button class="lote-modal__close" onclick="cerrarModalLote()">&#x2715;</button>
+            </div>
+            <div class="lote-empty">
+              <p style="font-weight:700;color:#253150;margin:0 0 6px">Lote no encontrado</p>
+              <p style="margin:0">Verifica el ID e intenta de nuevo.</p>
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+
+    const fi      = resultados[0];
+    const estados = [...new Set(resultados.map(r => r.estado))].join(', ');
+    const cards   = resultados.map(r => `
+      <div class="lote-contract-card">
+        <div>
+          <div class="lcc-name">${r.arrendatario || '—'}</div>
+          <div class="lcc-meta">${r.comercial} &middot; Ingreso: ${r.fechaIngreso}</div>
+        </div>
+        <span class="lote-badge ${getLoteBadgeClass(r.estado)}">${r.estado}</span>
+      </div>`).join('');
+
+    container.innerHTML = `
+      <div class="lote-modal-bg" onclick="if(event.target===this) cerrarModalLote()">
+        <div class="lote-modal">
+          <div class="lote-modal__head">
+            <p class="lote-modal__title">Detalle del lote</p>
+            <span class="lote-modal__id">${fi.idLote}</span>
+            <button class="lote-modal__close" onclick="cerrarModalLote()">&#x2715;</button>
+          </div>
+          <div class="lote-modal__summary">
+            <div><span class="lote-sum__label">Fecha ingreso</span><span class="lote-sum__val">${fi.fechaIngreso}</span></div>
+            <div><span class="lote-sum__label">Contratos</span><span class="lote-sum__val">${resultados.length}</span></div>
+            <div><span class="lote-sum__label">Comercial</span><span class="lote-sum__val">${fi.comercial}</span></div>
+            <div><span class="lote-sum__label">Estados</span><span class="lote-sum__val">${estados}</span></div>
+          </div>
+          <div class="lote-contracts">${cards}</div>
+        </div>
+      </div>`;
+  }
+
+  function cerrarModalLote() {
+    document.getElementById('loteModalContainer').innerHTML = '';
+    document.getElementById('inputConsultaLote').value = '';
+  }
+
+let intervaloTextos;
+function iniciarTextosDeCarga() {
+  const textos = [
+    "Validando estructura del Excel...",
+    "Analizando contratos y codeudores...",
+    "Verificando duplicados en la base...",
+    "Corriendo reglas de negocio...",
+    "Casi listo, por favor espera..."
+  ];
+  let i = 0;
+  document.getElementById('loadingSub').innerText = textos[0];
+  intervaloTextos = setInterval(() => {
+    i = (i + 1) % textos.length;
+    document.getElementById('loadingSub').innerText = textos[i];
+  }, 3500); // Cambia el texto cada 3.5 segundos
+}
+
+function detenerTextosDeCarga() {
+  clearInterval(intervaloTextos);
+}
+
+function guardarBorrador() {
+  const dataLocal = {
+    poliza: document.getElementById('poliza').value,
+    tasa: document.getElementById('tasaNegociacion').value,
+    observaciones: document.getElementById('observaciones').value
+  };
+  localStorage.setItem('borradorLibertador', JSON.stringify(dataLocal));
+}
+
+function restaurarBorrador() {
+  const dataGuardada = localStorage.getItem('borradorLibertador');
+  if (dataGuardada) {
+    const data = JSON.parse(dataGuardada);
+    if(data.poliza) document.getElementById('poliza').value = data.poliza;
+    if(data.tasa) document.getElementById('tasaNegociacion').value = data.tasa;
+    if(data.observaciones) document.getElementById('observaciones').value = data.observaciones;
+  }
+}
+
+</script>
