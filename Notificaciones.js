@@ -324,126 +324,6 @@ function _badge_estado_pendiente_() {
           </span>`;
 }
 
-
-// ============================================================
-//  EMAIL 1 Y 2 — INGRESO EXITOSO
-//  Reemplaza enviarNotificaciones() de Code.gs
-// ============================================================
-
-function enviarNotificaciones(formData, idLote, cantidad, email, urlDrive, filas) {
-
-  const URL_CONTROL_GENERAL = `https://docs.google.com/spreadsheets/d/${ID_HOJA_CONTROL}/edit#gid=991800725`;
-  const nombreComercial     = obtenerNombreComercial(email);
-  const correoDirector      = obtenerCorreoDirector(email);
-  const badgePS             = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
-
-  // ──────────────────────────────────────────
-  // EMAIL 1: AL COMERCIAL — Confirmación de ingreso exitoso
-  // ──────────────────────────────────────────
-  const bodyComercial = _envolver_([
-
-    _bloque_cabecera_("Ingreso exitoso"),
-
-    _bloque_barra_estado_(_C_ROJO, "&#10003;", "Lote procesado correctamente"),
-
-    _bloque_cuerpo_inicio_(
-      `&iexcl;Hola, ${nombreComercial}!`,
-      `Tu lote de inducciones fue recibido y procesado correctamente.
-       Ser&aacute; remitido al equipo de radicaci&oacute;n para su an&aacute;lisis.
-       Te notificaremos en cada etapa del proceso.`
-    ),
-
-    _bloque_chips_([
-      { label: "ID de Lote",     valor: idLote,                       colorVal: _C_ROJO },
-      { label: "P&oacute;liza",  valor: formData.poliza                                 },
-      { label: "Contratos",      valor: String(cantidad)                                 },
-      { label: "Tasa IVA incl.", valor: formData.tasaNegociacion + "%"                  },
-      { label: "Paz y Salvo",    valor: badgePS,                       full: true        }
-    ]),
-
-    _bloque_contratos_(filas),
-
-    _bloque_nota_(
-      `<strong style="color:#BD0F14;">Recuerda:</strong> si elegiste certificaci&oacute;n manual
-       de paz y salvo, el soporte f&iacute;sico emitido por la inmobiliaria ser&aacute; exigido
-       en caso de que el lote sea aprobado.`
-    ),
-
-    _bloque_pie_()
-
-  ].join(""));
-
-  MailApp.sendEmail({
-    to:       email,
-    cc:       correoDirector,
-    subject:  `✅ Lote recibido exitosamente · ID ${idLote}`,
-    htmlBody: bodyComercial,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador S A"
-  });
-
-  // ──────────────────────────────────────────
-  // EMAIL 2: A LOS LÍDERES — Nuevo lote para radicar
-  // ──────────────────────────────────────────
-  const bodyLideres = _envolver_([
-
-    _bloque_cabecera_("Nuevo lote"),
-
-    _bloque_barra_estado_(_C_GRIS, "&#128230;", "Pendiente radicar &nbsp;&middot;&nbsp; Requiere gesti&oacute;n"),
-
-    _bloque_cuerpo_inicio_(
-      "Nuevo lote recibido",
-      `El comercial <strong>${nombreComercial}</strong> acaba de radicar un lote
-       con <strong>${cantidad} contrato${cantidad !== 1 ? "s" : ""}</strong>.
-       Requiere revisi&oacute;n y gesti&oacute;n del equipo de inducciones.`
-    ),
-
-    _bloque_chips_([
-      { label: "ID de Lote",     valor: idLote,                       colorVal: _C_ROJO  },
-      { label: "P&oacute;liza",  valor: formData.poliza                                  },
-      { label: "Comercial",      valor: email       ,                 full: true         },
-      { label: "Contratos",      valor: String(cantidad)                                  },
-      { label: "Tasa IVA incl.", valor: formData.tasaNegociacion + "%"                   },
-      { label: "Paz y Salvo",    valor: badgePS,                       full: true         }
-    ]),
-
-    _bloque_contratos_(filas),
-
-    _bloque_boton_("Ver en Control General", URL_CONTROL_GENERAL),
-
-    _bloque_nota_(
-      formData.tipoPazYSalvo === "adjunto"
-        ? "El paz y salvo en PDF fue adjuntado directamente a este correo."
-        : "Paz y salvo con certificaci&oacute;n manual &mdash; el soporte ser&aacute; requerido si el lote es aprobado."
-    ),
-
-    _bloque_pie_()
-
-  ].join(""));
-
-  const opcionesLider = {
-    to:       CORREOS_LIDERES.join(", "),
-    subject:  `📦 Nuevo lote para radicar · ID ${idLote}`,
-    htmlBody: bodyLideres,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador S A"
-  };
-
-  if (formData.tipoPazYSalvo === "adjunto" && formData.pazYSalvoPdf) {
-    const pdfBase64 = formData.pazYSalvoPdf.bytes.split(",")[1] || formData.pazYSalvoPdf.bytes;
-    opcionesLider.attachments = [
-      Utilities.newBlob(
-        Utilities.base64Decode(pdfBase64),
-        "application/pdf",
-        formData.pazYSalvoPdf.nombre
-      )
-    ];
-  }
-
-  MailApp.sendEmail(opcionesLider);
-}
-
-
 // ============================================================
 //  EMAIL 3 — PENDIENTE PAZ Y SALVO (Trigger de edición)
 //  Reemplaza enviarCorreoPazYSalvo() de Triggers.gs
@@ -514,8 +394,8 @@ if (10 < colStart || 10 > colEnd) return;
 
   if (!emailFinal || !emailFinal.includes("@")) return;
 
-  const correoDirector  = obtenerCorreoDirector(emailFinal);
-  const nombreComercial = obtenerNombreComercial(emailFinal);
+  const correoDirector  = obtenerCorreoDeDirector(emailFinal);
+  const nombreComercial = obtenerNombreDeComercial(emailFinal);
   const correosCC       = CORREOS_LIDERES.join(",") + (correoDirector ? "," + correoDirector : "");
 
   const htmlBody = _envolver_([
@@ -575,111 +455,277 @@ if (10 < colStart || 10 > colEnd) return;
 //  EMAIL 4 — RECORDATORIO DIARIO DE PAZ Y SALVO
 // ============================================================
 
+/**
+ * Revisa diariamente los lotes estancados y busca el correo real 
+ * haciendo el cruce entre Control_General y Hoja_Control.
+ */
 function enviarRecordatoriosPazYSalvoDiario() {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Control_General");
-  if (!sheet) return;
+  const LISTA_LIDERES = [
+     "lady.vargas@segurosbolivar.com",
+     "jonathan.enciso@segurosbolivar.com",
+     "jenny.ascanio@segurosbolivar.com",
+     "daniela.giraldo@segurosbolivar.com",
+     "desarrollocrmlibertador@ellibertador.co"
+  ];
 
-  const ultimaFila = sheet.getLastRow();
-  if (ultimaFila < 2) return;
-
-  const data  = sheet.getRange(2, 1, ultimaFila - 1, 61).getValues();
-  const hoy   = new Date();
-  const lotes = {};
-
-  // ── Agrupar filas por lote y detectar cuáles están completos ──
-  for (let i = 0; i < data.length; i++) {
-    const idLote       = data[i][0].toString().trim();
-    const estado       = data[i][9].toString().trim().toUpperCase();
-    const emailCom     = data[i][10].toString().trim();
-    const fechaAviso   = data[i][60]; // Columna BI
-
-    if (!idLote) continue;
-
-    if (!lotes[idLote]) {
-      lotes[idLote] = { pendiente: true, email: emailCom, fecha: fechaAviso, filas: [] };
-    }
-    lotes[idLote].filas.push(i + 2);
-    if (estado !== "PENDIENTE PAZ Y SALVO") lotes[idLote].pendiente = false;
+  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
+  const sheetCG = ss.getSheetByName("Control_General");
+  const sheetHC = ss.getSheetByName("Hoja_Control");
+  
+  if (!sheetCG || !sheetHC) {
+    console.error("No se encontraron las hojas necesarias.");
+    return;
   }
 
-  // ── Enviar recordatorio a los lotes que llevan > 2 días (3 o más) ──
-  for (const idLote in lotes) {
-    const l = lotes[idLote];
-    
-    // Si no está pendiente o no tiene fecha de aviso previo, saltamos
-    if (!l.pendiente || !l.fecha) continue;
+  // 1. CARGAMOS HOJA_CONTROL EN UN MAPA (Para búsqueda ultra rápida)
+  // Estructura: Col F (ID Lote) -> Col B (Email)
+  const dataHC = sheetHC.getDataRange().getValues();
+  const mapaEmailsLote = {};
+  for (let i = 1; i < dataHC.length; i++) {
+    const emailHC = String(dataHC[i][1]).trim(); // Columna B
+    const idLoteHC = String(dataHC[i][5]).trim(); // Columna F
+    if (idLoteHC) mapaEmailsLote[idLoteHC] = emailHC;
+  }
 
-    // Validación de seguridad: Asegurarnos de que la fecha es válida
-    const fechaGuardada = new Date(l.fecha);
-    if (isNaN(fechaGuardada.getTime())) continue;
+  // 2. LEEMOS CONTROL_GENERAL PARA LOS PENDIENTES
+  const ultimaFilaCG = sheetCG.getLastRow();
+  const dataCG = sheetCG.getRange(1, 1, ultimaFilaCG, 61).getValues();
+  
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const lotesParaAvisar = {};
 
-    // Calcular diferencia en días exactos
-    const diffDias = Math.floor(Math.abs(hoy - fechaGuardada) / (1000 * 60 * 60 * 24));
-    
-    // NUEVA REGLA: Si la diferencia es de 2 días o menos, saltar este lote.
-    // Solo continuará si diffDias es 3, 4, 5...
-    if (diffDias <= 2) continue;
+  for (let i = 1; i < dataCG.length; i++) {
+    const idLote = String(dataCG[i][0]).trim();
+    const estado = String(dataCG[i][9]).trim().toUpperCase();
+    const fIngreso = dataCG[i][2];  
+    const fAviso = dataCG[i][60]; // Columna BI
 
-    const emailFinal = l.email;
-    if (!emailFinal || !emailFinal.includes("@")) continue;
+    if (!idLote || estado !== "PENDIENTE PAZ Y SALVO") continue;
 
-    const nombreComercial = obtenerNombreComercial(emailFinal);
-    const correoDirector  = obtenerCorreoDirector(emailFinal);
-    const correosCC       = CORREOS_LIDERES.join(",") + (correoDirector ? "," + correoDirector : "");
+    if (!lotesParaAvisar[idLote]) {
+      let fechaRef = (fAviso instanceof Date && !isNaN(fAviso)) ? fAviso : fIngreso;
+      if (!(fechaRef instanceof Date) && typeof fechaRef === 'string') {
+        const p = fechaRef.split(/[/ -]/);
+        if (p.length >= 3) fechaRef = new Date(p[2], p[1] - 1, p[0]);
+      }
 
-    const htmlBody = _envolver_([
+      lotesParaAvisar[idLote] = { 
+        timestamp: (fechaRef instanceof Date && !isNaN(fechaRef)) ? new Date(fechaRef).setHours(0,0,0,0) : null, 
+        filas: [] 
+      };
+    }
+    lotesParaAvisar[idLote].filas.push(i + 1);
+  }
 
-      _bloque_cabecera_("Recordatorio"),
+  // 3. PROCESAR Y ENVIAR
+  for (const idLote in lotesParaAvisar) {
+    const lote = lotesParaAvisar[idLote];
+    if (!lote.timestamp) continue;
 
-      _bloque_barra_estado_(
-        _C_GRIS,
-        "&#128260;",
-        `Recordatorio &nbsp;&middot;&nbsp; ${diffDias} d&iacute;a${diffDias !== 1 ? "s" : ""} pendiente`
-      ),
+    const diffDias = Math.floor((hoy.getTime() - lote.timestamp) / (1000 * 60 * 60 * 24));
 
-      _bloque_cuerpo_inicio_(
-        `Hola, ${nombreComercial}`,
-        `Han pasado <strong>${diffDias} d&iacute;a${diffDias !== 1 ? "s" : ""}</strong>
-         desde que el lote <strong style="color:#253150;">${idLote}</strong>
-         qued&oacute; en estado <strong>Pendiente de Paz y Salvo</strong>.
-         El equipo de inducciones est&aacute; esperando el soporte para continuar.`
-      ),
+    if (diffDias >= 3) {
+      // --- EL CRUCE DE DATOS ---
+      // Buscamos en el mapa el email real usando el ID del lote
+      const emailReal = mapaEmailsLote[idLote];
 
-      _bloque_chips_([
-        { label: "ID de Lote",          valor: idLote,                   colorVal: _C_ROJO },
-        { label: "D&iacute;as pendiente", valor: diffDias + " d&iacute;as", colorVal: _C_ROJO },
-        { label: "Estado",              valor: _badge_estado_pendiente_(), full: true        }
-      ]),
+      if (!emailReal || !emailReal.includes("@")) {
+        console.warn(`⚠️ Lote ${idLote} omitido: No se encontró email real en Hoja_Control.`);
+        continue;
+      }
 
-      _bloque_nota_(
-        `<strong style="color:#BD0F14;">Acci&oacute;n requerida:</strong>
-         Responde a este correo usando <strong>"Responder a todos"</strong> y adjunta
-         el documento de Paz y Salvo emitido por la inmobiliaria.
-         Si tienes dudas, contacta directamente al equipo de inducciones.`
-      ),
+      const nombreComercial = _correoANombre(emailReal);
+      const correoDirector = obtenerCorreoDeDirector(emailReal);
+      
+      // Unificamos CCs (Líderes + Director)
+      const ccs = [...new Set([...LISTA_LIDERES, correoDirector])].filter(e => e && e.includes("@")).join(",");
 
-      _bloque_pie_()
+      const htmlBody = _envolver_([
+        _bloque_cabecera_("Recordatorio"),
+        _bloque_barra_estado_(_C_GRIS, "&#128260;", `Pendiente hace ${diffDias} d&iacute;as`),
+        _bloque_cuerpo_inicio_(
+          `Hola, ${nombreComercial}`, 
+          `El lote <strong>${idLote}</strong> est&aacute; a la espera del soporte de Paz y Salvo para ser aprobado.`
+        ),
+        _bloque_chips_([
+          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+          { label: "D&iacute;as de espera", valor: String(diffDias) }
+        ]),
+        _bloque_nota_(
+      `<strong style="color:#253150;">C&oacute;mo enviar el soporte:</strong>
+       Responde a este correo usando <strong>"Responder a todos"</strong> y adjunta
+       el documento de Paz y Salvo. El equipo de inducciones lo gestionar&aacute; de inmediato.`
+    ),
 
-    ].join(""));
+    _bloque_pie_()
 
-    try {
-      GmailApp.sendEmail(
-        emailFinal,
-        `🔁 Recordatorio · Lote pendiente de paz y salvo · ID ${idLote}`,
-        "",
-        {
+  ].join(""));
+
+
+      try {
+        GmailApp.sendEmail(emailReal, `⚠️ Recordatorio lote pendiente de paz y salvo · Lote ${idLote}`, "", {
           htmlBody: htmlBody,
-          cc:       correosCC,
-          name:     "Inducciones · El Libertador S A"
-        }
-      );
-
-      // Actualizar fecha de último aviso en columna BI (61)
-      l.filas.forEach(f => sheet.getRange(f, 61).setValue(hoy));
-
-    } catch (err) {
-      console.error("Error recordatorio lote " + idLote + ": " + err.message);
+          cc: ccs,
+          name: "Inducciones · El Libertador S A"
+        });
+        
+        // Marcamos la fecha de aviso en BI para que el conteo reinicie
+        lote.filas.forEach(f => sheetCG.getRange(f, 61).setValue(new Date()));
+        
+        console.log(`✅ Recordatorio enviado a ${emailReal} para lote ${idLote}`);
+      } catch (e) {
+        console.error(`❌ Error en lote ${idLote}: ${e.message}`);
+      }
     }
   }
+}
+
+// ============================================================
+//  FUNCIONES AUXILIARES
+// ============================================================
+
+function _correoANombre(correo) {
+  if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
+  return correo.split("@")[0].split(".").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
+}
+
+function obtenerNombreDeComercial(email) { 
+  return _correoANombre(email).toUpperCase(); 
+}
+
+function obtenerCorreoDeDirector(emailComercial) {
+  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
+  const hoja = ss.getSheetByName("CORREOS");
+  if (!hoja) return "";
+  const data = hoja.getDataRange().getValues();
+  const email = emailComercial.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1] || "").toLowerCase().trim() === email) return String(data[i][0] || "").trim();
+  }
+  return "";
+}
+
+
+// ============================================================
+//  EMAIL 1 & 2 — RADICACIÓN EXITOSA
+//  Reemplaza enviarNotificaciones() de Codigo.js
+// ============================================================
+
+/**
+ * Envía el correo de confirmación al comercial (+ CC director)
+ * y el aviso de nuevo lote a los líderes.
+ *
+ * @param {Object} formData           Datos del formulario.
+ * @param {string} idLote             ID generado para el lote.
+ * @param {number} cantidad           Número de contratos radicados.
+ * @param {string} emailComercial     Email del usuario que radicó.
+ * @param {string} urlDrive           URL de la carpeta en Drive.
+ * @param {Array}  filasParaInsertar  Filas ya procesadas del lote.
+ */
+function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, urlDrive, filasParaInsertar) {
+
+  const urlControlGeneral = `https://docs.google.com/spreadsheets/d/1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI/edit#gid=991800725`;
+  const nombreComercial   = obtenerNombreDeComercial(emailComercial);
+  const correoDirector    = obtenerCorreoDeDirector(emailComercial);
+
+  const badgePazYSalvo = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
+
+  // ── CORREO AL COMERCIAL ──
+  const htmlComercial = _envolver_([
+
+    _bloque_cabecera_("Ingreso Exitoso"),
+
+    _bloque_barra_estado_(_C_NAVY, "&#10003;", "Lote recibido y procesado"),
+
+    _bloque_cuerpo_inicio_(
+      `Hola, ${nombreComercial}`,
+      `Tu lote de inducciones fue recibido y procesado correctamente.
+       Ser&aacute; remitido a radicaci&oacute;n y posterior an&aacute;lisis.`
+    ),
+
+    _bloque_chips_([
+      { label: "ID de Lote",          valor: idLote,                        colorVal: _C_ROJO },
+      { label: "P&oacute;liza",        valor: formData.poliza                                  },
+      { label: "Contratos radicados", valor: String(cantidad)                                  },
+      { label: "Tasa de Inducci&oacute;n", valor: formData.tasaNegociacion + "%" },
+      { label: "Paz y Salvo",         valor: badgePazYSalvo,                full: true         }
+    ]),
+
+    _bloque_contratos_(filasParaInsertar),
+
+    _bloque_nota_(
+      `<strong style="color:#253150;">Importante:</strong> Lote recibido con Paz y Salvo
+       validado manualmente; en caso de aprobaci&oacute;n, se requerir&aacute; soporte
+       emitido por la inmobiliaria.`
+    ),
+
+    _bloque_pie_()
+
+  ].join(""));
+
+  MailApp.sendEmail({
+    to:       emailComercial,
+    cc:       correoDirector,
+    subject:  `✅ Ingreso exitoso de lote: ID ${idLote}`,
+    htmlBody: htmlComercial,
+    replyTo:  "noreply@ellibertador.co",
+    name:     "Inducciones · El Libertador S A"
+  });
+
+  // ── CORREO A LOS LÍDERES ──
+  const htmlLideres = _envolver_([
+
+    _bloque_cabecera_("Nuevo Lote"),
+
+    _bloque_barra_estado_(_C_ROJO, "&#9660;", "Pendiente Radicar"),
+
+    _bloque_cuerpo_inicio_(
+      "Nuevo lote recibido",
+      `El comercial <strong>${emailComercial}</strong> acaba de radicar un nuevo lote
+       que requiere gesti&oacute;n del equipo de inducciones.`
+    ),
+
+    _bloque_chips_([
+      { label: "ID de Lote",          valor: idLote,                        colorVal: _C_ROJO },
+      { label: "P&oacute;liza",        valor: formData.poliza                                  },
+      { label: "Comercial",           valor: emailComercial,                full: true         },
+      { label: "Contratos",           valor: String(cantidad)                                  },
+      { label: "Tasa de Inducci&oacute;n", valor: formData.tasaNegociacion + "%" },
+      { label: "Paz y Salvo",         valor: badgePazYSalvo,                full: true         }
+    ]),
+
+    _bloque_contratos_(filasParaInsertar),
+
+    _bloque_boton_("Ver en Control General", urlControlGeneral),
+
+    _bloque_nota_(
+      `Lote recibido con Paz y Salvo validado manualmente; en caso de aprobaci&oacute;n,
+       se requerir&aacute; soporte emitido por la inmobiliaria.`
+    ),
+
+    _bloque_pie_()
+
+  ].join(""));
+
+  const opcionesLider = {
+    to:       CORREOS_LIDERES.join(", "),
+    subject:  `📦 Nuevo lote para radicar: ID ${idLote}`,
+    htmlBody: htmlLideres,
+    replyTo:  "noreply@ellibertador.co",
+    name:     "Inducciones · El Libertador S A"
+  };
+
+  if (formData.tipoPazYSalvo === "adjunto" && formData.pazYSalvoPdf) {
+    const pdfBase64 = formData.pazYSalvoPdf.bytes.split(',')[1] || formData.pazYSalvoPdf.bytes;
+    opcionesLider.attachments = [
+      Utilities.newBlob(
+        Utilities.base64Decode(pdfBase64),
+        "application/pdf",
+        formData.pazYSalvoPdf.nombre
+      )
+    ];
+  }
+
+  MailApp.sendEmail(opcionesLider);
 }

@@ -113,9 +113,11 @@
         pazYSalvoPdf:     pazYSalvoObj
       };
 
+      iniciarTextosDeCarga();
+
       google.script.run
-        .withSuccessHandler((res) => { if (modal) modal.style.display = 'none'; alRecibirRespuesta(res); })
-        .withFailureHandler((err)  => { if (modal) modal.style.display = 'none'; alDarErrorGrave(err); })
+        .withSuccessHandler((res) => { if (modal) modal.style.display = 'none'; detenerTextosDeCarga(); alRecibirRespuesta(res); })
+        .withFailureHandler((err)  => { if (modal) modal.style.display = 'none'; detenerTextosDeCarga(); alDarErrorGrave(err); })
         .motorDeAuditoria(dataParaEnviar);
 
     } catch (err) {
@@ -135,7 +137,7 @@
     const panelErrores = document.getElementById('errorPanel');
 
     if (res.status === "ERROR") {
-      mostrarErrores(res.detalles || res.errores || []);
+      mostrarErrores(res.detalles || res.errores || [], res.archivoMarcado);
       Swal.fire({
         title: 'Revisión Necesaria',
         text: 'Se detectaron inconsistencias en el lote. Corrige el archivo y vuelve a intentarlo.',
@@ -181,7 +183,7 @@
   //  UTILIDADES DE INTERFAZ
   // ============================================================
 
-  function mostrarErrores(lista) {
+  function mostrarErrores(lista, archivoMarcado) {
     const panel = document.getElementById('errorPanel');
     const tbody = document.getElementById('errorBody');
     if (!tbody || !panel) return;
@@ -195,6 +197,32 @@
           <td>${err.motivo || err.descripcion}</td>
         </tr>`;
     });
+
+    // Botón de descarga del Excel marcado
+    const btnDescargar = document.getElementById('btnDescargarMarcado');
+    if (btnDescargar) {
+      if (archivoMarcado && archivoMarcado.base64 && archivoMarcado.nombre) {
+        btnDescargar.style.display = 'inline-block';
+        btnDescargar.onclick = function () {
+          const byteChars = atob(archivoMarcado.base64);
+          const byteNums  = new Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+          const blob = new Blob([new Uint8Array(byteNums)], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          });
+          const url = URL.createObjectURL(blob);
+          const a   = document.createElement('a');
+          a.href     = url;
+          a.download = archivoMarcado.nombre;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        };
+      } else {
+        btnDescargar.style.display = 'none';
+      }
+    }
 
     panel.style.display = 'block';
     panel.classList.add('animate__animated', 'animate__headShake');
