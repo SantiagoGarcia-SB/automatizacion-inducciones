@@ -29,7 +29,7 @@ function _bloque_cabecera_(tagTexto) {
                 <td style="padding-left:14px;">
                   <div style="color:#ffffff;font-size:16px;font-weight:900;letter-spacing:1px;
                               font-family:Arial,sans-serif;text-transform:uppercase;">
-                    &#9650; EL LIBERTADOR
+                    EL LIBERTADOR
                   </div>
                   <div style="color:rgba(255,255,255,0.45);font-size:9px;letter-spacing:2px;
                               font-family:Arial,sans-serif;text-transform:uppercase;margin-top:4px;">
@@ -434,7 +434,7 @@ if (10 < colStart || 10 > colEnd) return;
       {
         htmlBody: htmlBody,
         cc:       correosCC,
-        name:     "Inducciones · El Libertador S A"
+        name:     "Inducciones · El Libertador S A",
       }
     );
 
@@ -460,13 +460,6 @@ if (10 < colStart || 10 > colEnd) return;
  * haciendo el cruce entre Control_General y Hoja_Control.
  */
 function enviarRecordatoriosPazYSalvoDiario() {
-  const LISTA_LIDERES = [
-     "lady.vargas@segurosbolivar.com",
-     "jonathan.enciso@segurosbolivar.com",
-     "jenny.ascanio@segurosbolivar.com",
-     "daniela.giraldo@segurosbolivar.com",
-     "desarrollocrmlibertador@ellibertador.co"
-  ];
 
   const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
   const sheetCG = ss.getSheetByName("Control_General");
@@ -538,8 +531,8 @@ function enviarRecordatoriosPazYSalvoDiario() {
       const nombreComercial = _correoANombre(emailReal);
       const correoDirector = obtenerCorreoDeDirector(emailReal);
       
-      // Unificamos CCs (Líderes + Director)
-      const ccs = [...new Set([...LISTA_LIDERES, correoDirector])].filter(e => e && e.includes("@")).join(",");
+      // Unificamos CCs (Líderes + Director) usando la constante Global CORREOS_LIDERES
+      const ccs = [...new Set([...CORREOS_LIDERES, correoDirector])].filter(e => e && e.includes("@")).join(",");
 
       const htmlBody = _envolver_([
         _bloque_cabecera_("Recordatorio"),
@@ -580,6 +573,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
     }
   }
 }
+
 
 // ============================================================
 //  FUNCIONES AUXILIARES
@@ -665,13 +659,14 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
   ].join(""));
 
   MailApp.sendEmail({
-    to:       emailComercial,
-    cc:       correoDirector,
-    subject:  `✅ Ingreso exitoso de lote: ID ${idLote}`,
-    htmlBody: htmlComercial,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador S A"
-  });
+  to:      emailComercial,
+  cc:      correoDirector,
+  subject: `✅ Ingreso exitoso de lote: ID ${idLote}`,
+  htmlBody: htmlComercial,
+  replyTo: "noreply@ellibertador.co",
+  name:    "Inducciones · El Libertador S A",
+  bcc:     CORREOS_LIDERES.join(","),
+});
 
   // ── CORREO A LOS LÍDERES ──
   const htmlLideres = _envolver_([

@@ -1,25 +1,25 @@
 /**
  * ============================================================
- *  CONFIGURACIÓN GLOBAL
- *  El Libertador - Ingreso de Inducciones
+ * CONFIGURACIÓN GLOBAL
+ * El Libertador - Ingreso de Inducciones
  * ============================================================
  */
 
-const ID_HOJA_CONTROL   = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
-const ID_CARPETA_RAIZ   = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
-const CORREOS_LIDERES = [
-  "lady.vargas@segurosbolivar.com",
-  "jonathan.enciso@segurosbolivar.com",
-  "juan.diaz.buitrago@segurosbolivar.com",
-  "jenny.ascanio@segurosbolivar.com",
-  "daniela.giraldo@segurosbolivar.com",
+var ID_HOJA_CONTROL   = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
+var ID_CARPETA_RAIZ   = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
+var CORREOS_LIDERES   = [ 
+  "lady.vargas@segurosbolivar.com", 
+  "jonathan.enciso@segurosbolivar.com", 
+  "juan.diaz.buitrago@segurosbolivar.com", 
+  "jenny.ascanio@segurosbolivar.com", 
+  "luisa.castillo@segurosbolivar.com", 
   "desarrollocrmlibertador@ellibertador.co"
 ];
-const MIME_EXCEL_VALIDOS = [
+var MIME_EXCEL_VALIDOS = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel"
 ];
-const COLUMNAS_OBLIGATORIAS = [1, 2, 3, 4, 5, 6, 9, 10, 11];
+var COLUMNAS_OBLIGATORIAS = [1, 2, 3, 4, 5, 6, 9, 10, 11];
 
 const DESTINOS_INVALIDOS = new Set([
   // Genéricos del negocio
@@ -91,6 +91,28 @@ function validarDestino(valor) {
 
   if (/^(.)\1{3,}$/.test(raw.replace(/\s/g, "")))
     return `"${raw}" parece un valor de relleno.`;
+
+  return null; // ✅ Válido
+}
+
+// ============================================================
+//  VALIDADOR DE CAMPOS MONETARIOS (Canon, Administración, IVA)
+// ============================================================
+
+function validarCampoMonetario(valor, nombreCampo) {
+  const raw = String(valor ?? "").trim();
+
+  // Si está vacío, lo maneja la validación de obligatorios — no duplicamos.
+  if (!raw) return null;
+
+  // Eliminamos símbolos monetarios y de formato permitidos: $ . , (espacio)
+  const sinFormato = raw.replace(/[$.,\s]/g, "");
+
+  // Si después de quitar los símbolos permitidos queda algo que no es dígito → hay letras u otros caracteres
+  if (!/^\d+$/.test(sinFormato)) {
+    return `El campo "${nombreCampo}" tiene el valor "${raw}", que contiene letras o símbolos no permitidos. ` +
+       `Escribe solo el valor numérico, por ejemplo: 1500000 o $1.500.000`;
+  }
 
   return null; // ✅ Válido
 }
@@ -174,9 +196,6 @@ function motorDeAuditoria(formData) {
       if (!inquilino) continue;
 
       // ── 1. CAMPOS OBLIGATORIOS ──
-      // ✅ FIX 2 — Se quitó el índice 3 (Destino) de este array.
-      //    Antes generaba un error duplicado junto con validarDestino().
-      //    Ahora el destino lo valida exclusivamente la regla 3.
       const obligatoriosInquilino = [1, 2, 4, 5, 6, 9, 10, 11];
       obligatoriosInquilino.forEach(idx => {
         if (!String(fila[idx] || "").trim()) {
@@ -207,6 +226,20 @@ function motorDeAuditoria(formData) {
       if (motivoDestino) {
         errores.push({ fila: nF, campo: "Destino", motivo: motivoDestino });
       }
+
+      // ── 3b. CAMPOS MONETARIOS (Canon, Administración, IVA) ──
+      const camposMonetarios = [
+        { idx: 6, nombre: "Canon"          },
+        { idx: 7, nombre: "Administración" },
+        { idx: 8, nombre: "IVA"            },
+      ];
+
+      camposMonetarios.forEach(({ idx, nombre }) => {
+        const motivoMonetario = validarCampoMonetario(fila[idx], nombre);
+        if (motivoMonetario) {
+          errores.push({ fila: nF, campo: nombre, motivo: motivoMonetario });
+        }
+      });
 
       // ── 4. CODEUDORES (COA 1 al 5) ──
       const coaSlots = [
@@ -273,25 +306,19 @@ function motorDeAuditoria(formData) {
       }
     }
 
-    // ✅ FIX 3 — Se integró generarArchivoMarcado() en el flujo de errores.
-    //    Antes existía la función pero nunca se llamaba, así que el Excel
-    //    marcado jamás llegaba al frontend. Ahora se genera aquí, ANTES
-    //    de que el finally borre la hoja temporal.
     if (errores.length > 0) {
       hojaLog.appendRow([new Date(), usuarioEmail, formData.poliza, "FALLIDO", "Inconsistencias en Excel", "N/A", formData.observaciones]);
-
       const archivoMarcado = generarArchivoMarcado(tempSheetId, errores);
-
       return {
         status: "ERROR",
         detalles: errores,
-        archivoMarcado: archivoMarcado  // { base64, nombre } — el frontend puede ofrecerlo como descarga
+        archivoMarcado: archivoMarcado
       };
     }
 
-    // ----------------------------------------------------------
-    // CASCADA 4 — PREPARACIÓN DE DATOS (EN MEMORIA)
-    // ----------------------------------------------------------
+    // =========================================================================
+    // MODIFICADO: CASCADA 4 — PREPARACIÓN DE DATOS (CON SALVAVIDAS INCLUIDO)
+    // =========================================================================
 
     const ts              = new Date();
     const fechaId         = Utilities.formatDate(ts, "GMT-5", "d/M/yyyy");
@@ -300,25 +327,55 @@ function motorDeAuditoria(formData) {
     const estadoCartera   = "PAZ Y SALVO";
     const filasParaInsertar = [];
 
+    let tasaNegociacionLimpia = "";
+    if (formData.tasaNegociacion) {
+      tasaNegociacionLimpia = formData.tasaNegociacion.toString().replace(/\./g, ',');
+    }
+
+    let contadorRegistro = 1;
+
     for (let i = 4; i < data.length; i++) {
       const filaE = data[i];
       if (!String(filaE[9] || "").trim()) continue;
 
-      const filaFinal = [
-        idLote, estadoCartera, ts, "", "", "", "", "", "",
-        "PENDIENTE RADICAR", nombreComercial, formData.tasaNegociacion,
-        filaE[0], limpiarFecha(filaE[1]), filaE[2], tipoNegociacion,
-        formData.poliza, filaE[3], filaE[4], filaE[5], filaE[6],
-        filaE[7], filaE[8], filaE[9], filaE[10], filaE[11],
-        filaE[12], filaE[13], "", filaE[14], filaE[15], filaE[16],
-        filaE[17], filaE[18], "", filaE[19], filaE[20], filaE[21],
-        filaE[22], filaE[23], "", filaE[24], filaE[25], filaE[26],
-        filaE[27], filaE[28], "", filaE[29], filaE[30], filaE[31],
-        filaE[32], filaE[33], "", filaE[34], filaE[35], filaE[36],
-        filaE[37], filaE[38], ""
-      ];
+      const uuidUnicoFila = `${idLote}_REG_${String(contadorRegistro).padStart(3, '0')}`;
+      const filaFinal = new Array(62).fill(""); 
 
+      filaFinal[0]  = idLote;
+      filaFinal[1]  = estadoCartera;
+      filaFinal[2]  = ts;
+      filaFinal[9]  = "PENDIENTE RADICAR";
+      filaFinal[10] = nombreComercial;
+      filaFinal[11] = tasaNegociacionLimpia;
+      filaFinal[12] = filaE[0];
+      filaFinal[13] = limpiarFecha(filaE[1]);
+      filaFinal[14] = filaE[2];
+      filaFinal[15] = tipoNegociacion;
+      filaFinal[16] = formData.poliza;
+      filaFinal[17] = filaE[3];
+      filaFinal[18] = filaE[4];
+      filaFinal[19] = filaE[5];
+      filaFinal[20] = filaE[6];
+      filaFinal[21] = filaE[7];
+      filaFinal[22] = filaE[8];
+      
+      filaFinal[23] = filaE[9];
+      filaFinal[24] = filaE[10];
+      filaFinal[25] = filaE[11];
+      filaFinal[26] = filaE[12];
+      filaFinal[27] = filaE[13];
+      
+      filaFinal[29] = filaE[14]; filaFinal[30] = filaE[15]; filaFinal[31] = filaE[16]; filaFinal[32] = filaE[17]; filaFinal[33] = filaE[18];
+      filaFinal[35] = filaE[19]; filaFinal[36] = filaE[20]; filaFinal[37] = filaE[21]; filaFinal[38] = filaE[22]; filaFinal[39] = filaE[23];
+      filaFinal[41] = filaE[24]; filaFinal[42] = filaE[25]; filaFinal[43] = filaE[26]; filaFinal[44] = filaE[27]; filaFinal[45] = filaE[28];
+      filaFinal[47] = filaE[29]; filaFinal[48] = filaE[30]; filaFinal[49] = filaE[31]; filaFinal[50] = filaE[32]; filaFinal[51] = filaE[33];
+      filaFinal[53] = filaE[34]; filaFinal[54] = filaE[35]; filaFinal[55] = filaE[36]; filaFinal[56] = filaE[37]; filaFinal[57] = filaE[38];
+
+      filaFinal[61] = uuidUnicoFila; 
+
+      // SALVAVIDAS 1: Protegemos contra nulos y errores de tipeo
       const filaProcesada = filaFinal.map(dato => {
+        if (dato === undefined || dato === null) return ""; 
         if (typeof dato === 'string' && !dato.includes('@') && !dato.includes('/')) {
           return dato.toUpperCase();
         }
@@ -326,7 +383,9 @@ function motorDeAuditoria(formData) {
       });
 
       filasParaInsertar.push(filaProcesada);
+      contadorRegistro++;
     }
+
 
     // ----------------------------------------------------------
     // CASCADA 5 — OPERACIONES DE ALTO RIESGO (DRIVE Y CORREO)
@@ -352,6 +411,12 @@ function motorDeAuditoria(formData) {
     // ----------------------------------------------------------
 
     if (filasParaInsertar.length > 0) {
+      // SALVAVIDAS 2: Si tu hoja tiene menos de 62 columnas, añade las faltantes automáticamente
+      const columnasExistentes = hojaMaestra.getMaxColumns();
+      if (columnasExistentes < 62) {
+        hojaMaestra.insertColumnsAfter(columnasExistentes, 62 - columnasExistentes);
+      }
+
       const ultimaFila = hojaMaestra.getLastRow();
       retry(() => {
         hojaMaestra
@@ -371,17 +436,15 @@ function motorDeAuditoria(formData) {
   } catch (e) {
     console.error("Error crítico durante la radicación: ", e);
 
-    const msjAmable = "Tuvimos una breve intermitencia de conexión al guardar los documentos. Para proteger tu información y evitar contratos duplicados, detuvimos el proceso de forma segura. Por favor, vuelve a dar clic en el botón de Radicar.";
+    // SALVAVIDAS 3: Mostramos en pantalla el error técnico exacto en vez del mensaje amigable.
+    const errorReal = e.toString();
 
     return {
       status: "ERROR",
-      detalles: [{ fila: "SISTEMA", campo: "INTERRUPCIÓN TEMPORAL", motivo: msjAmable }]
+      detalles: [{ fila: "SISTEMA", campo: "DEBUG (ERROR REAL)", motivo: errorReal }]
     };
 
   } finally {
-    // La hoja temporal se borra siempre al final.
-    // En el caso de errores, generarArchivoMarcado() ya exportó el XLSX
-    // antes de llegar aquí, así que borrarla en este punto es seguro.
     if (tempSheetId) {
       try { DriveApp.getFileById(tempSheetId).setTrashed(true); } catch (f) {
         console.warn("No se pudo eliminar hoja temporal: " + f.toString());
@@ -450,30 +513,18 @@ function consultarLote(idLote) {
 //  GENERADOR DE EXCEL MARCADO
 // ============================================================
 
-/**
- * Pinta los errores en la hoja temporal y devuelve el XLSX como base64.
- * @param {string} ssId    ID de la hoja de cálculo temporal.
- * @param {Array}  errores Array de objetos { fila, campo, motivo }.
- * @returns {{ base64: string, nombre: string }}
- */
 function generarArchivoMarcado(ssId, errores) {
   const ss = SpreadsheetApp.openById(ssId);
   const hoja = ss.getSheets()[0];
   const ultimaCol = hoja.getLastColumn();
   
-  // 1. Añadimos columna de diagnóstico al final de la hoja para dar contexto
   hoja.getRange(4, ultimaCol + 1).setValue("DIAGNÓSTICO DE AUDITORÍA")
       .setFontWeight("bold").setBackground("#BD0F14").setFontColor("white");
 
-  // 2. Pintamos los errores iterando sobre el array
   errores.forEach(err => {
-    // Solo marcamos los errores que correspondan a una fila específica en los datos
     if (typeof err.fila === 'number') {
-      // Pintamos toda la fila con un fondo rojo claro para que el usuario la identifique
       hoja.getRange(err.fila, 1, 1, ultimaCol).setBackground("#fff2f2");
       
-      // Construimos el mensaje de error para esa fila. 
-      // Si ya hay un error previo en esa fila, lo concatenamos.
       const celdaDiagnostico = hoja.getRange(err.fila, ultimaCol + 1);
       const valorActual = celdaDiagnostico.getValue();
       const nuevoMensaje = `[${err.campo}] ${err.motivo}`;
@@ -483,10 +534,8 @@ function generarArchivoMarcado(ssId, errores) {
     }
   });
 
-  // IMPORTANTE: Aseguramos que los cambios visuales se guarden ANTES de exportar
   SpreadsheetApp.flush();
 
-  // 3. Descargamos el archivo modificado y lo convertimos a base64
   const url = "https://docs.google.com/spreadsheets/d/" + ssId + "/export?format=xlsx";
   const params = {
     method: "get",
