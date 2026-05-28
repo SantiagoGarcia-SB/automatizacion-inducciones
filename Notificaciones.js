@@ -602,7 +602,7 @@ function obtenerCorreoDeDirector(emailComercial) {
 
 
 // ============================================================
-//  EMAIL 1 & 2 — RADICACIÓN EXITOSA
+//  EMAIL RADICACIÓN EXITOSA
 //  Reemplaza enviarNotificaciones() de Codigo.js
 // ============================================================
 
@@ -619,14 +619,17 @@ function obtenerCorreoDeDirector(emailComercial) {
  */
 function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, urlDrive, filasParaInsertar) {
 
-  const urlControlGeneral = `https://docs.google.com/spreadsheets/d/1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI/edit#gid=991800725`;
-  const nombreComercial   = obtenerNombreDeComercial(emailComercial);
-  const correoDirector    = obtenerCorreoDeDirector(emailComercial);
+  const nombreComercial = obtenerNombreDeComercial(emailComercial);
+  const correoDirector  = obtenerCorreoDeDirector(emailComercial);
+  const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
-  const badgePazYSalvo = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
+  // ── Unificar destinatarios CC (director + líderes), filtrando vacíos ──
+  const correosCC = [...CORREOS_LIDERES, correoDirector]
+    .filter(e => e && e.includes("@"))
+    .join(",");
 
-  // ── CORREO AL COMERCIAL ──
-  const htmlComercial = _envolver_([
+  // ── Plantilla HTML única (Ingreso Exitoso) ──
+  const htmlBody = _envolver_([
 
     _bloque_cabecera_("Ingreso Exitoso"),
 
@@ -658,62 +661,20 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
   ].join(""));
 
-  MailApp.sendEmail({
-  to:      emailComercial,
-  cc:      correoDirector,
-  subject: `✅ Ingreso exitoso de lote: ID ${idLote}`,
-  htmlBody: htmlComercial,
-  replyTo: "noreply@ellibertador.co",
-  name:    "Inducciones · El Libertador S A",
-  bcc:     CORREOS_LIDERES.join(","),
-});
-
-  // ── CORREO A LOS LÍDERES ──
-  const htmlLideres = _envolver_([
-
-    _bloque_cabecera_("Nuevo Lote"),
-
-    _bloque_barra_estado_(_C_ROJO, "&#9660;", "Pendiente Radicar"),
-
-    _bloque_cuerpo_inicio_(
-      "Nuevo lote recibido",
-      `El comercial <strong>${emailComercial}</strong> acaba de radicar un nuevo lote
-       que requiere gesti&oacute;n del equipo de inducciones.`
-    ),
-
-    _bloque_chips_([
-      { label: "ID de Lote",          valor: idLote,                        colorVal: _C_ROJO },
-      { label: "P&oacute;liza",        valor: formData.poliza                                  },
-      { label: "Comercial",           valor: emailComercial,                full: true         },
-      { label: "Contratos",           valor: String(cantidad)                                  },
-      { label: "Tasa de Inducci&oacute;n", valor: formData.tasaNegociacion + "%" },
-      { label: "Paz y Salvo",         valor: badgePazYSalvo,                full: true         }
-    ]),
-
-    _bloque_contratos_(filasParaInsertar),
-
-    _bloque_boton_("Ver en Control General", urlControlGeneral),
-
-    _bloque_nota_(
-      `Lote recibido con Paz y Salvo validado manualmente; en caso de aprobaci&oacute;n,
-       se requerir&aacute; soporte emitido por la inmobiliaria.`
-    ),
-
-    _bloque_pie_()
-
-  ].join(""));
-
-  const opcionesLider = {
-    to:       CORREOS_LIDERES.join(", "),
-    subject:  `📦 Nuevo lote para radicar: ID ${idLote}`,
-    htmlBody: htmlLideres,
+  // ── Configurar envío único ──
+  const opciones = {
+    to:       emailComercial,
+    cc:       correosCC,
+    subject:  `✅ Ingreso exitoso de lote: ID ${idLote}`,
+    htmlBody: htmlBody,
     replyTo:  "noreply@ellibertador.co",
     name:     "Inducciones · El Libertador S A"
   };
 
+  // ── Adjuntar PDF de paz y salvo si aplica ──
   if (formData.tipoPazYSalvo === "adjunto" && formData.pazYSalvoPdf) {
     const pdfBase64 = formData.pazYSalvoPdf.bytes.split(',')[1] || formData.pazYSalvoPdf.bytes;
-    opcionesLider.attachments = [
+    opciones.attachments = [
       Utilities.newBlob(
         Utilities.base64Decode(pdfBase64),
         "application/pdf",
@@ -722,5 +683,5 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
     ];
   }
 
-  MailApp.sendEmail(opcionesLider);
+  MailApp.sendEmail(opciones);
 }
