@@ -322,7 +322,8 @@ function motorDeAuditoria(formData) {
 
     const ts              = new Date();
     const fechaId         = Utilities.formatDate(ts, "GMT-5", "d/M/yyyy");
-    const idLote          = fechaId + "-" + formData.poliza;
+    const horaMin         = Utilities.formatDate(ts, "GMT-5", "HHmm");
+    const idLote          = fechaId + "-" + formData.poliza + "-" + horaMin;
     const nombreComercial = obtenerNombreDeComercial(usuarioEmail);
     const estadoCartera   = "PAZ Y SALVO";
     const filasParaInsertar = [];
