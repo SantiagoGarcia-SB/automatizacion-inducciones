@@ -3,4 +3,5 @@
 ## [No publicado]
 
 ### Agregado
-- Se creó archivo README.md con documentación técnica completa del proyecto: descripción general, estructura de archivos, funcionalidades clave por módulo, tecnologías utilizadas, instrucciones de despliegue con clasp y arquitectura de datos
+- Se agregó función `obtenerCorreoDeBackup` que busca en la hoja CORREOS si el ejecutivo tiene un backup activo (columna D = TRUE) y retorna el correo de columna C.
+- Se integró el correo de backup como CC adicional en los 3 flujos de notificación: radicación exitosa (`enviarLasNotificaciones`), solicitud de paz y salvo (`enviarCorreoPazYSalvo`) y recordatorio diario (`enviarRecordatoriosPazYSalvoDiario`).

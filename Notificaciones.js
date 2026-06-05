@@ -395,8 +395,9 @@ if (10 < colStart || 10 > colEnd) return;
   if (!emailFinal || !emailFinal.includes("@")) return;
 
   const correoDirector  = obtenerCorreoDeDirector(emailFinal);
+  const correoBackup    = obtenerCorreoDeBackup(emailFinal);
   const nombreComercial = obtenerNombreDeComercial(emailFinal);
-  const correosCC       = CORREOS_LIDERES.join(",") + (correoDirector ? "," + correoDirector : "");
+  const correosCC       = CORREOS_LIDERES.join(",") + (correoDirector ? "," + correoDirector : "") + (correoBackup ? "," + correoBackup : "");
 
   const htmlBody = _envolver_([
 
@@ -530,9 +531,10 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
       const nombreComercial = _correoANombre(emailReal);
       const correoDirector = obtenerCorreoDeDirector(emailReal);
+      const correoBackup   = obtenerCorreoDeBackup(emailReal);
       
-      // Unificamos CCs (Líderes + Director) usando la constante Global CORREOS_LIDERES
-      const ccs = [...new Set([...CORREOS_LIDERES, correoDirector])].filter(e => e && e.includes("@")).join(",");
+      // Unificamos CCs (Líderes + Director + Backup si activo) usando la constante Global CORREOS_LIDERES
+      const ccs = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@")).join(",");
 
       const htmlBody = _envolver_([
         _bloque_cabecera_("Recordatorio"),
@@ -600,6 +602,32 @@ function obtenerCorreoDeDirector(emailComercial) {
   return "";
 }
 
+/**
+ * Obtiene el correo de backup de un ejecutivo comercial.
+ * Busca en la hoja CORREOS por columna B (Correo Ejecutivo),
+ * verifica si columna D (Activar BackUp) es TRUE,
+ * y retorna el correo de columna C (BackUp).
+ * @param {string} emailComercial  Correo del ejecutivo.
+ * @returns {string} Correo del backup o vacío si no aplica.
+ */
+function obtenerCorreoDeBackup(emailComercial) {
+  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
+  const hoja = ss.getSheetByName("CORREOS");
+  if (!hoja) return "";
+  const data = hoja.getDataRange().getValues();
+  const email = emailComercial.toLowerCase().trim();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1] || "").toLowerCase().trim() === email) {
+      const backupActivo = data[i][3]; // Columna D — checkbox (TRUE/FALSE)
+      if (backupActivo === true) {
+        return String(data[i][2] || "").trim(); // Columna C — correo backup
+      }
+      return "";
+    }
+  }
+  return "";
+}
+
 
 // ============================================================
 //  EMAIL RADICACIÓN EXITOSA
@@ -621,10 +649,11 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
   const nombreComercial = obtenerNombreDeComercial(emailComercial);
   const correoDirector  = obtenerCorreoDeDirector(emailComercial);
+  const correoBackup    = obtenerCorreoDeBackup(emailComercial);
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
-  // ── Unificar destinatarios CC (director + líderes), filtrando vacíos ──
-  const correosCC = [...CORREOS_LIDERES, correoDirector]
+  // ── Unificar destinatarios CC (director + líderes + backup si activo), filtrando vacíos ──
+  const correosCC = [...CORREOS_LIDERES, correoDirector, correoBackup]
     .filter(e => e && e.includes("@"))
     .join(",");
 

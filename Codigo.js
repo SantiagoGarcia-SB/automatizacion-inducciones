@@ -12,7 +12,7 @@ var CORREOS_LIDERES   = [
   "jonathan.enciso@segurosbolivar.com", 
   "juan.diaz.buitrago@segurosbolivar.com", 
   "jenny.ascanio@segurosbolivar.com", 
-  "luisa.castillo@segurosbolivar.com", 
+  "kharen.garcia@segurosbolivar.com", 
   "desarrollocrmlibertador@ellibertador.co"
 ];
 var MIME_EXCEL_VALIDOS = [
