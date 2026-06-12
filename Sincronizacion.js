@@ -212,3 +212,115 @@ function obtenerMapaColumnas(filaEncabezados) {
   }
   return mapa;
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SINCRONIZACIÓN DE ESTADO: registro analisis → Control_General
+//
+// Regla 1: Si "REGISTRO ANALISTA SAI" (col CX) está diligenciado → TERMINADO
+// Regla 2: Si "ASIGNADA A…" (col C) está diligenciado → EN ANÁLISIS
+// Llave:   "Solicitud Inquilino" (col W en análisis ↔ col AC en Control_General)
+// Prioridad: Regla 1 > Regla 2
+// ══════════════════════════════════════════════════════════════════════════════
+
+function sincronizarEstadoDesdeAnalisis() {
+
+  // ── 1. CONEXIONES ──────────────────────────────────────────────────────────
+  var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
+  var ID_ARCHIVO_CONTROL   = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
+
+  var libroAnalisis  = SpreadsheetApp.openById(ID_ARCHIVO_ANALISIS);
+  var hojaAnalisis   = libroAnalisis.getSheetByName("registro analisis");
+
+  var libroControl   = SpreadsheetApp.openById(ID_ARCHIVO_CONTROL);
+  var hojaControl    = libroControl.getSheetByName("Control_General");
+
+  if (!hojaAnalisis || !hojaControl) {
+    Logger.log("Error: No se encontró alguna de las hojas requeridas.");
+    return;
+  }
+
+  // ── 2. LEER DATOS DE "registro analisis" ───────────────────────────────────
+  var datosAnalisis   = hojaAnalisis.getDataRange().getValues();
+  var indicesAnalisis = obtenerMapaColumnas(datosAnalisis[0]);
+
+  // Validar columnas requeridas en análisis
+  var colSolicitudAnalisis = indicesAnalisis["Solicitud Inquilino"];   // col W
+  var colAsignadaA         = indicesAnalisis["ASIGNADA A…"];           // col C
+  var colRegistroSAI       = indicesAnalisis["REGISTRO ANALISTA SAI"]; // col CX
+
+  // Fallback: si el encabezado no tiene los puntos suspensivos exactos
+  if (colAsignadaA === undefined) {
+    colAsignadaA = indicesAnalisis["ASIGNADA A..."];
+  }
+  if (colAsignadaA === undefined) {
+    colAsignadaA = indicesAnalisis["ASIGNADA A"];
+  }
+
+  if (colSolicitudAnalisis === undefined) {
+    Logger.log("Error: No se encontró 'Solicitud Inquilino' en 'registro analisis'."); return;
+  }
+  if (colAsignadaA === undefined) {
+    Logger.log("Error: No se encontró 'ASIGNADA A…' en 'registro analisis'."); return;
+  }
+  if (colRegistroSAI === undefined) {
+    Logger.log("Error: No se encontró 'REGISTRO ANALISTA SAI' en 'registro analisis'."); return;
+  }
+
+  // ── 3. CONSTRUIR MAPA DE ESTADOS DESDE ANÁLISIS ───────────────────────────
+  // Llave: Solicitud Inquilino → Estado a asignar
+  var mapaEstados = {};
+
+  for (var i = 1; i < datosAnalisis.length; i++) {
+    var solicitud       = String(datosAnalisis[i][colSolicitudAnalisis] || "").trim();
+    var registroSAI     = String(datosAnalisis[i][colRegistroSAI] || "").trim();
+    var asignadaA       = String(datosAnalisis[i][colAsignadaA] || "").trim();
+
+    if (!solicitud) continue;
+
+    // Prioridad: REGISTRO ANALISTA SAI > ASIGNADA A…
+    if (registroSAI) {
+      mapaEstados[solicitud] = "TERMINADO";
+    } else if (asignadaA) {
+      // Solo asignar EN ANÁLISIS si no se ha determinado TERMINADO previamente
+      if (mapaEstados[solicitud] !== "TERMINADO") {
+        mapaEstados[solicitud] = "EN ANÁLISIS";
+      }
+    }
+  }
+
+  // ── 4. LEER DATOS DE "Control_General" ─────────────────────────────────────
+  var datosControl   = hojaControl.getDataRange().getValues();
+  var indicesControl = obtenerMapaColumnas(datosControl[0]);
+
+  var colSolicitudControl = indicesControl["Solicitud Inquilino"]; // col AC
+  var colEstadoControl    = indicesControl["Estado"];               // col J
+
+  if (colSolicitudControl === undefined) {
+    Logger.log("Error: No se encontró 'Solicitud Inquilino' en 'Control_General'."); return;
+  }
+  if (colEstadoControl === undefined) {
+    Logger.log("Error: No se encontró 'Estado' en 'Control_General'."); return;
+  }
+
+  // ── 5. ACTUALIZAR ESTADOS EN Control_General ───────────────────────────────
+  var actualizaciones = 0;
+
+  for (var j = 1; j < datosControl.length; j++) {
+    var solicitudControl = String(datosControl[j][colSolicitudControl] || "").trim();
+    var estadoActual     = String(datosControl[j][colEstadoControl] || "").trim();
+
+    if (!solicitudControl) continue;
+
+    var nuevoEstado = mapaEstados[solicitudControl];
+
+    if (nuevoEstado && nuevoEstado !== estadoActual) {
+      hojaControl.getRange(j + 1, colEstadoControl + 1).setValue(nuevoEstado);
+      actualizaciones++;
+      Logger.log("  [ESTADO] Fila " + (j + 1) + " | Solicitud: " + solicitudControl +
+                 " | " + estadoActual + " → " + nuevoEstado);
+    }
+  }
+
+  Logger.log("✅ Sincronización de estados completada. Actualizaciones: " + actualizaciones);
+}
