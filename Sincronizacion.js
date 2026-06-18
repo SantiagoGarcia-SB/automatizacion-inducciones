@@ -314,7 +314,8 @@ function sincronizarEstadoDesdeAnalisis() {
 
     var nuevoEstado = mapaEstados[solicitudControl];
 
-    if (nuevoEstado && nuevoEstado !== estadoActual) {
+    if (nuevoEstado && nuevoEstado !== estadoActual &&
+        !(nuevoEstado === "EN ANÁLISIS" && estadoActual === "PENDIENTE PAZ Y SALVO")) {
       hojaControl.getRange(j + 1, colEstadoControl + 1).setValue(nuevoEstado);
       actualizaciones++;
       Logger.log("  [ESTADO] Fila " + (j + 1) + " | Solicitud: " + solicitudControl +
