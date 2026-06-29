@@ -5,6 +5,8 @@ const _C_ROJO = "#BD0F14";   // Color primario
 const _C_NAVY = "#253150";   // Color secundario
 const _C_GRIS = "#706F6F";   // Color terciario
 
+const BCC_AUDITORIA = "santiago.garcia@segurosbolivar.com";
+
 
 // ============================================================
 //  BLOQUES HTML — Construcción modular
@@ -251,10 +253,10 @@ function _bloque_pie_() {
         <tr>
           <td valign="middle">
             <div style="font-size:11px;font-weight:700;color:#253150;font-family:Arial,sans-serif;">
-              Investigaciones y Cobranzas El Libertador
+              El Libertador SA &middot; Inducciones
             </div>
             <div style="font-size:10px;color:#94a3b8;margin-top:3px;font-family:Arial,sans-serif;">
-              Env&iacute;o autom&aacute;tico &middot; Por favor no responda este correo &middot;
+              Notificaci&oacute;n autom&aacute;tica &middot;
               <a href="https://www.ellibertador.co"
                  style="color:#BD0F14;text-decoration:none;">ellibertador.co</a>
             </div>
@@ -430,12 +432,13 @@ if (10 < colStart || 10 > colEnd) return;
   try {
     GmailApp.sendEmail(
       emailFinal,
-      `⚠️ Lote pendiente de paz y salvo · ID ${idLoteActual}`,
+      `⚠️ Paz y salvo pendiente · Lote ${idLoteActual}`,
       "",
       {
         htmlBody: htmlBody,
         cc:       correosCC,
-        name:     "Inducciones · El Libertador S A",
+        bcc:      BCC_AUDITORIA,
+        name:     "Inducciones · El Libertador SA",
       }
     );
 
@@ -559,10 +562,11 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
 
       try {
-        GmailApp.sendEmail(emailReal, `⚠️ Recordatorio lote pendiente de paz y salvo · Lote ${idLote}`, "", {
+        GmailApp.sendEmail(emailReal, `🔔 Paz y salvo aún pendiente · Lote ${idLote}`, "", {
           htmlBody: htmlBody,
           cc: ccs,
-          name: "Inducciones · El Libertador S A"
+          bcc: BCC_AUDITORIA,
+          name: "Inducciones · El Libertador SA"
         });
         
         // Marcamos la fecha de aviso en BI para que el conteo reinicie
@@ -586,8 +590,8 @@ function _correoANombre(correo) {
   return correo.split("@")[0].split(".").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
 }
 
-function obtenerNombreDeComercial(email) { 
-  return _correoANombre(email).toUpperCase(); 
+function obtenerNombreDeComercial(email) {
+  return _correoANombre(email);
 }
 
 function obtenerCorreoDeDirector(emailComercial) {
@@ -666,8 +670,9 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
     _bloque_cuerpo_inicio_(
       `Hola, ${nombreComercial}`,
-      `Tu lote de inducciones fue recibido y procesado correctamente.
-       Ser&aacute; remitido a radicaci&oacute;n y posterior an&aacute;lisis.`
+      `Tu lote de inducciones fue recibido y procesado correctamente por El Libertador SA.
+       A partir de este momento ser&aacute; asignado a un analista para su revisi&oacute;n.
+       Te notificaremos por correo cuando haya una actualizaci&oacute;n de estado.`
     ),
 
     _bloque_chips_([
@@ -680,11 +685,16 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
     _bloque_contratos_(filasParaInsertar),
 
-    _bloque_nota_(
-      `<strong style="color:#253150;">Importante:</strong> Lote recibido con Paz y Salvo
-       validado manualmente; en caso de aprobaci&oacute;n, se requerir&aacute; soporte
-       emitido por la inmobiliaria.`
-    ),
+    formData.tipoPazYSalvo === "checkbox"
+      ? _bloque_nota_(
+          `<strong style="color:#253150;">Importante:</strong> Este lote fue radicado con
+           certificaci&oacute;n manual de paz y salvo. En caso de aprobaci&oacute;n,
+           el equipo de inducciones solicitar&aacute; el soporte emitido por la inmobiliaria.`
+        )
+      : _bloque_nota_(
+          `<strong style="color:#253150;">Soporte recibido:</strong> El documento de paz y salvo
+           fue adjuntado correctamente con esta radicaci&oacute;n.`
+        ),
 
     _bloque_pie_()
 
@@ -694,10 +704,11 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
   const opciones = {
     to:       emailComercial,
     cc:       correosCC,
-    subject:  `✅ Ingreso exitoso de lote: ID ${idLote}`,
+    bcc:      BCC_AUDITORIA,
+    subject:  `✅ Radicación exitosa · Lote ${idLote}`,
     htmlBody: htmlBody,
     replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador S A"
+    name:     "Inducciones · El Libertador SA"
   };
 
   // ── Adjuntar PDF de paz y salvo si aplica ──

@@ -8,6 +8,7 @@
   <link rel="icon" href="https://www.ellibertador.co/assets/img/logo.svg" type="image/x-icon">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
   <?!= include('Estilos'); ?>
@@ -22,7 +23,7 @@
       <h1>Ingreso de Inducciones</h1>
     </div>
     <div class="user-badge">
-      <i class="fa-brands fa-readme"></i> Revisión Express
+      <i class="fa-brands fa-readme"></i> Portal Comercial
     </div>
   </header>
 
@@ -31,7 +32,7 @@
       <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
     </svg>
     <input class="query-bar__input" id="inputConsultaLote"
-      type="text" placeholder="Consulta el estado de tu lote ingresado por ID enviado... ej: 7/4/2026-1985-1456"
+      type="text" placeholder="Ingresa el ID de tu lote para consultar su estado, ej: 7/4/2026-1985-1456"
       onkeydown="if(event.key==='Enter') consultarLoteDesdeUI()" />
     <button class="query-bar__btn" id="btnConsultaLote" onclick="consultarLoteDesdeUI()">
       Consultar lote
@@ -75,7 +76,7 @@
         </div>
         <div class="input-container full-width">
           <label>Notas de Radicación</label>
-          <textarea id="observaciones" class="guardar-local" rows="2" placeholder="Escribe aquí notas relevantes para el analista..." oninput="guardarBorrador()"></textarea>
+          <textarea id="observaciones" class="guardar-local" rows="2" placeholder="Información adicional que consideres importante para el equipo de inducciones..." oninput="guardarBorrador()"></textarea>
         </div>
       </section>
 
@@ -85,7 +86,7 @@
           <span style="color: #BD0F14;">Certificación de Paz y Salvo</span>
         </div>
         <p style="font-size:13px; color:#64748B; margin:0 0 16px; line-height:1.6; text-transform:none;">
-          Elige una de las dos opciones para certificar el estado de los contratos:
+          Selecciona cómo deseas certificar el estado de cartera de los contratos:
         </p>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;" id="opcionesPS">
@@ -104,8 +105,8 @@
                 Certificación manual
               </b>
               <span style="font-size:12px; color:#64748B; line-height:1.5; text-transform:none;">
-                Certifico bajo mi responsabilidad que todos los contratos no presentan obligaciones pendientes.
-                <strong style="color:#BD0F14; display:block; margin-top:4px;">El soporte físico será requerido si se aprueba.</strong>
+                Como comercial, certifico que los contratos de este lote se encuentran al día sin obligaciones pendientes.
+                <strong style="color:#BD0F14; display:block; margin-top:4px;">El soporte emitido por la inmobiliaria será solicitado en caso de aprobación.</strong>
               </span>
             </div>
           </label>
@@ -121,11 +122,11 @@
             <div>
               <b style="display:block; color:#253150; font-size:14px; margin-bottom:4px; text-transform:none;">
                 <i class="fas fa-file-pdf" style="color:#BD0F14; margin-right:6px; font-size:13px;"></i>
-                Adjuntar paz y salvo (no mayor a 30 dias)
+                Adjuntar paz y salvo (no mayor a 30 días)
               </b>
               <span style="font-size:12px; color:#64748B; line-height:1.5; text-transform:none;">
-                Adjunta el documento emitido por la inmobiliaria en formato PDF.
-                <strong style="color:#16A34A; display:block; margin-top:4px;">Gestión más ágil con soporte inmediato.</strong>
+                Adjunta el documento de paz y salvo emitido por la inmobiliaria en formato PDF.
+                <strong style="color:#16A34A; display:block; margin-top:4px;">Agiliza la gestión al incluir el soporte desde el inicio.</strong>
               </span>
             </div>
           </label>
@@ -138,7 +139,7 @@
             </div>
             <div class="drop-info">
               <b id="labelPdf">Paz y Salvo (PDF)</b>
-              <span id="subLabelPdf">Click para cargar o arrastra aquí</span>
+              <span id="subLabelPdf">Haz clic o arrastra el archivo aquí</span>
             </div>
             <i class="fas fa-circle-check drop-check"></i>
           </div>
@@ -155,45 +156,45 @@
           <div class="drop-icon excel"><i class="fas fa-file-excel"></i></div>
           <div class="drop-info">
             <b id="labelExcel">Planilla de Inducción</b>
-            <span id="subLabelExcel">Click para cargar Excel (.xlsx)</span>
+            <span id="subLabelExcel">Haz clic o arrastra el archivo aquí (.xlsx)</span>
           </div>
           <i class="fas fa-circle-check drop-check"></i>
         </div>
         <input type="file" id="fileExcel" accept=".xlsx, .xls" style="display:none">
         <p style="text-align:center; font-size:12px; color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; padding:8px 14px; margin-top:14px; text-transform:none;">
-          ⚠️ La planilla debe ser el <strong>nuevo formato rojo</strong>
+          Recuerda usar la <strong>planilla actualizada (formato rojo)</strong> disponible en la barra de descargas
         </p>
       </section>
 
+      <div id="errorPanel" class="result-box error">
+        <div class="result-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-triangle-exclamation" style="color: #991B1B; font-size: 18px;"></i>
+            <h3 style="margin: 0; color: #991B1B; font-size: 16px;">Ajustes necesarios antes de radicar</h3>
+          </div>
+
+          <button type="button" id="btnDescargarMarcado" style="display: none; background: #BD0F14; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; align-items: center; gap: 8px; font-size: 13px; box-shadow: 0 4px 6px rgba(189, 15, 20, 0.2); transition: transform 0.2s;">
+            <i class="fas fa-file-download"></i> Descargar planilla con observaciones
+          </button>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr><th>Fila</th><th>Campo</th><th>Observación</th></tr>
+            </thead>
+            <tbody id="errorBody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="submit-area">
         <button type="button" class="btn-main" id="btnEnviar" onclick="procesarRadicacion()">
-          <i class="fas fa-bolt"></i> Revisar y envíar a radicación
+          <i class="fas fa-bolt"></i> Revisar y enviar a radicación
         </button>
       </div>
 
     </form>
-
-    <div id="errorPanel" class="result-box error">
-      <div class="result-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-wrap: wrap; gap: 10px;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <i class="fas fa-triangle-exclamation" style="color: #991B1B; font-size: 18px;"></i>
-          <h3 style="margin: 0; color: #991B1B; font-size: 16px;">Inconsistencias Detectadas</h3>
-        </div>
-        
-        <button type="button" id="btnDescargarMarcado" style="display: none; background: #BD0F14; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; align-items: center; gap: 8px; font-size: 13px; box-shadow: 0 4px 6px rgba(189, 15, 20, 0.2); transition: transform 0.2s;">
-          <i class="fas fa-file-download"></i> Descargar Excel con Errores
-        </button>
-      </div>
-      
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr><th>Fila</th><th>Campo</th><th>Motivo del Rechazo</th></tr>
-          </thead>
-          <tbody id="errorBody"></tbody>
-        </table>
-      </div>
-    </div>
 
   </main>
 </div>

@@ -202,13 +202,7 @@
     height: 6px; width: 0%;
     background: linear-gradient(90deg, #253150, #005BB9);
     border-radius: 999px;
-    animation: fillBar 20s ease-in-out forwards;
-  }
-  @keyframes fillBar {
-    0%   { width: 0%;  }
-    60%  { width: 75%; }
-    85%  { width: 88%; }
-    100% { width: 95%; }
+    transition: width 0.5s ease-out;
   }
 
   /* ============================================================
