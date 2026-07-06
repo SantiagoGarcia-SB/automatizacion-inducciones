@@ -5,8 +5,9 @@
  * ============================================================
  */
 
-var ID_HOJA_CONTROL   = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
-var ID_CARPETA_RAIZ   = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
+var ID_HOJA_CONTROL      = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
+var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
+var ID_CARPETA_RAIZ      = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
 var CORREOS_LIDERES   = [ 
   "lady.vargas@segurosbolivar.com", 
   "jonathan.enciso@segurosbolivar.com", 

@@ -11,9 +11,16 @@
 
 function sincronizarLoteAutomatico() {
 
-  // ── 1. CONEXIONES ──────────────────────────────────────────────────────────
-  var ID_ARCHIVO_ANALISIS = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
+  // ── 0. LOCK — evita chocar con procesarDatosMejorado() u otra corrida propia ──
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("No se pudo obtener el lock (otro proceso está usando 'registro analisis'). Se reintentará en el próximo trigger.");
+    return;
+  }
 
+  try {
+
+  // ── 1. CONEXIONES ──────────────────────────────────────────────────────────
   var libroOrigen = SpreadsheetApp.getActiveSpreadsheet();
   if (!libroOrigen) {
     Logger.log("Error: Ejecuta el script desde Extensiones > Apps Script del Sheet de origen.");
@@ -164,6 +171,10 @@ function sincronizarLoteAutomatico() {
   }
 
   Logger.log("✅ Sincronización completada.");
+
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 
@@ -225,8 +236,16 @@ function obtenerMapaColumnas(filaEncabezados) {
 
 function sincronizarEstadoDesdeAnalisis() {
 
+  // ── 0. LOCK — evita chocar con procesarDatosMejorado() u otra corrida propia ──
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("No se pudo obtener el lock (otro proceso está usando 'registro analisis'). Se reintentará en el próximo trigger.");
+    return;
+  }
+
+  try {
+
   // ── 1. CONEXIONES ──────────────────────────────────────────────────────────
-  var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
   var ID_ARCHIVO_CONTROL   = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
 
   var libroAnalisis  = SpreadsheetApp.openById(ID_ARCHIVO_ANALISIS);
@@ -324,4 +343,8 @@ function sincronizarEstadoDesdeAnalisis() {
   }
 
   Logger.log("✅ Sincronización de estados completada. Actualizaciones: " + actualizaciones);
+
+  } finally {
+    lock.releaseLock();
+  }
 }
