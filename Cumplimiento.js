@@ -197,6 +197,30 @@ function procesarDatosMejorado() {
 }
 
 /**
+ * Ejecutar UNA VEZ, manualmente, desde el editor de Apps Script
+ * (seleccionar esta función en el desplegable > Ejecutar) para crear
+ * el trigger de tiempo de procesarDatosMejorado. Es idempotente: si el
+ * trigger ya existe, no crea uno duplicado.
+ */
+function configurarTriggerCumplimiento() {
+  const yaExiste = ScriptApp.getProjectTriggers()
+    .some(t => t.getHandlerFunction() === 'procesarDatosMejorado');
+
+  if (yaExiste) {
+    Logger.log('El trigger de procesarDatosMejorado ya existe. No se creó uno nuevo.');
+    return;
+  }
+
+  ScriptApp.newTrigger('procesarDatosMejorado')
+    .timeBased()
+    .everyDays(15)
+    .atHour(6)
+    .create();
+
+  Logger.log('Trigger creado: procesarDatosMejorado cada 15 días, alrededor de las 6am (America/Bogota).');
+}
+
+/**
  * Escapa un valor para CSV: si contiene coma, comilla o salto de línea,
  * lo envuelve en comillas dobles y duplica las comillas internas.
  */

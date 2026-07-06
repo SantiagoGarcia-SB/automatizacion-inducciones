@@ -149,6 +149,7 @@ Los siguientes triggers deben configurarse manualmente desde el editor de Apps S
 | `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Cada edición |
 | `enviarRecordatoriosPazYSalvoDiario` | Time-driven | Diario (hora configurable) |
 | `sincronizarLoteAutomatico` | Time-driven | Cada 5–15 minutos (según volumen) |
+| `procesarDatosMejorado` | Time-driven | Cada 15 días — se crea ejecutando `configurarTriggerCumplimiento` una sola vez desde el editor |
 
 ---
 
