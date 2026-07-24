@@ -14,7 +14,8 @@ var CORREOS_LIDERES   = [
   "juan.diaz.buitrago@segurosbolivar.com", 
   "jenny.ascanio@segurosbolivar.com", 
   "kharen.garcia@segurosbolivar.com", 
-  "desarrollocrmlibertador@ellibertador.co"
+  "desarrollocrmlibertador@ellibertador.co",
+  "daniela.giraldo@segurosbolivar.com"
 ];
 var MIME_EXCEL_VALIDOS = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
