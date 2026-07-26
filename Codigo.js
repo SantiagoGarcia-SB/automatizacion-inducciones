@@ -98,6 +98,32 @@ function validarDestino(valor) {
 }
 
 // ============================================================
+//  VALIDADORES DE CELULAR Y CORREO
+// ============================================================
+
+function validarCelular(valor) {
+  const raw = String(valor ?? "").trim().replace(/[\s-]/g, "").replace(/^(\+?57)/, "");
+  if (!raw) return null; // vacío lo maneja la regla de "al menos uno"
+
+  if (!/^3\d{9}$/.test(raw)) {
+    return `El celular "${valor}" no es válido. Debe tener 10 dígitos y empezar por 3 (indicativo de celular en Colombia).`;
+  }
+
+  return null; // ✅ Válido
+}
+
+function validarCorreo(valor) {
+  const raw = String(valor ?? "").trim();
+  if (!raw) return null; // vacío lo maneja la regla de "al menos uno"
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    return `El correo "${raw}" no tiene un formato válido.`;
+  }
+
+  return null; // ✅ Válido
+}
+
+// ============================================================
 //  VALIDADOR DE CAMPOS MONETARIOS (Canon, Administración, IVA)
 // ============================================================
 
@@ -188,6 +214,31 @@ function motorDeAuditoria(formData) {
     // CASCADA 3 — AUDITORÍA FILA POR FILA
     // ----------------------------------------------------------
 
+    // Pre-paso: valores únicos de Destino que ya pasan la heurística barata
+    // (validarDestino) se envían UNA sola vez a Vertex AI para juicio
+    // semántico, en vez de una llamada de red por fila. Si Vertex AI falla,
+    // validarDestinosConIA_ se degrada sola y devuelve {} — no bloquea la
+    // radicación (ver IADestino.js).
+    const destinosUnicosParaIA = new Set();
+    for (let iPre = 4; iPre < data.length; iPre++) {
+      const filaPre = data[iPre];
+      if (!String(filaPre[9] || "").trim()) continue;
+
+      const rawDestinoPre = String(filaPre[3] ?? "").trim();
+      if (rawDestinoPre && !validarDestino(rawDestinoPre)) {
+        destinosUnicosParaIA.add(rawDestinoPre);
+      }
+    }
+    const resultadoIA          = validarDestinosConIA_(Array.from(destinosUnicosParaIA));
+    const veredictosDestinoIA  = resultadoIA.mapa;
+    const validacionIADegradada = resultadoIA.degradado;
+
+    // Nota visible en Hoja_Control (no solo en el log técnico) cuando la IA
+    // no pudo validar Destino en este envío y se siguió solo con heurística.
+    const notaValidacionIA = validacionIADegradada
+      ? " [Aviso: la validación de Destino con IA no estuvo disponible en este envío; se usó solo la validación heurística.]"
+      : "";
+
     const mapaLlavesUnicas = {};
 
     for (let i = 4; i < data.length; i++) {
@@ -215,18 +266,32 @@ function motorDeAuditoria(formData) {
           campo: "Celular (INQ) / Correo Electrónico (INQ)",
           motivo: "Debe diligenciar al menos el Celular o el Correo del Inquilino."
         });
-      } else if (celularInq && !(/^\d{10,}$/.test(celularInq))) {
-        errores.push({
-          fila: nF,
-          campo: "Celular (INQ)",
-          motivo: "El celular debe tener exactamente 10 dígitos numéricos."
-        });
+      } else {
+        const motivoCelularInq = validarCelular(celularInq);
+        if (motivoCelularInq) {
+          errores.push({ fila: nF, campo: "Celular (INQ)", motivo: motivoCelularInq });
+        }
+
+        const motivoCorreoInq = validarCorreo(correoInq);
+        if (motivoCorreoInq) {
+          errores.push({ fila: nF, campo: "Correo Electrónico (INQ)", motivo: motivoCorreoInq });
+        }
       }
 
-      // ── 3. DESTINO (validación heurística completa) ──
+      // ── 3. DESTINO (heurística barata + juicio semántico con IA) ──
       const motivoDestino = validarDestino(fila[3]);
       if (motivoDestino) {
         errores.push({ fila: nF, campo: "Destino", motivo: motivoDestino });
+      } else {
+        const rawDestino  = String(fila[3] ?? "").trim();
+        const veredictoIA = veredictosDestinoIA[rawDestino];
+        if (veredictoIA && veredictoIA.valido === false) {
+          errores.push({
+            fila: nF,
+            campo: "Destino",
+            motivo: veredictoIA.motivo || `"${rawDestino}" no parece describir un uso real del inmueble (validado por IA).`
+          });
+        }
       }
 
       // ── 3b. CAMPOS MONETARIOS (Canon, Administración, IVA) ──
@@ -261,12 +326,16 @@ function motorDeAuditoria(formData) {
 
         if (!celCoa && !corCoa) {
           errores.push({ fila: nF, campo: `Celular / Correo (${coa.label})`, motivo: `Debe diligenciar al menos el Celular o el Correo de ${coa.label}.` });
-        } else if (celCoa && !(/^\d{10,}$/.test(celCoa))) {
-          errores.push({
-            fila: nF,
-            campo: `Celular (${coa.label})`,
-            motivo: "El celular debe tener exactamente 10 dígitos numéricos."
-          });
+        } else {
+          const motivoCelularCoa = validarCelular(celCoa);
+          if (motivoCelularCoa) {
+            errores.push({ fila: nF, campo: `Celular (${coa.label})`, motivo: motivoCelularCoa });
+          }
+
+          const motivoCorreoCoa = validarCorreo(corCoa);
+          if (motivoCorreoCoa) {
+            errores.push({ fila: nF, campo: `Correo (${coa.label})`, motivo: motivoCorreoCoa });
+          }
         }
       });
 
@@ -309,7 +378,7 @@ function motorDeAuditoria(formData) {
     }
 
     if (errores.length > 0) {
-      hojaLog.appendRow([new Date(), usuarioEmail, formData.poliza, "FALLIDO", "Inconsistencias en Excel", "N/A", formData.observaciones]);
+      hojaLog.appendRow([new Date(), usuarioEmail, formData.poliza, "FALLIDO", "Inconsistencias en Excel", "N/A", formData.observaciones + notaValidacionIA]);
       const archivoMarcado = generarArchivoMarcado(tempSheetId, errores);
       return {
         status: "ERROR",
@@ -432,7 +501,7 @@ function motorDeAuditoria(formData) {
       ? "Radicado con adjunto de paz y salvo"
       : "Radicado con confirmación de paz y salvo";
 
-    hojaLog.appendRow([ts, usuarioEmail, formData.poliza, "EXITOSO", detallePazYSalvo, idLote, formData.observaciones]);
+    hojaLog.appendRow([ts, usuarioEmail, formData.poliza, "EXITOSO", detallePazYSalvo, idLote, formData.observaciones + notaValidacionIA]);
 
     return { status: "OK", idLote: idLote };
 

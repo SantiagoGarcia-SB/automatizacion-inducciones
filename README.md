@@ -19,9 +19,12 @@ El flujo completo abarca:
 
 | Archivo | Tipo | Responsabilidad |
 |---------|------|-----------------|
-| `Codigo.js` | Backend (GAS) | Motor principal de auditoría, punto de entrada web (`doGet`), validadores heurísticos (destino, campos monetarios), conversión Excel → Google Sheets, generación de archivo marcado con errores, volcado de datos a `Control_General` y consulta de lotes. |
+| `Codigo.js` | Backend (GAS) | Motor principal de auditoría, punto de entrada web (`doGet`), validadores (destino heurístico + IA, celular, correo, campos monetarios), conversión Excel → Google Sheets, generación de archivo marcado con errores, volcado de datos a `Control_General` y consulta de lotes. |
+| `IADestino.js` | Backend (GAS) | Validación semántica del campo Destino con Vertex AI (Gemini), como complemento a la heurística de `Codigo.js`. Autenticación por cuenta de servicio (librería OAuth2), llamada en lote (no por fila) y degradación controlada si Vertex AI no responde. |
+| `Reportes.js` | Backend (GAS) | Reporte diario de gestión de inducciones por correo (métricas + tabla de seguimiento por lote), leyendo `Control_General`, `registro analisis` e `Historico_Envios`. Estrictamente de lectura. |
 | `Notificaciones.js` | Backend (GAS) | Construcción modular de correos HTML con diseño corporativo (bloques reutilizables), envío de notificaciones de radicación exitosa (comercial + líderes), correo de solicitud de paz y salvo (trigger `onEdit`) y recordatorio diario de lotes estancados. |
 | `Sincronizacion.js` | Backend (GAS) | Motor de sincronización automática que replica registros con estado `RADICADO` o `ERROR EN TERCEROS` desde `Control_General` hacia la hoja de análisis, manteniendo consecutividad por lote y actualizando estados. |
+| `Cumplimiento.js` | Backend (GAS) | Cumplimiento Ley 2300: genera CSV de contacto (correo/celular) de solicitudes aprobadas cada 15 días para envío manual a Infobip. **Envío automático vía API de Infobip pendiente** — ver [Pendientes](#pendientes--próximos-pasos). |
 | `Index.html` | Frontend | Estructura HTML de la aplicación web: formulario de radicación, barra de consulta de lotes, zona de carga de archivos (Excel y PDF), panel de errores y modal de progreso. |
 | `Estilos.html` | Frontend | Hoja de estilos CSS con variables de diseño, componentes visuales (cards, drop zones, botones, modales, badges de estado) y animaciones. |
 | `Scripts.html` | Frontend | Lógica JavaScript del cliente: inicialización de zonas drag-and-drop, validaciones de formulario, conversión de archivos a Base64, comunicación con el backend vía `google.script.run`, consulta de lotes y persistencia local (borrador en `localStorage`). |
@@ -38,13 +41,25 @@ El flujo completo abarca:
 - **Validación de encabezados**: Comprueba que los metadatos del lote (tipo de negociación, póliza, inmobiliaria) estén completos.
 - **Auditoría fila por fila**:
   - Campos obligatorios por participante (inquilino y codeudores).
-  - Contacto mínimo: al menos celular o correo por cada participante.
-  - Validación heurística de destino: rechaza valores genéricos, evasivos, de relleno o demasiado cortos.
+  - Contacto mínimo: al menos celular o correo por cada participante, con **validación de formato** (celular: 10 dígitos empezando en 3; correo: formato de email válido).
+  - Validación de destino en dos pasos: heurística barata (rechaza valores genéricos, evasivos, de relleno o demasiado cortos) + **juicio semántico con IA (Vertex AI/Gemini)** para valores que pasan la heurística pero no describen un uso real del inmueble. Ver `IADestino.js`.
   - Validación monetaria: detecta letras o símbolos no permitidos en canon, administración e IVA.
   - Detección de contactos duplicados dentro de la misma fila.
   - Detección de contratos duplicados verticalmente (misma identificación + dirección).
 - **Generación de archivo marcado**: Exporta el Excel con una columna de diagnóstico y filas resaltadas en rojo para facilitar la corrección.
 - **Consulta de lotes**: Permite buscar el estado de un lote por ID desde la interfaz.
+
+### Módulo de IA de Destino (`IADestino.js`)
+
+- **Validación semántica con Vertex AI (Gemini)**: complementa la heurística — solo se envían a la IA los valores de Destino que ya pasaron el filtro barato, y en **una sola llamada por lote de radicación** (no una por fila), para no afectar el tiempo de espera del usuario.
+- **Autenticación por cuenta de servicio**: usa la librería OAuth2 for Apps Script contra el proyecto GCP `proyecto-ia-servicios-bolivar`. Credenciales en Propiedades del Script (`VERTEX_SA_KEY_JSON`, `VERTEX_PROJECT_ID`, `VERTEX_LOCATION`, `VERTEX_MODEL`), nunca en el código.
+- **Degradación controlada**: si Vertex AI no responde, la radicación **no se bloquea** — sigue solo con la heurística y deja constancia en `Hoja_Control`.
+
+### Módulo de Reportes de Gestión (`Reportes.js`)
+
+- **Correo diario automático** a los líderes (`enviarReporteGestionInducciones`, disparado por trigger lunes a viernes 5:00pm y sábado 12:30pm) con: analizadas hoy, pendientes por radicar, pendientes paz y salvo, pendiente por asignar, en análisis, pendientes error en terceros, resultados enviados (de `Historico_Envios`) y tabla de seguimiento por lote.
+- **Estrictamente de lectura**: no escribe en ninguna hoja, no requiere `LockService`.
+- **Funciones de prueba** (`probarReporteGestion`, `probarReporteGestionConFecha`): envían una vista previa solo a quien las ejecuta, nunca a los líderes.
 
 ### Módulo de Notificaciones (`Notificaciones.js`)
 
@@ -74,6 +89,8 @@ El flujo completo abarca:
 | **HTML5** | Estructura de la webapp servida por `HtmlService`. |
 | **CSS3** | Estilos con variables CSS, grid, flexbox, animaciones y backdrop-filter. |
 | **Google Drive API v3** | Conversión de Excel a Google Sheets y gestión de carpetas. |
+| **Vertex AI (Gemini)** | Validación semántica del campo Destino, vía cuenta de servicio del proyecto GCP `proyecto-ia-servicios-bolivar`. |
+| **OAuth2 for Apps Script** (librería) | Autenticación de la cuenta de servicio de Vertex AI desde Apps Script. |
 | **SweetAlert2** | Diálogos de confirmación y error en el frontend. |
 | **Animate.css** | Animaciones de entrada para elementos de la interfaz. |
 | **Font Awesome 6** | Iconografía de la aplicación. |
@@ -150,6 +167,24 @@ Los siguientes triggers deben configurarse manualmente desde el editor de Apps S
 | `enviarRecordatoriosPazYSalvoDiario` | Time-driven | Diario (hora configurable) |
 | `sincronizarLoteAutomatico` | Time-driven | Cada 5–15 minutos (según volumen) |
 | `procesarDatosMejorado` | Time-driven | Cada 15 días — se crea ejecutando `configurarTriggerCumplimiento` una sola vez desde el editor |
+| `enviarReporteGestionInducciones` | Time-driven | Lunes a viernes 5:00pm y sábado 12:30pm — se crea ejecutando `configurarTriggerReporteGestion` una sola vez desde el editor (idempotente por reemplazo: se puede re-ejecutar sin duplicar) |
+
+### Propiedades del Script requeridas
+
+Configurables en el editor de Apps Script (⚙️ Configuración del proyecto → Propiedades del script). Nunca se guardan en el código ni en este repositorio.
+
+| Propiedad | Uso |
+|-----------|-----|
+| `VERTEX_SA_KEY_JSON` | Contenido completo del JSON de la cuenta de servicio con acceso a Vertex AI. |
+| `VERTEX_PROJECT_ID` | ID del proyecto GCP (`proyecto-ia-servicios-bolivar`). |
+| `VERTEX_LOCATION` | Región de Vertex AI (`us-central1`). |
+| `VERTEX_MODEL` | Modelo de Gemini a usar (`gemini-2.5-flash-lite`). |
+
+---
+
+## Pendientes / Próximos pasos
+
+- **Automatizar envío de Ley 2300 vía API de Infobip** (reemplazar la subida manual de CSV en `Cumplimiento.js` por un envío directo). Bloqueado: la cuenta de Infobip no tiene un remitente alfanumérico de SMS configurado (canal requerido — WhatsApp está disponible pero se descarta a propósito para evitar interacciones con el bot de la empresa). En espera de guía de la coordinación de operaciones sobre cómo solicitar ese remitente antes de construir la integración.
 
 ---
 
@@ -165,8 +200,12 @@ Los siguientes triggers deben configurarse manualmente desde el editor de Apps S
           │ sincronización automática
           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Google Sheets: "Archivo de Análisis"                       │
-│  └── registro analisis → Copia de trabajo para analistas    │
+│  Google Sheets: "Archivo de Análisis" (ID_ARCHIVO_ANALISIS)  │
+│  ├── registro analisis → Copia de trabajo para analistas    │
+│  └── Historico_Envios  → Resultado final por lote emitido   │
+│                          por la aseguradora (aprobadas/      │
+│                          negadas), fuente del reporte de     │
+│                          gestión                              │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐

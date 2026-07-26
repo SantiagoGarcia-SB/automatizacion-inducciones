@@ -208,6 +208,108 @@ function _bloque_contratos_(filas) {
 }
 
 /**
+ * Colores estándar por estado de contrato/lote, usados en badges y tablas
+ * de reportes. Centraliza el criterio visual para no repetirlo en cada bloque.
+ * @param {string} estado  Valor exacto de la columna "Estado" en Control_General.
+ */
+function _colorPorEstado_(estado) {
+  const mapa = {
+    "PENDIENTE RADICAR"     : _C_GRIS,
+    "PENDIENTE PAZ Y SALVO" : "#E65100",
+    "PENDIENTE ASIGNAR"     : _C_NAVY,
+    "EN ANÁLISIS"           : _C_NAVY,
+    "ERROR EN TERCEROS"     : _C_ROJO,
+    "RADICADO"              : "#3B6D11",
+    "TERMINADO"             : "#3B6D11",
+  };
+  return mapa[estado] || _C_GRIS;
+}
+
+/**
+ * Badge de estado genérico (para tablas de reporte), coloreado según _colorPorEstado_.
+ * @param {string} estado  Texto del estado a mostrar.
+ * @param {number} [cantidad]  Si se pasa, se muestra "ESTADO (n)".
+ */
+function _badge_estado_generico_(estado, cantidad) {
+  const color = _colorPorEstado_(estado);
+  const texto = cantidad ? `${estado} (${cantidad})` : estado;
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;
+                       font-weight:700;color:${color};background:${color}18;
+                       font-family:Arial,sans-serif;margin:1px 3px 1px 0;white-space:nowrap;">
+            ${texto}
+          </span>`;
+}
+
+/**
+ * Tabla de seguimiento de inducciones por lote — usada en el reporte de gestión.
+ * No asume un único estado por lote: cada lote puede tener contratos en estados
+ * distintos (RADICADO/ERROR EN TERCEROS se marcan manualmente fila por fila), así
+ * que la columna Estado muestra el desglose real en vez de un valor único.
+ * @param {Array} lotes  [{idLote, comercial, fechaIngresoStr, contratos, estados:{ESTADO:n}}]
+ */
+function _bloque_tabla_seguimiento_(lotes) {
+  const filasHtml = lotes.map(l => {
+    const badges = Object.keys(l.estados)
+      .sort()
+      .map(estado => _badge_estado_generico_(estado, l.estados[estado]))
+      .join("");
+
+    return `
+    <tr>
+      <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;
+                 font-size:12px;font-weight:700;color:#253150;white-space:nowrap;">
+        ${l.idLote}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;
+                 font-size:11px;color:#64748b;">
+        ${l.comercial || "&mdash;"}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;
+                 font-size:11px;color:#64748b;white-space:nowrap;">
+        ${l.fechaIngresoStr || "&mdash;"}
+      </td>
+      <td align="center" style="padding:10px 8px;border-bottom:1px solid #f1f5f9;
+                 font-family:Arial,sans-serif;font-size:11px;font-weight:700;color:#253150;">
+        ${l.contratos}
+      </td>
+      <td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;">
+        ${badges}
+      </td>
+    </tr>`;
+  }).join("");
+
+  const filasVacio = `
+    <tr><td colspan="5" style="padding:16px 8px;text-align:center;font-family:Arial,sans-serif;
+        font-size:12px;color:#94a3b8;">No hay lotes activos en este momento.</td></tr>`;
+
+  return `
+  <tr>
+    <td style="padding:20px 28px 0;">
+      <div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>
+      <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
+                  color:#94a3b8;margin-bottom:10px;font-family:Arial,sans-serif;">
+        Seguimiento de inducciones por lote
+      </div>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;
+                     letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Lote</td>
+          <td style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;
+                     letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Comercial</td>
+          <td style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;
+                     letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Fecha</td>
+          <td align="center" style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;
+                     font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Contratos</td>
+          <td style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;
+                     letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Estado</td>
+        </tr>
+        ${lotes.length ? filasHtml : filasVacio}
+      </table>
+    </td>
+  </tr>`;
+}
+
+/**
  * Nota / aviso con borde izquierdo rojo.
  * @param {string} html  Contenido del aviso (puede incluir <strong>).
  */
