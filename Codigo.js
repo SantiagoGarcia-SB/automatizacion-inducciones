@@ -189,15 +189,14 @@ function motorDeAuditoria(formData) {
 
     // V1: Si el frontend envió los datos ya parseados, los usamos directamente
     // (elimina la conversión Drive.Files.create que tarda 3-8 seg y requiere permisos extra).
-    // Si no vienen (ej. un cliente antiguo), hacemos fallback a la conversión tradicional.
     let data;
     if (formData.excelParseado && Array.isArray(formData.excelParseado) && formData.excelParseado.length >= 5) {
       data = formData.excelParseado;
     } else {
-      tempSheetId  = convertirExcelAGoogleSheets(excelBlob);
-      const ssTemp = retry(() => SpreadsheetApp.openById(tempSheetId));
-      const hoja   = ssTemp.getSheets()[0];
-      data         = hoja.getDataRange().getValues();
+      return {
+        status: "ERROR",
+        detalles: [{ fila: "SISTEMA", campo: "Planilla", motivo: "No se pudieron leer los datos de la planilla. Por favor recarga la página y vuelve a cargar el archivo Excel." }]
+      };
     }
 
     // ----------------------------------------------------------
@@ -397,14 +396,20 @@ function motorDeAuditoria(formData) {
     if (errores.length > 0) {
       hojaLog.appendRow([new Date(), usuarioEmail, formData.poliza, "FALLIDO", "Inconsistencias en Excel", "N/A", formData.observaciones + notaValidacionIA]);
 
-      // Si usamos parseo directo (V1), creamos un sheet temporal para generar el archivo marcado
-      let ssIdParaMarcado = tempSheetId;
-      if (!ssIdParaMarcado) {
-        ssIdParaMarcado = convertirExcelAGoogleSheets(excelBlob);
-        tempSheetId = ssIdParaMarcado; // para que el finally lo borre
+      // Intentar generar el archivo marcado (puede fallar si no hay permisos de Drive avanzado)
+      let archivoMarcado = null;
+      try {
+        let ssIdParaMarcado = tempSheetId;
+        if (!ssIdParaMarcado) {
+          ssIdParaMarcado = convertirExcelAGoogleSheets(excelBlob);
+          tempSheetId = ssIdParaMarcado;
+        }
+        archivoMarcado = generarArchivoMarcado(ssIdParaMarcado, errores);
+      } catch (errMarcado) {
+        console.warn("No se pudo generar archivo marcado: " + errMarcado.message);
+        // No bloquea — el usuario igual ve los errores en la tabla
       }
 
-      const archivoMarcado = generarArchivoMarcado(ssIdParaMarcado, errores);
       return {
         status: "ERROR",
         detalles: errores,
@@ -486,19 +491,26 @@ function motorDeAuditoria(formData) {
 
     // ----------------------------------------------------------
     // CASCADA 5 — OPERACIONES EN DRIVE (archivos del lote)
+    // Si falla, la radicación continúa (los datos se guardan en el sheet)
     // ----------------------------------------------------------
 
-    const carpeta = retry(() => DriveApp.getFolderById(ID_CARPETA_RAIZ).createFolder(idLote));
-    retry(() => carpeta.createFile(excelBlob));
+    let carpeta = null;
+    try {
+      carpeta = retry(() => DriveApp.getFolderById(ID_CARPETA_RAIZ).createFolder(idLote));
+      retry(() => carpeta.createFile(excelBlob));
 
-    if (formData.tipoPazYSalvo === "adjunto" && formData.pazYSalvoPdf) {
-      const pdfBase64 = formData.pazYSalvoPdf.bytes.split(',')[1] || formData.pazYSalvoPdf.bytes;
-      const pdfBlob   = Utilities.newBlob(
-        Utilities.base64Decode(pdfBase64),
-        "application/pdf",
-        formData.pazYSalvoPdf.nombre
-      );
-      retry(() => carpeta.createFile(pdfBlob));
+      if (formData.tipoPazYSalvo === "adjunto" && formData.pazYSalvoPdf) {
+        const pdfBase64 = formData.pazYSalvoPdf.bytes.split(',')[1] || formData.pazYSalvoPdf.bytes;
+        const pdfBlob   = Utilities.newBlob(
+          Utilities.base64Decode(pdfBase64),
+          "application/pdf",
+          formData.pazYSalvoPdf.nombre
+        );
+        retry(() => carpeta.createFile(pdfBlob));
+      }
+    } catch (errDrive) {
+      console.error("Error al crear carpeta/archivos en Drive (radicación continúa): " + errDrive.message);
+      _registrarEvento_("ERROR", "Codigo.js", "No se pudo crear carpeta en Drive para lote " + idLote, errDrive.message);
     }
 
     // ----------------------------------------------------------
@@ -535,7 +547,7 @@ function motorDeAuditoria(formData) {
     // ----------------------------------------------------------
 
     try {
-      enviarLasNotificaciones(formData, idLote, filasParaInsertar.length, usuarioEmail, carpeta.getUrl(), filasParaInsertar);
+      enviarLasNotificaciones(formData, idLote, filasParaInsertar.length, usuarioEmail, carpeta ? carpeta.getUrl() : "", filasParaInsertar);
     } catch (errMail) {
       console.error("Notificación no enviada (la radicación SÍ fue exitosa): " + errMail.message);
       _registrarEvento_("WARN", "Codigo.js", "Correo de confirmación no enviado para lote " + idLote, errMail.message);
@@ -547,10 +559,10 @@ function motorDeAuditoria(formData) {
     console.error("Error crítico durante la radicación: ", e);
     _registrarEvento_("ERROR", "Codigo.js", "Error crítico en motorDeAuditoria", e.toString());
 
-    // Mensaje amigable para el usuario (sin exponer detalles técnicos)
+    // Mensaje con detalle técnico para diagnóstico (cambiar a amigable después de resolver)
     return {
       status: "ERROR",
-      detalles: [{ fila: "SISTEMA", campo: "Error de procesamiento", motivo: "No fue posible completar la radicación en este momento. Por favor intenta de nuevo en unos minutos. Si el problema persiste, contacta al equipo de inducciones." }]
+      detalles: [{ fila: "SISTEMA", campo: "Error de procesamiento", motivo: "Error interno: " + e.toString() }]
     };
 
   } finally {

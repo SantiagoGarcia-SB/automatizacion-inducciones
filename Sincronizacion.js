@@ -459,7 +459,6 @@ function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
     cache.put(cacheKey, "enviado", 86400); // 24 horas
 
     var nombreComercial = obtenerNombreDeComercial(emailComercial);
-    var icono = info.nuevoEstado === "TERMINADO" ? "✅" : "📋";
     var colorBarra = info.nuevoEstado === "TERMINADO" ? "#3B6D11" : _C_NAVY;
     var textoEstado = info.nuevoEstado === "TERMINADO"
       ? "Análisis finalizado"
@@ -483,7 +482,11 @@ function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
     ].join(""));
 
     try {
-      GmailApp.sendEmail(emailComercial, icono + " Tu lote " + idLote + " pasó a " + info.nuevoEstado, "", {
+      var asuntoCorreo = info.nuevoEstado === "TERMINADO"
+        ? "✅ Tu lote " + idLote + " fue analizado exitosamente"
+        : "📌 Tu lote " + idLote + " está en análisis";
+
+      GmailApp.sendEmail(emailComercial, asuntoCorreo, "", {
         htmlBody: htmlBody,
         bcc: BCC_AUDITORIA,
         name: "Inducciones · El Libertador SA"

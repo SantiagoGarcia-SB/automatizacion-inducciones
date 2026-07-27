@@ -739,7 +739,9 @@ function _obtenerDatosCorreos_() {
 
 function _correoANombre(correo) {
   if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
-  return correo.split("@")[0].split(".").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
+  const partes = correo.split("@")[0].split(".");
+  // Solo el primer nombre, capitalizado
+  return partes[0].charAt(0).toUpperCase() + partes[0].slice(1).toLowerCase();
 }
 
 function obtenerNombreDeComercial(email) {
