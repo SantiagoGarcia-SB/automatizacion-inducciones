@@ -551,8 +551,10 @@ if (10 < colStart || 10 > colEnd) return;
         sheetActual.getRange(i + 2, 61).setValue(fechaHoy);
       }
     }
+    _registrarEvento_("INFO", "Notificaciones.js", "Correo paz y salvo enviado (onEdit)", "Lote: " + idLoteActual + " | Destino: " + emailFinal);
   } catch (err) {
     console.error("Error envío paz y salvo: " + err.message);
+    _registrarEvento_("ERROR", "Notificaciones.js", "Error al enviar correo paz y salvo", "Lote: " + idLoteActual + " | Error: " + err.message);
   }
 }
 
@@ -573,6 +575,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
   
   if (!sheetCG || !sheetHC) {
     console.error("No se encontraron las hojas necesarias.");
+    _registrarEvento_("ERROR", "Notificaciones.js", "enviarRecordatoriosPazYSalvoDiario: hojas no encontradas");
     return;
   }
 
@@ -618,6 +621,14 @@ function enviarRecordatoriosPazYSalvoDiario() {
   }
 
   // 3. PROCESAR Y ENVIAR
+  const lotesIds = Object.keys(lotesParaAvisar);
+  
+  // Verificar cuota antes de enviar (Fase 2.2)
+  if (!_verificarCuotaEmail_(lotesIds.length)) {
+    _registrarEvento_("WARN", "Notificaciones.js", "Recordatorios no enviados: cuota insuficiente", "Lotes pendientes: " + lotesIds.length);
+    return;
+  }
+
   for (const idLote in lotesParaAvisar) {
     const lote = lotesParaAvisar[idLote];
     if (!lote.timestamp) continue;
@@ -625,8 +636,26 @@ function enviarRecordatoriosPazYSalvoDiario() {
     const diffDias = Math.floor((hoy.getTime() - lote.timestamp) / (1000 * 60 * 60 * 24));
 
     if (diffDias >= 3) {
+      // ── A3: Escalamiento progresivo según días de espera ──
+      let nivelEscalamiento = "recordatorio";
+      let asuntoEmoji = "🔔";
+      let mensajeExtra = "";
+
+      if (diffDias >= 21) {
+        nivelEscalamiento = "critico";
+        asuntoEmoji = "🚨";
+        mensajeExtra = `<br><br><strong style="color:#BD0F14;">⚠️ ALERTA CR&Iacute;TICA:</strong> Este lote lleva m&aacute;s de 21 d&iacute;as sin paz y salvo. Se requiere acci&oacute;n inmediata para evitar el cierre del tr&aacute;mite.`;
+      } else if (diffDias >= 14) {
+        nivelEscalamiento = "urgente";
+        asuntoEmoji = "⚠️";
+        mensajeExtra = `<br><br><strong style="color:#E65100;">Atenci&oacute;n:</strong> Este lote lleva m&aacute;s de 14 d&iacute;as en espera. Por favor priorizar el env&iacute;o del documento.`;
+      } else if (diffDias >= 7) {
+        nivelEscalamiento = "elevado";
+        asuntoEmoji = "📌";
+        mensajeExtra = `<br><br><strong style="color:#253150;">Nota:</strong> Este lote supera los 7 d&iacute;as sin respuesta. El equipo de inducciones est&aacute; monitoreando.`;
+      }
+
       // --- EL CRUCE DE DATOS ---
-      // Buscamos en el mapa el email real usando el ID del lote
       const emailReal = mapaEmailsLote[idLote];
 
       if (!emailReal || !emailReal.includes("@")) {
@@ -638,19 +667,22 @@ function enviarRecordatoriosPazYSalvoDiario() {
       const correoDirector = obtenerCorreoDeDirector(emailReal);
       const correoBackup   = obtenerCorreoDeBackup(emailReal);
       
-      // Unificamos CCs (Líderes + Director + Backup si activo) usando la constante Global CORREOS_LIDERES
-      const ccs = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@")).join(",");
+      // A3: CCs escalan según nivel
+      const ccsBase = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@"));
+      const ccs = ccsBase.join(",");
+
+      const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
 
       const htmlBody = _envolver_([
-        _bloque_cabecera_("Recordatorio"),
-        _bloque_barra_estado_(_C_GRIS, "&#128260;", `Pendiente hace ${diffDias} d&iacute;as`),
+        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci&oacute;n urgente" : "Recordatorio"),
+        _bloque_barra_estado_(barraColor, "&#128260;", `Pendiente hace ${diffDias} d&iacute;as`),
         _bloque_cuerpo_inicio_(
           `Hola, ${nombreComercial}`, 
-          `El lote <strong>${idLote}</strong> est&aacute; a la espera del soporte de Paz y Salvo para ser aprobado.`
+          `El lote <strong>${idLote}</strong> est&aacute; a la espera del soporte de Paz y Salvo para ser aprobado.${mensajeExtra}`
         ),
         _bloque_chips_([
           { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
-          { label: "D&iacute;as de espera", valor: String(diffDias) }
+          { label: "D&iacute;as de espera", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
         ]),
         _bloque_nota_(
       `<strong style="color:#253150;">C&oacute;mo enviar el soporte:</strong>
@@ -664,7 +696,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
 
       try {
-        GmailApp.sendEmail(emailReal, `🔔 Paz y salvo aún pendiente · Lote ${idLote}`, "", {
+        GmailApp.sendEmail(emailReal, `${asuntoEmoji} Paz y salvo ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'aún pendiente'} · Lote ${idLote}`, "", {
           htmlBody: htmlBody,
           cc: ccs,
           bcc: BCC_AUDITORIA,
@@ -675,8 +707,10 @@ function enviarRecordatoriosPazYSalvoDiario() {
         lote.filas.forEach(f => sheetCG.getRange(f, 61).setValue(new Date()));
         
         console.log(`✅ Recordatorio enviado a ${emailReal} para lote ${idLote}`);
+        _registrarEvento_("INFO", "Notificaciones.js", "Recordatorio paz y salvo enviado", "Lote: " + idLote + " | Destino: " + emailReal);
       } catch (e) {
         console.error(`❌ Error en lote ${idLote}: ${e.message}`);
+        _registrarEvento_("ERROR", "Notificaciones.js", "Error al enviar recordatorio paz y salvo", "Lote: " + idLote + " | Error: " + e.message);
       }
     }
   }
@@ -686,6 +720,22 @@ function enviarRecordatoriosPazYSalvoDiario() {
 // ============================================================
 //  FUNCIONES AUXILIARES
 // ============================================================
+
+/**
+ * Cache en memoria de la hoja CORREOS para evitar lecturas repetidas
+ * dentro de la misma ejecución. Se invalida automáticamente al terminar
+ * cada invocación del script (GAS no mantiene estado entre ejecuciones).
+ */
+var _cacheHojaCorreos_ = null;
+
+function _obtenerDatosCorreos_() {
+  if (_cacheHojaCorreos_) return _cacheHojaCorreos_;
+  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
+  const hoja = ss.getSheetByName("CORREOS");
+  if (!hoja) { _cacheHojaCorreos_ = []; return []; }
+  _cacheHojaCorreos_ = hoja.getDataRange().getValues();
+  return _cacheHojaCorreos_;
+}
 
 function _correoANombre(correo) {
   if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
@@ -697,10 +747,8 @@ function obtenerNombreDeComercial(email) {
 }
 
 function obtenerCorreoDeDirector(emailComercial) {
-  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
-  const hoja = ss.getSheetByName("CORREOS");
-  if (!hoja) return "";
-  const data = hoja.getDataRange().getValues();
+  const data = _obtenerDatosCorreos_();
+  if (!data || data.length === 0) return "";
   const email = emailComercial.toLowerCase().trim();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][1] || "").toLowerCase().trim() === email) return String(data[i][0] || "").trim();
@@ -717,10 +765,8 @@ function obtenerCorreoDeDirector(emailComercial) {
  * @returns {string} Correo del backup o vacío si no aplica.
  */
 function obtenerCorreoDeBackup(emailComercial) {
-  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
-  const hoja = ss.getSheetByName("CORREOS");
-  if (!hoja) return "";
-  const data = hoja.getDataRange().getValues();
+  const data = _obtenerDatosCorreos_();
+  if (!data || data.length === 0) return "";
   const email = emailComercial.toLowerCase().trim();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][1] || "").toLowerCase().trim() === email) {
@@ -826,4 +872,41 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
   }
 
   MailApp.sendEmail(opciones);
+}
+
+
+// ============================================================
+//  CONFIGURACIÓN DE TRIGGERS — Ejecutar UNA VEZ desde el editor
+// ============================================================
+
+/**
+ * Crea los triggers de notificaciones (si no existen).
+ * - enviarCorreoPazYSalvo: onEdit instalable en el spreadsheet de Control
+ * - enviarRecordatoriosPazYSalvoDiario: diario a las 8:00am
+ *
+ * Idempotente: borra triggers previos de estas funciones antes de crearlos.
+ */
+function configurarTriggersNotificaciones() {
+  const funciones = ['enviarCorreoPazYSalvo', 'enviarRecordatoriosPazYSalvoDiario'];
+
+  // Limpiar triggers existentes de estas funciones
+  ScriptApp.getProjectTriggers()
+    .filter(t => funciones.includes(t.getHandlerFunction()))
+    .forEach(t => ScriptApp.deleteTrigger(t));
+
+  // enviarCorreoPazYSalvo: installable onEdit en el spreadsheet de Control_General
+  ScriptApp.newTrigger('enviarCorreoPazYSalvo')
+    .forSpreadsheet(ID_HOJA_CONTROL)
+    .onEdit()
+    .create();
+
+  // enviarRecordatoriosPazYSalvoDiario: todos los días a las 8am
+  ScriptApp.newTrigger('enviarRecordatoriosPazYSalvoDiario')
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .nearMinute(0)
+    .create();
+
+  Logger.log('Triggers creados: enviarCorreoPazYSalvo (onEdit) y enviarRecordatoriosPazYSalvoDiario (diario 8am).');
 }

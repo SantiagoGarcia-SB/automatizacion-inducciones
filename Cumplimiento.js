@@ -139,6 +139,12 @@ function procesarDatosMejorado() {
       correo === "jenny.ascanio@segurosbolivar.com" || correo === "kharen.garcia@segurosbolivar.com"
     ).join(",");
 
+    // Verificar cuota antes de enviar (Fase 2.2)
+    if (!_verificarCuotaEmail_(1)) {
+      Logger.log("⚠️ Cuota de email insuficiente. Archivos Ley 2300 no enviados.");
+      return;
+    }
+
     // Lógica para armar el rango de fechas del corte
     let rangoFechas = "";
     if (fechasProcesadas.length > 0) {
@@ -188,9 +194,11 @@ function procesarDatosMejorado() {
 
     propiedades.setProperty('ultimaEjecucion', hoy.toUTCString());
     Logger.log(`Proceso completado. Se procesaron ${filasParaMarcar.length} filas. Asunto enviado: ${asunto}`);
+    _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente", "Filas: " + filasParaMarcar.length + " | Asunto: " + asunto);
 
   } catch (err) {
     Logger.log(`Error en procesarDatosMejorado: ${err.message}`);
+    _registrarEvento_("ERROR", "Cumplimiento.js", "Error en procesarDatosMejorado", err.message);
   } finally {
     lock.releaseLock();
   }

@@ -106,7 +106,7 @@ function validarCelular(valor) {
   if (!raw) return null; // vacío lo maneja la regla de "al menos uno"
 
   if (!/^3\d{9}$/.test(raw)) {
-    return `El celular "${valor}" no es válido. Debe tener 10 dígitos y empezar por 3 (indicativo de celular en Colombia).`;
+    return `El celular "${valor}" no es válido. Verifique el número e intente nuevamente.`;
   }
 
   return null; // ✅ Válido
@@ -151,6 +151,15 @@ function validarCampoMonetario(valor, nombreCampo) {
 // ============================================================
 
 function motorDeAuditoria(formData) {
+  // Lock para evitar colisión si dos usuarios radican en el mismo instante
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(60000)) {
+    return {
+      status: "ERROR",
+      detalles: [{ fila: "SISTEMA", campo: "CONCURRENCIA", motivo: "Otro usuario está radicando en este momento. Por favor intenta de nuevo en unos segundos." }]
+    };
+  }
+
   let tempSheetId    = null;
   const usuarioEmail = Session.getActiveUser().getEmail();
   const ss           = retry(() => SpreadsheetApp.openById(ID_HOJA_CONTROL));
@@ -178,10 +187,18 @@ function motorDeAuditoria(formData) {
       formData.excel.nombre
     );
 
-    tempSheetId  = convertirExcelAGoogleSheets(excelBlob);
-    const ssTemp = retry(() => SpreadsheetApp.openById(tempSheetId));
-    const hoja   = ssTemp.getSheets()[0];
-    const data   = hoja.getDataRange().getValues();
+    // V1: Si el frontend envió los datos ya parseados, los usamos directamente
+    // (elimina la conversión Drive.Files.create que tarda 3-8 seg y requiere permisos extra).
+    // Si no vienen (ej. un cliente antiguo), hacemos fallback a la conversión tradicional.
+    let data;
+    if (formData.excelParseado && Array.isArray(formData.excelParseado) && formData.excelParseado.length >= 5) {
+      data = formData.excelParseado;
+    } else {
+      tempSheetId  = convertirExcelAGoogleSheets(excelBlob);
+      const ssTemp = retry(() => SpreadsheetApp.openById(tempSheetId));
+      const hoja   = ssTemp.getSheets()[0];
+      data         = hoja.getDataRange().getValues();
+    }
 
     // ----------------------------------------------------------
     // CASCADA 2 — VALIDACIÓN DE ENCABEZADOS
@@ -379,7 +396,15 @@ function motorDeAuditoria(formData) {
 
     if (errores.length > 0) {
       hojaLog.appendRow([new Date(), usuarioEmail, formData.poliza, "FALLIDO", "Inconsistencias en Excel", "N/A", formData.observaciones + notaValidacionIA]);
-      const archivoMarcado = generarArchivoMarcado(tempSheetId, errores);
+
+      // Si usamos parseo directo (V1), creamos un sheet temporal para generar el archivo marcado
+      let ssIdParaMarcado = tempSheetId;
+      if (!ssIdParaMarcado) {
+        ssIdParaMarcado = convertirExcelAGoogleSheets(excelBlob);
+        tempSheetId = ssIdParaMarcado; // para que el finally lo borre
+      }
+
+      const archivoMarcado = generarArchivoMarcado(ssIdParaMarcado, errores);
       return {
         status: "ERROR",
         detalles: errores,
@@ -427,21 +452,21 @@ function motorDeAuditoria(formData) {
       filaFinal[17] = filaE[3];
       filaFinal[18] = filaE[4];
       filaFinal[19] = filaE[5];
-      filaFinal[20] = filaE[6];
-      filaFinal[21] = filaE[7];
-      filaFinal[22] = filaE[8];
+      filaFinal[20] = _limpiarMonetario_(filaE[6]);
+      filaFinal[21] = _limpiarMonetario_(filaE[7]);
+      filaFinal[22] = _limpiarMonetario_(filaE[8]);
       
       filaFinal[23] = filaE[9];
-      filaFinal[24] = filaE[10];
-      filaFinal[25] = filaE[11];
-      filaFinal[26] = filaE[12];
-      filaFinal[27] = filaE[13];
+      filaFinal[24] = _limpiarTipoDoc_(filaE[10]);
+      filaFinal[25] = _limpiarIdentificacion_(filaE[11]);
+      filaFinal[26] = _limpiarCelular_(filaE[12]);
+      filaFinal[27] = _limpiarCorreo_(filaE[13]);
       
-      filaFinal[29] = filaE[14]; filaFinal[30] = filaE[15]; filaFinal[31] = filaE[16]; filaFinal[32] = filaE[17]; filaFinal[33] = filaE[18];
-      filaFinal[35] = filaE[19]; filaFinal[36] = filaE[20]; filaFinal[37] = filaE[21]; filaFinal[38] = filaE[22]; filaFinal[39] = filaE[23];
-      filaFinal[41] = filaE[24]; filaFinal[42] = filaE[25]; filaFinal[43] = filaE[26]; filaFinal[44] = filaE[27]; filaFinal[45] = filaE[28];
-      filaFinal[47] = filaE[29]; filaFinal[48] = filaE[30]; filaFinal[49] = filaE[31]; filaFinal[50] = filaE[32]; filaFinal[51] = filaE[33];
-      filaFinal[53] = filaE[34]; filaFinal[54] = filaE[35]; filaFinal[55] = filaE[36]; filaFinal[56] = filaE[37]; filaFinal[57] = filaE[38];
+      filaFinal[29] = filaE[14]; filaFinal[30] = _limpiarTipoDoc_(filaE[15]); filaFinal[31] = _limpiarIdentificacion_(filaE[16]); filaFinal[32] = _limpiarCelular_(filaE[17]); filaFinal[33] = _limpiarCorreo_(filaE[18]);
+      filaFinal[35] = filaE[19]; filaFinal[36] = _limpiarTipoDoc_(filaE[20]); filaFinal[37] = _limpiarIdentificacion_(filaE[21]); filaFinal[38] = _limpiarCelular_(filaE[22]); filaFinal[39] = _limpiarCorreo_(filaE[23]);
+      filaFinal[41] = filaE[24]; filaFinal[42] = _limpiarTipoDoc_(filaE[25]); filaFinal[43] = _limpiarIdentificacion_(filaE[26]); filaFinal[44] = _limpiarCelular_(filaE[27]); filaFinal[45] = _limpiarCorreo_(filaE[28]);
+      filaFinal[47] = filaE[29]; filaFinal[48] = _limpiarTipoDoc_(filaE[30]); filaFinal[49] = _limpiarIdentificacion_(filaE[31]); filaFinal[50] = _limpiarCelular_(filaE[32]); filaFinal[51] = _limpiarCorreo_(filaE[33]);
+      filaFinal[53] = filaE[34]; filaFinal[54] = _limpiarTipoDoc_(filaE[35]); filaFinal[55] = _limpiarIdentificacion_(filaE[36]); filaFinal[56] = _limpiarCelular_(filaE[37]); filaFinal[57] = _limpiarCorreo_(filaE[38]);
 
       filaFinal[61] = uuidUnicoFila; 
 
@@ -460,7 +485,7 @@ function motorDeAuditoria(formData) {
 
 
     // ----------------------------------------------------------
-    // CASCADA 5 — OPERACIONES DE ALTO RIESGO (DRIVE Y CORREO)
+    // CASCADA 5 — OPERACIONES EN DRIVE (archivos del lote)
     // ----------------------------------------------------------
 
     const carpeta = retry(() => DriveApp.getFolderById(ID_CARPETA_RAIZ).createFolder(idLote));
@@ -476,10 +501,10 @@ function motorDeAuditoria(formData) {
       retry(() => carpeta.createFile(pdfBlob));
     }
 
-    enviarLasNotificaciones(formData, idLote, filasParaInsertar.length, usuarioEmail, carpeta.getUrl(), filasParaInsertar);
-
     // ----------------------------------------------------------
     // CASCADA 6 — VOLCADO AL SHEET (PUNTO DE NO RETORNO)
+    // Se escribe ANTES del envío de correo para que, si la
+    // notificación falla, los datos ya estén registrados.
     // ----------------------------------------------------------
 
     if (filasParaInsertar.length > 0) {
@@ -503,6 +528,19 @@ function motorDeAuditoria(formData) {
 
     hojaLog.appendRow([ts, usuarioEmail, formData.poliza, "EXITOSO", detallePazYSalvo, idLote, formData.observaciones + notaValidacionIA]);
 
+    // ----------------------------------------------------------
+    // CASCADA 7 — NOTIFICACIÓN POR CORREO (best-effort)
+    // Si falla, la radicación ya fue exitosa. Se loguea el error
+    // pero el usuario recibe su confirmación de lote creado.
+    // ----------------------------------------------------------
+
+    try {
+      enviarLasNotificaciones(formData, idLote, filasParaInsertar.length, usuarioEmail, carpeta.getUrl(), filasParaInsertar);
+    } catch (errMail) {
+      console.error("Notificación no enviada (la radicación SÍ fue exitosa): " + errMail.message);
+      _registrarEvento_("WARN", "Codigo.js", "Correo de confirmación no enviado para lote " + idLote, errMail.message);
+    }
+
     return { status: "OK", idLote: idLote };
 
   } catch (e) {
@@ -522,13 +560,121 @@ function motorDeAuditoria(formData) {
         console.warn("No se pudo eliminar hoja temporal: " + f.toString());
       }
     }
+    lock.releaseLock();
   }
 }
 
 
 // ============================================================
-//  UTILIDADES
+//  UTILIDADES — SANITIZACIÓN DE DATOS ANTES DE ESCRIBIR
 // ============================================================
+
+/**
+ * Limpia un número de celular: quita +57, espacios, guiones, paréntesis.
+ * Retorna solo los dígitos o vacío si no hay dato.
+ * Ejemplos:
+ *   "+57 310 555-1234" → "3105551234"
+ *   "310-555-1234"     → "3105551234"
+ *   "(310) 5551234"    → "3105551234"
+ */
+function _limpiarCelular_(valor) {
+  if (!valor) return "";
+  return String(valor).trim().replace(/[\s\-\(\)]/g, "").replace(/^\+?57/, "") || "";
+}
+
+/**
+ * Limpia un correo electrónico: trim + lowercase.
+ * Ejemplos:
+ *   " Juan.Perez@Gmail.com " → "juan.perez@gmail.com"
+ */
+function _limpiarCorreo_(valor) {
+  if (!valor) return "";
+  return String(valor).trim().toLowerCase();
+}
+
+/**
+ * Limpia un número de identificación: quita puntos de miles y espacios.
+ * Ejemplos:
+ *   "1.032.456.789" → "1032456789"
+ *   "A1234567"      → "A1234567" (pasaportes se dejan sin puntos)
+ */
+function _limpiarIdentificacion_(valor) {
+  if (!valor) return "";
+  return String(valor).trim().replace(/\./g, "").replace(/\s/g, "");
+}
+
+/**
+ * Normaliza el tipo de documento a su forma canónica.
+ * Ejemplos:
+ *   "C.C." → "CC"    "Cédula" → "CC"    "N.I.T" → "NIT"
+ *   "CE" → "CE"      "NT" → "NT"
+ */
+function _limpiarTipoDoc_(valor) {
+  if (!valor) return "";
+  const upper = String(valor).trim().toUpperCase().replace(/[.\s]/g, "");
+
+  const mapa = {
+    "CC": "CC", "CEDULA": "CC", "CEDULADECIUDADANIA": "CC", "CEDULACIUDADANIA": "CC",
+    "NIT": "NIT",
+    "CE": "CE", "CEDULADEEXTRANJERIA": "CE", "EXTRANJERIA": "CE",
+    "PP": "PP", "PASAPORTE": "PP",
+    "TI": "TI", "TARJETADEIDENTIDAD": "TI", "TARJETAIDENTIDAD": "TI",
+    "NT": "NT", "NOTIENE": "NT", "NA": "NT"
+  };
+
+  return mapa[upper] || upper;
+}
+
+
+// ============================================================
+//  UTILIDADES — CONVERSIÓN Y FORMATO
+// ============================================================
+
+/**
+ * Limpia un valor monetario quitando $, puntos de miles y espacios.
+ * Trata la COMA como separador decimal (estándar colombiano).
+ * Retorna un número limpio listo para escribir en la hoja.
+ *
+ * Ejemplos:
+ *   "$1.500.000"    → 1500000
+ *   "1,500,000"     → 1500000  (comas como miles si hay más de una)
+ *   "1500000"       → 1500000
+ *   "1.500.000,50"  → 1500000  (redondea, no hay centavos en canon)
+ *   "2300000.5"     → 2300000  (redondea)
+ *   ""              → ""
+ */
+function _limpiarMonetario_(valor) {
+  if (valor === null || valor === undefined || valor === "") return "";
+  if (typeof valor === 'number') return Math.round(valor);
+
+  let texto = String(valor).trim().replace(/[$\s]/g, "");
+  if (!texto) return "";
+
+  // Detectar separador decimal:
+  // Si tiene UNA sola coma y lo que sigue son 1-2 dígitos al final → es decimal colombiano
+  // Ej: "1500000,50" o "1.500.000,5"
+  const matchDecimalComa = texto.match(/^(.+),(\d{1,2})$/);
+  if (matchDecimalComa) {
+    // Parte entera: quitar puntos (miles), parte decimal: ignorar (redondear)
+    const parteEntera = matchDecimalComa[1].replace(/\./g, "");
+    const numero = parseInt(parteEntera, 10);
+    return isNaN(numero) ? "" : numero;
+  }
+
+  // Si tiene UN solo punto y lo que sigue son 1-2 dígitos al final → es decimal anglosajón
+  // Ej: "1500000.50"
+  const matchDecimalPunto = texto.match(/^(.+)\.(\d{1,2})$/);
+  if (matchDecimalPunto) {
+    const parteEntera = matchDecimalPunto[1].replace(/[.,]/g, "");
+    const numero = parseInt(parteEntera, 10);
+    return isNaN(numero) ? "" : numero;
+  }
+
+  // Caso normal: quitar puntos y comas (son separadores de miles)
+  const limpio = texto.replace(/[.,]/g, "");
+  const numero = parseInt(limpio, 10);
+  return isNaN(numero) ? "" : numero;
+}
 
 function convertirExcelAGoogleSheets(blob) {
   return retry(() => Drive.Files.create(
@@ -550,15 +696,21 @@ function limpiarFecha(valor) {
 function consultarLote(idLote) {
   const ss   = SpreadsheetApp.openById(ID_HOJA_CONTROL);
   const hoja = ss.getSheetByName("Control_General");
-  const data = hoja.getDataRange().getValues();
+
+  // V3: Usar TextFinder en vez de leer toda la hoja — mucho más rápido
+  const finder = hoja.createTextFinder(idLote).matchEntireCell(true).matchCase(false);
+  const celdas = finder.findAll();
+
+  if (celdas.length === 0) return [];
 
   const IDX = { idLote:0, fechaIngreso:2, estado:9, comercial:10, arrendatario:23 };
   const resultados = [];
 
-  for (let i = 1; i < data.length; i++) {
-    const fila = data[i];
-    const id   = String(fila[IDX.idLote] || "").trim();
-    if (id.toLowerCase() !== idLote.toLowerCase()) continue;
+  celdas.forEach(celda => {
+    // Solo considerar coincidencias en la columna A (ID Lote)
+    if (celda.getColumn() !== 1) return;
+    const row = celda.getRow();
+    const fila = hoja.getRange(row, 1, 1, 24).getValues()[0];
 
     const fechaRaw = fila[IDX.fechaIngreso];
     let fechaStr   = "";
@@ -575,9 +727,136 @@ function consultarLote(idLote) {
       comercial:    String(fila[IDX.comercial]    || "").trim(),
       arrendatario: String(fila[IDX.arrendatario] || "").trim()
     });
-  }
+  });
 
   return resultados;
+}
+
+
+// ============================================================
+//  U1: HISTORIAL DE LOTES DEL USUARIO
+// ============================================================
+
+/**
+ * Retorna los últimos lotes radicados por el usuario logueado.
+ * Se agrupa por lote y muestra resumen con estado actual.
+ * @returns {Array} [{idLote, fecha, contratos, estados}]
+ */
+function obtenerLotesDelUsuario() {
+  const email = Session.getActiveUser().getEmail();
+
+  const ss   = SpreadsheetApp.openById(ID_HOJA_CONTROL);
+  const hoja = ss.getSheetByName("Hoja_Control");
+  if (!hoja) return [];
+
+  const data = hoja.getDataRange().getValues();
+  const lotesMap = {};
+
+  // Recorrer de abajo hacia arriba para obtener los más recientes primero
+  for (let i = data.length - 1; i >= 1; i--) {
+    const fila       = data[i];
+    const emailLog   = String(fila[1] || "").trim().toLowerCase();
+    const resultado  = String(fila[3] || "").trim();
+    const idLote     = String(fila[5] || "").trim();
+
+    if (emailLog !== email.toLowerCase()) continue;
+    if (resultado !== "EXITOSO" || !idLote) continue;
+    if (lotesMap[idLote]) continue;
+
+    const fechaRaw = fila[0];
+    let fechaStr = "";
+    if (fechaRaw instanceof Date) {
+      fechaStr = Utilities.formatDate(fechaRaw, "GMT-5", "d/MM/yyyy HH:mm");
+    } else {
+      fechaStr = String(fechaRaw || "");
+    }
+
+    lotesMap[idLote] = { idLote: idLote, fecha: fechaStr, contratos: 0, estadosSet: new Set() };
+    if (Object.keys(lotesMap).length >= 10) break;
+  }
+
+  if (Object.keys(lotesMap).length === 0) return [];
+
+  // Obtener estado actual desde Control_General
+  const hojaCtrl = ss.getSheetByName("Control_General");
+  if (hojaCtrl) {
+    const dataCtrl = hojaCtrl.getDataRange().getValues();
+    for (let i = 1; i < dataCtrl.length; i++) {
+      const id = String(dataCtrl[i][0] || "").trim();
+      if (!lotesMap[id]) continue;
+      lotesMap[id].contratos++;
+      lotesMap[id].estadosSet.add(String(dataCtrl[i][9] || "").trim());
+    }
+  }
+
+  return Object.values(lotesMap).map(l => ({
+    idLote:    l.idLote,
+    fecha:     l.fecha,
+    contratos: l.contratos,
+    estados:   Array.from(l.estadosSet).join(", ") || "Sin datos"
+  }));
+}
+
+
+/**
+ * Retorna el nombre del usuario actual derivado de su email.
+ * Ultraligero: no lee ninguna hoja. Respuesta instantánea.
+ */
+function obtenerNombreUsuarioActual() {
+  const email = Session.getActiveUser().getEmail();
+  return obtenerNombreDeComercial(email);
+}
+
+/**
+ * Retorna el resumen semanal del comercial logueado.
+ * Separado del nombre para no bloquear el saludo.
+ * @returns {{radicados: number, enAnalisis: number, pendientePS: number, terminados: number}}
+ */
+function obtenerResumenSemanal() {
+  const email = Session.getActiveUser().getEmail();
+  const nombre = obtenerNombreDeComercial(email);
+  const resumen = { radicados: 0, enAnalisis: 0, pendientePS: 0, terminados: 0 };
+
+  const ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
+
+  // Contar lotes radicados esta semana desde Hoja_Control (liviana)
+  const hojaLog = ss.getSheetByName("Hoja_Control");
+  if (hojaLog) {
+    const dataLog = hojaLog.getDataRange().getValues();
+    const hace7dias = new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000);
+    const lotesContados = new Set();
+
+    for (let i = dataLog.length - 1; i >= 1; i--) {
+      const fechaRaw = dataLog[i][0];
+      if (fechaRaw instanceof Date && fechaRaw < hace7dias) break;
+      const emailLog  = String(dataLog[i][1] || "").trim().toLowerCase();
+      const resultado = String(dataLog[i][3] || "").trim();
+      const idLote    = String(dataLog[i][5] || "").trim();
+      if (emailLog === email.toLowerCase() && resultado === "EXITOSO" && idLote && !lotesContados.has(idLote)) {
+        lotesContados.add(idLote);
+        resumen.radicados++;
+      }
+    }
+  }
+
+  // Contar estados actuales del comercial con TextFinder
+  const hojaCtrl = ss.getSheetByName("Control_General");
+  if (hojaCtrl && hojaCtrl.getLastRow() > 1) {
+    const nombreUpper = nombre.toUpperCase();
+    const finder = hojaCtrl.createTextFinder(nombreUpper).matchCase(false);
+    const celdas = finder.findAll();
+
+    celdas.forEach(celda => {
+      if (celda.getColumn() !== 11) return;
+      const row = celda.getRow();
+      const estado = String(hojaCtrl.getRange(row, 10).getValue() || "").trim().toUpperCase();
+      if (estado === "EN ANÁLISIS") resumen.enAnalisis++;
+      else if (estado.includes("PENDIENTE PAZ")) resumen.pendientePS++;
+      else if (estado === "TERMINADO") resumen.terminados++;
+    });
+  }
+
+  return resumen;
 }
 
 

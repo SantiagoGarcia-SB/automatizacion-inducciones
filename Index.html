@@ -22,10 +22,18 @@
       <div class="v-divider"></div>
       <h1>Ingreso de Inducciones</h1>
     </div>
-    <div class="user-badge">
+    <div class="user-badge" id="userBadge">
       <i class="fa-brands fa-readme"></i> Portal Comercial
     </div>
   </header>
+
+  <!-- 1: Saludo personalizado + 2: Resumen semanal -->
+  <div id="saludoContainer" class="saludo-bar" style="display:none;">
+    <div class="saludo-bar__left">
+      <span id="saludoTexto" class="saludo-bar__greeting"></span>
+      <span id="resumenSemanal" class="saludo-bar__summary"></span>
+    </div>
+  </div>
 
   <div class="query-bar">
     <svg class="query-bar__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -56,6 +64,9 @@
     </div>
   </div>
 
+  <!-- U1: Historial de lotes recientes del usuario -->
+  <div id="historialContainer" class="glass-section" style="display:none; padding:20px 28px;"></div>
+
   <main class="content-wrapper">
     <form id="formInducciones">
 
@@ -63,6 +74,7 @@
         <div class="section-title">
           <i class="fas fa-list-check"></i>
           <span>Información del Lote</span>
+          <span id="borradorIndicator" style="margin-left:auto; font-size:11px; color:#16A34A; font-weight:500; opacity:0.6; transition:opacity 0.3s;"></span>
         </div>
         <div class="form-grid">
           <div class="input-container">
@@ -192,6 +204,12 @@
         <button type="button" class="btn-main" id="btnEnviar" onclick="procesarRadicacion()">
           <i class="fas fa-bolt"></i> Revisar y enviar a radicación
         </button>
+        <button type="button" onclick="limpiarFormulario()" style="
+          width:100%; margin-top:10px; padding:12px; border-radius:12px; border:1.5px solid #e2e8f0;
+          background:white; color:#64748B; font-weight:600; font-size:13px; cursor:pointer;
+          transition:0.2s;">
+          <i class="fas fa-eraser"></i> Limpiar formulario
+        </button>
       </div>
 
     </form>
@@ -203,7 +221,11 @@
   <div class="loader-card">
     <div class="custom-loader"></div>
     <h3 id="loadingTitle" style="margin: 0 0 6px;">Analizando documentos</h3>
-    <p id="loadingSub" style="color: #64748B; font-size: 13px; margin: 0 0 20px;">Preparando entorno de seguridad...</p>
+    <p id="loadingSub" style="color: #64748B; font-size: 13px; margin: 0 0 12px;">Preparando entorno de seguridad...</p>
+    <div style="display:flex; align-items:center; justify-content:center; gap:12px; margin-bottom:20px;">
+      <span id="loadingEta" style="color: #94A3B8; font-size: 11px; font-weight:600;"></span>
+      <span id="loadingCronometro" style="display:none; background:#F1F5F9; border:1px solid #E2E8F0; border-radius:6px; padding:3px 10px; font-family:'Roboto Mono',monospace; font-size:13px; font-weight:700; color:#253150;"></span>
+    </div>
     <div style="width: 260px; background: #F1F5F9; border-radius: 999px; overflow: hidden; height: 6px;">
       <div id="progressBarFill" class="progress-bar-fill"></div>
     </div>
@@ -211,6 +233,9 @@
 </div>
 
 <?!= include('Scripts'); ?>
+
+<!-- 10: Canvas para confetti de éxito -->
+<canvas id="confettiCanvas" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;"></canvas>
 
 </body>
 </html>

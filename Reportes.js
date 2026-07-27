@@ -309,6 +309,12 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
  */
 function enviarReporteGestionInducciones() {
   try {
+    // Verificar cuota antes de enviar (Fase 2.2)
+    if (!_verificarCuotaEmail_(1)) {
+      Logger.log("⚠️ Cuota de email insuficiente para enviar reporte de gestión.");
+      return;
+    }
+
     const m = _recolectarMetricasGestion_();
     const correo = _construirCorreoReporteGestion_(m);
 
@@ -322,8 +328,10 @@ function enviarReporteGestionInducciones() {
     });
 
     Logger.log("✅ Reporte de gestión enviado a líderes.");
+    _registrarEvento_("INFO", "Reportes.js", "Reporte de gestión enviado", "Destinatarios: " + CORREOS_LIDERES.length);
   } catch (err) {
     console.error("Error en enviarReporteGestionInducciones: " + err.message);
+    _registrarEvento_("ERROR", "Reportes.js", "Error al enviar reporte de gestión", err.message);
   }
 }
 

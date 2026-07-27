@@ -42,24 +42,51 @@
   // Inicializar zona PDF
   setupDropZone('dropZonePdf', 'filePdf', 'labelPdf', 'subLabelPdf');
 
+  // Variable global para guardar los datos parseados del Excel
+  var _datosExcelParseados = null;
+  var _metadatosExcel = null;
+
   function contarContratosExcel(file) {
     const sub = document.getElementById('subLabelExcel');
     if (!sub) return;
+    _datosExcelParseados = null;
+    _metadatosExcel = null;
+
     const reader = new FileReader();
     reader.onload = function (e) {
       try {
         const wb = XLSX.read(e.target.result, { type: 'array' });
         const datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+
+        // ── Validación pre-vuelo: detectar plantilla incorrecta ──
+        if (datos.length >= 4) {
+          const encabezadoC4 = String(datos[3] && datos[3][2] || '').trim().toUpperCase();
+          if (encabezadoC4 !== 'AMPARO INTEGRAL') {
+            sub.textContent = '⚠️ Plantilla incorrecta — usa el formato rojo actualizado';
+            sub.style.color = '#991B1B';
+            _datosExcelParseados = null;
+            return;
+          }
+        }
+
+        // Guardar datos parseados para enviar al servidor sin conversión Drive
+        _datosExcelParseados = datos;
+        _metadatosExcel = { nombre: file.name, tipo: file.type };
+
         let count = 0;
         for (let i = 4; i < datos.length; i++) {
           if (datos[i] && String(datos[i][9] || '').trim()) count++;
         }
+        sub.style.color = '';
         sub.textContent = count > 0
           ? '✅ ' + count + (count === 1 ? ' contrato detectado' : ' contratos detectados')
           : '⚠️ No se detectaron contratos en la planilla';
       } catch (err) {
         sub.textContent = '✅ Archivo cargado correctamente';
+        _datosExcelParseados = null;
       }
+      // 4: Actualizar stepper al cargar archivo
+      actualizarStepper();
     };
     reader.readAsArrayBuffer(file);
   }
@@ -80,22 +107,71 @@
     const radioB          = document.getElementById('radioB');
     const filePdf         = document.getElementById('filePdf').files[0];
 
-    // ── Validaciones previas ──
+    // ── Validaciones previas de formulario ──
     if (!poliza || !tasaNegociacion) {
-      Swal.fire('Información incompleta', 'Para continuar, por favor diligencia el número de póliza y la tasa de inducción.', 'warning');
+      const campoFaltante = !poliza ? 'poliza' : 'tasaNegociacion';
+      Swal.fire({
+        title: 'Información incompleta',
+        text: 'Para continuar, por favor diligencia el número de póliza y la tasa de inducción.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#253150'
+      }).then(function() { enfocarCampoFaltante(campoFaltante); });
       return;
     }
     if (!fileExcel) {
-      Swal.fire('Planilla pendiente', 'Carga la planilla de inducción en formato Excel para poder radicar el lote.', 'warning');
+      Swal.fire({
+        title: 'Planilla pendiente',
+        text: 'Carga la planilla de inducción en formato Excel para poder radicar el lote.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#253150'
+      }).then(function() { enfocarCampoFaltante('dropZoneExcel'); });
+      return;
+    }
+    if (!_datosExcelParseados || _datosExcelParseados.length < 5) {
+      Swal.fire({
+        title: 'Planilla inválida',
+        text: 'No se pudieron leer datos de la planilla. Verifica que sea un Excel válido (.xlsx) con contratos.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#253150'
+      }).then(function() { enfocarCampoFaltante('dropZoneExcel'); });
       return;
     }
 
     if (!radioA.checked && !radioB.checked) {
-      Swal.fire('Paz y salvo pendiente', 'Selecciona una de las dos opciones de certificación de paz y salvo antes de continuar.', 'warning');
+      Swal.fire({
+        title: 'Paz y salvo pendiente',
+        text: 'Selecciona una de las dos opciones de certificación de paz y salvo antes de continuar.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#253150'
+      }).then(function() { enfocarCampoFaltante('opcionesPS'); });
       return;
     }
     if (radioB.checked && !filePdf) {
-      Swal.fire('Documento pendiente', 'Seleccionaste adjuntar el paz y salvo, pero aún no has cargado el archivo PDF.', 'warning');
+      Swal.fire({
+        title: 'Documento pendiente',
+        text: 'Seleccionaste adjuntar el paz y salvo, pero aún no has cargado el archivo PDF.',
+        icon: 'warning',
+        confirmButtonText: 'OK',
+        confirmButtonColor: '#253150'
+      }).then(function() { enfocarCampoFaltante('dropZonePdf'); });
+      return;
+    }
+
+    // ── V2: Pre-validación completa en frontend ──
+    const erroresFront = validarExcelEnFrontend(_datosExcelParseados);
+    if (erroresFront.length > 0) {
+      mostrarErrores(erroresFront, null);
+      Swal.fire({
+        title: 'Planilla con observaciones',
+        text: 'Encontramos ' + erroresFront.length + ' dato(s) que necesitan ajuste. Revisa el detalle, corrige y vuelve a cargar.',
+        icon: 'warning',
+        confirmButtonText: 'Entendido',
+        confirmButtonColor: '#253150'
+      });
       return;
     }
 
@@ -105,11 +181,16 @@
     if (modal) {
       modal.style.display = 'flex';
       avanzarProgreso(0);
+      // Iniciar temporizador regresivo
+      const eta = document.getElementById('loadingEta');
+      if (eta) eta.textContent = 'Tiempo restante aproximado:';
+      iniciarCronometro();
     }
 
     try {
       avanzarProgreso(1);
 
+      // V1: Enviar Excel como blob para Drive + datos parseados para auditoría
       const excelObj     = await archivoABase64(fileExcel);
       const pazYSalvoObj = (radioB.checked && filePdf)
         ? await archivoABase64(filePdf)
@@ -122,6 +203,7 @@
         tasaNegociacion:  tasaNegociacion,
         observaciones:    document.getElementById('observaciones').value,
         excel:            excelObj,
+        excelParseado:    _datosExcelParseados,  // V1: datos ya parseados
         tipoPazYSalvo:    radioA.checked ? "checkbox" : "adjunto",
         pazYSalvoPdf:     pazYSalvoObj
       };
@@ -140,6 +222,91 @@
     }
   }
 
+  // ============================================================
+  //  V2: VALIDACIÓN COMPLETA EN FRONTEND (pre-vuelo)
+  //  Mismas reglas que el servidor, excepto IA de Destino.
+  //  Feedback instantáneo sin esperar 15-30 seg del backend.
+  // ============================================================
+
+  function validarExcelEnFrontend(data) {
+    const errores = [];
+    if (!data || data.length < 5) return errores;
+
+    const titulos = data[3] || [];
+    const mapaLlaves = {};
+
+    for (let i = 4; i < data.length; i++) {
+      const fila = data[i];
+      const nF   = i + 1;
+      const inquilino = String(fila[9] || '').trim();
+      if (!inquilino) continue;
+
+      // 1. Campos obligatorios
+      const obligatorios = [1, 2, 4, 5, 6, 9, 10, 11];
+      obligatorios.forEach(idx => {
+        if (!String(fila[idx] || '').trim()) {
+          errores.push({ fila: nF, campo: String(titulos[idx] || 'Col ' + (idx+1)), motivo: 'Dato faltante.' });
+        }
+      });
+
+      // 2. Celular o correo del inquilino
+      const celInq = String(fila[12] || '').trim().replace(/[\s-]/g, '');
+      const corInq = String(fila[13] || '').trim();
+      if (!celInq && !corInq) {
+        errores.push({ fila: nF, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos el Celular o el Correo del Inquilino.' });
+      } else {
+        if (celInq) {
+          const celLimpio = celInq.replace(/^\+?57/, '');
+          if (!/^3\d{9}$/.test(celLimpio)) {
+            errores.push({ fila: nF, campo: 'Celular (INQ)', motivo: 'El celular "' + fila[12] + '" no es válido. Verifique el número.' });
+          }
+        }
+        if (corInq && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(corInq)) {
+          errores.push({ fila: nF, campo: 'Correo (INQ)', motivo: 'El correo "' + corInq + '" no tiene formato válido.' });
+        }
+      }
+
+      // 3. Campos monetarios
+      [{ idx: 6, nombre: 'Canon' }, { idx: 7, nombre: 'Administración' }, { idx: 8, nombre: 'IVA' }].forEach(cm => {
+        const val = String(fila[cm.idx] || '').trim();
+        if (val) {
+          const sinFmt = val.replace(/[$.,\s]/g, '');
+          if (!/^\d+$/.test(sinFmt)) {
+            errores.push({ fila: nF, campo: cm.nombre, motivo: '"' + val + '" contiene letras o símbolos no permitidos.' });
+          }
+        }
+      });
+
+      // 4. Codeudores — contacto requerido
+      const coaSlots = [
+        { nombre: 14, cel: 17, correo: 18, label: 'COA 1' },
+        { nombre: 19, cel: 22, correo: 23, label: 'COA 2' },
+        { nombre: 24, cel: 27, correo: 28, label: 'COA 3' },
+        { nombre: 29, cel: 32, correo: 33, label: 'COA 4' },
+        { nombre: 34, cel: 37, correo: 38, label: 'COA 5' }
+      ];
+      coaSlots.forEach(coa => {
+        const nombreCoa = String(fila[coa.nombre] || '').trim();
+        if (!nombreCoa) return;
+        const celCoa = String(fila[coa.cel] || '').trim().replace(/[\s-]/g, '');
+        const corCoa = String(fila[coa.correo] || '').trim();
+        if (!celCoa && !corCoa) {
+          errores.push({ fila: nF, campo: 'Celular / Correo (' + coa.label + ')', motivo: 'Debe diligenciar al menos el Celular o Correo de ' + coa.label + '.' });
+        }
+      });
+
+      // 5. Duplicados verticales
+      const llave = (String(fila[11] || '').trim() + '|' + String(fila[5] || '').trim()).toUpperCase();
+      if (mapaLlaves[llave]) {
+        errores.push({ fila: nF, campo: 'DUPLICADO', motivo: 'Contrato repetido — misma identificación y dirección (ver fila ' + mapaLlaves[llave] + ').' });
+      } else {
+        mapaLlaves[llave] = nF;
+      }
+    }
+
+    return errores;
+  }
+
 
   // ============================================================
   //  MANEJO DE RESPUESTA DEL SERVIDOR
@@ -147,6 +314,7 @@
 
   function alRecibirRespuesta(res) {
     resetBoton();
+    detenerCronometro();
     const panelErrores = document.getElementById('errorPanel');
 
     if (res.status === "ERROR") {
@@ -162,6 +330,9 @@
     } else if (res.status === "OK" || res.status === "success") {
       if (panelErrores) panelErrores.style.display = 'none';
       localStorage.removeItem('borradorLibertador');
+
+      // 10: Confetti de celebración
+      lanzarConfetti();
 
       Swal.fire({
         title: '¡Lote radicado con éxito!',
@@ -191,6 +362,7 @@
 
   function alDarErrorGrave(error) {
     resetBoton();
+    detenerCronometro();
     Swal.fire('No pudimos procesar tu solicitud', 'Ocurrió un problema de conexión. Por favor intenta de nuevo en unos minutos. Si el problema persiste, contacta al equipo de inducciones.', 'error');
   }
 
@@ -250,6 +422,38 @@
     if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-bolt"></i> Revisar y enviar a radicación'; }
   }
 
+  // ============================================================
+  //  ENFOQUE Y RESALTADO DE CAMPO FALTANTE
+  //  Al cerrar el Swal, hace scroll suave al campo y lo marca
+  //  con un borde rojo + fondo rosado por 3 segundos.
+  // ============================================================
+
+  function enfocarCampoFaltante(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    // Scroll suave al elemento
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Resaltar con borde rojo y fondo rosado
+    el.style.transition = 'border-color 0.3s, background-color 0.3s, box-shadow 0.3s';
+    el.style.borderColor = '#BD0F14';
+    el.style.backgroundColor = '#FFF5F5';
+    el.style.boxShadow = '0 0 0 4px rgba(189, 15, 20, 0.15)';
+
+    // Si es un input/textarea, darle focus
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+      el.focus();
+    }
+
+    // Quitar el resaltado después de 3 segundos
+    setTimeout(function() {
+      el.style.borderColor = '';
+      el.style.backgroundColor = '';
+      el.style.boxShadow = '';
+    }, 3000);
+  }
+
   function resetLabels() {
     const lblExcel = document.getElementById('labelExcel');
     const subLbl   = document.getElementById('subLabelExcel');
@@ -300,6 +504,9 @@
       labelA.style.background   = 'white';
       zonaPdf.style.display     = 'block';
     }
+    // 4: Actualizar stepper + U3: guardar borrador
+    actualizarStepper();
+    guardarBorrador();
   }
 
   function resetDropPdf() {
@@ -422,8 +629,8 @@ const PASOS_PROGRESO = [
   { pct: 0,   titulo: "Preparando tu radicación",   sub: "Un momento mientras alistamos todo..." },
   { pct: 15,  titulo: "Leyendo la planilla",         sub: "Cargando los documentos adjuntos..." },
   { pct: 30,  titulo: "Documentos recibidos",         sub: "Preparando la información del lote..." },
-  { pct: 50,  titulo: "Revisando contratos",          sub: "Validando datos de arrendatarios, codeudores y campos obligatorios..." },
-  { pct: 85,  titulo: "Casi listo",                   sub: "Guardando archivos y enviando confirmación por correo..." },
+  { pct: 50,  titulo: "Validando con inteligencia artificial", sub: "Revisando campos de destino con IA generativa..." },
+  { pct: 85,  titulo: "Casi listo",                   sub: "Guardando archivos y registrando el lote..." },
   { pct: 100, titulo: "Radicación completada",        sub: "Tu lote fue procesado exitosamente." }
 ];
 
@@ -432,18 +639,89 @@ function avanzarProgreso(paso) {
   const bar  = document.getElementById('progressBarFill');
   const tit  = document.getElementById('loadingTitle');
   const sub  = document.getElementById('loadingSub');
+  const eta  = document.getElementById('loadingEta');
   if (bar) bar.style.width = info.pct + '%';
   if (tit) tit.innerText   = info.titulo;
   if (sub) sub.innerText   = info.sub;
 }
 
+// U4: Calcular tiempo estimado basado en contratos
+function calcularTiempoEstimado() {
+  if (!_datosExcelParseados) return '';
+  let count = 0;
+  for (let i = 4; i < _datosExcelParseados.length; i++) {
+    if (_datosExcelParseados[i] && String(_datosExcelParseados[i][9] || '').trim()) count++;
+  }
+  // Aproximación: 2 seg base + 1 seg por cada 5 contratos (por la validación IA)
+  const segs = Math.max(5, Math.round(2 + count * 0.2));
+  return segs <= 10 ? '~10 segundos' : '~' + segs + ' segundos';
+}
+
+// Temporizador regresivo en el modal de carga
+var _cronometroInterval = null;
+var _cronometroSegsRestantes = 0;
+
+function iniciarCronometro() {
+  const el = document.getElementById('loadingCronometro');
+  if (!el) return;
+
+  // Calcular segundos estimados
+  // Realidad medida: ~14s para 3 contratos, la IA de destino toma ~10s fijos
+  var segsEstimados = 15;
+  if (_datosExcelParseados) {
+    let count = 0;
+    for (let i = 4; i < _datosExcelParseados.length; i++) {
+      if (_datosExcelParseados[i] && String(_datosExcelParseados[i][9] || '').trim()) count++;
+    }
+    // Base: 12s (IA + Drive + escritura) + 1s por cada 10 contratos
+    segsEstimados = Math.max(15, Math.round(12 + count * 0.1));
+  }
+
+  _cronometroSegsRestantes = segsEstimados;
+  el.textContent = _cronometroSegsRestantes + 's';
+  el.style.display = 'inline-block';
+
+  if (_cronometroInterval) clearInterval(_cronometroInterval);
+  _cronometroInterval = setInterval(function() {
+    _cronometroSegsRestantes--;
+    if (_cronometroSegsRestantes <= 0) {
+      el.textContent = 'Casi listo...';
+      clearInterval(_cronometroInterval);
+      _cronometroInterval = null;
+    } else {
+      el.textContent = _cronometroSegsRestantes + 's';
+    }
+  }, 1000);
+}
+
+function detenerCronometro() {
+  if (_cronometroInterval) {
+    clearInterval(_cronometroInterval);
+    _cronometroInterval = null;
+  }
+  const el = document.getElementById('loadingCronometro');
+  if (el) el.style.display = 'none';
+}
+
+// U3: Borrador mejorado — guarda también opción de paz y salvo
 function guardarBorrador() {
   const dataLocal = {
     poliza: document.getElementById('poliza').value,
     tasa: document.getElementById('tasaNegociacion').value,
-    observaciones: document.getElementById('observaciones').value
+    observaciones: document.getElementById('observaciones').value,
+    pazYSalvo: document.getElementById('radioA').checked ? 'A' :
+               document.getElementById('radioB').checked ? 'B' : null,
+    guardadoEn: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
   };
   localStorage.setItem('borradorLibertador', JSON.stringify(dataLocal));
+
+  // Indicador visual de borrador guardado
+  const indicator = document.getElementById('borradorIndicator');
+  if (indicator) {
+    indicator.textContent = '✓ Borrador guardado ' + dataLocal.guardadoEn;
+    indicator.style.opacity = '1';
+    setTimeout(() => { indicator.style.opacity = '0.6'; }, 2000);
+  }
 }
 
 function restaurarBorrador() {
@@ -453,7 +731,239 @@ function restaurarBorrador() {
     if(data.poliza) document.getElementById('poliza').value = data.poliza;
     if(data.tasa) document.getElementById('tasaNegociacion').value = data.tasa;
     if(data.observaciones) document.getElementById('observaciones').value = data.observaciones;
+    if(data.pazYSalvo === 'A') seleccionarOpcion('A');
+    if(data.pazYSalvo === 'B') seleccionarOpcion('B');
   }
+
+  // U1: Cargar historial de lotes del usuario
+  cargarHistorialLotes();
+
+  // 1+2: Cargar saludo personalizado y resumen semanal
+  cargarSaludo();
+
+  // 4: Inicializar stepper
+  actualizarStepper();
+}
+
+// ============================================================
+//  U1: HISTORIAL DE LOTES RECIENTES
+// ============================================================
+
+function cargarHistorialLotes() {
+  google.script.run
+    .withSuccessHandler(mostrarHistorialLotes)
+    .withFailureHandler(function() { /* silencioso si falla */ })
+    .obtenerLotesDelUsuario();
+}
+
+function mostrarHistorialLotes(lotes) {
+  const container = document.getElementById('historialContainer');
+  if (!container || !lotes || lotes.length === 0) {
+    if (container) container.style.display = 'none';
+    return;
+  }
+
+  const cards = lotes.map(l => {
+    const badgeClass = getLoteBadgeClass(l.estados.split(',')[0].trim());
+    return `
+      <div class="historial-card" onclick="document.getElementById('inputConsultaLote').value='${l.idLote}'; consultarLoteDesdeUI();">
+        <div class="historial-card__info">
+          <span class="historial-card__id">${l.idLote}</span>
+          <span class="historial-card__meta">${l.fecha} · ${l.contratos} contrato(s)</span>
+        </div>
+        <span class="lote-badge ${badgeClass}" style="font-size:10px;">${l.estados.split(',')[0].trim()}</span>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="section-title" style="margin-bottom:12px;">
+      <i class="fas fa-clock-rotate-left"></i>
+      <span>Mis radicaciones recientes</span>
+    </div>
+    ${cards}`;
+  container.style.display = 'block';
+}
+
+function limpiarFormulario() {
+  document.getElementById('formInducciones').reset();
+  resetLabels();
+  localStorage.removeItem('borradorLibertador');
+  _datosExcelParseados = null;
+  _metadatosExcel = null;
+  const indicator = document.getElementById('borradorIndicator');
+  if (indicator) indicator.textContent = '';
+  const errorPanel = document.getElementById('errorPanel');
+  if (errorPanel) errorPanel.style.display = 'none';
+  actualizarStepper();
+}
+
+// ============================================================
+//  1: SALUDO PERSONALIZADO + 2: RESUMEN SEMANAL
+// ============================================================
+
+function cargarSaludo() {
+  const container = document.getElementById('saludoContainer');
+  const textoEl   = document.getElementById('saludoTexto');
+  const resumenEl = document.getElementById('resumenSemanal');
+  if (!container || !textoEl) return;
+
+  // Saludo inmediato basado en hora
+  const hora = new Date().getHours();
+  let saludo = 'Buenas noches';
+  if (hora >= 5 && hora < 12) saludo = 'Buenos días';
+  else if (hora >= 12 && hora < 18) saludo = 'Buenas tardes';
+
+  textoEl.textContent = saludo;
+  container.style.display = 'block';
+
+  // Obtener nombre desde el email (instantáneo, no lee hojas)
+  google.script.run
+    .withSuccessHandler(function(nombre) {
+      if (nombre) {
+        textoEl.textContent = saludo + ', ' + nombre;
+        const badge = document.getElementById('userBadge');
+        if (badge) badge.innerHTML = '<i class="fas fa-user-circle"></i> ' + nombre;
+      }
+    })
+    .obtenerNombreUsuarioActual();
+
+  // Resumen semanal aparte (puede tardar, no bloquea el saludo)
+  if (resumenEl) resumenEl.textContent = '';
+  google.script.run
+    .withSuccessHandler(function(resumen) {
+      if (!resumen || !resumenEl) return;
+      const r = resumen;
+      const partes = [];
+      if (r.radicados > 0) partes.push(r.radicados + ' lote(s) radicado(s) esta semana');
+      if (r.enAnalisis > 0) partes.push(r.enAnalisis + ' en análisis');
+      if (r.pendientePS > 0) partes.push(r.pendientePS + ' pendiente(s) de paz y salvo');
+      if (r.terminados > 0) partes.push(r.terminados + ' terminado(s)');
+      resumenEl.textContent = partes.length > 0
+        ? partes.join(' · ')
+        : '';
+    })
+    .withFailureHandler(function() {})
+    .obtenerResumenSemanal();
+}
+
+// ============================================================
+//  4: STEPPER VISUAL DE PROGRESO DEL FORMULARIO
+// ============================================================
+
+function actualizarStepper() {
+  const poliza  = document.getElementById('poliza').value.trim();
+  const tasa    = document.getElementById('tasaNegociacion').value.trim();
+  const radioA  = document.getElementById('radioA');
+  const radioB  = document.getElementById('radioB');
+  const excel   = document.getElementById('fileExcel').files[0] || _datosExcelParseados;
+
+  const paso1 = poliza && tasa;
+  const paso2 = radioA.checked || radioB.checked;
+  const paso3 = !!excel;
+  const paso4 = paso1 && paso2 && paso3;
+
+  setStepState('step1', 'line1', paso1 ? 'done' : (true ? 'active' : ''));
+  setStepState('step2', 'line2', paso2 ? 'done' : (paso1 ? 'active' : ''));
+  setStepState('step3', 'line3', paso3 ? 'done' : (paso1 && paso2 ? 'active' : ''));
+  setStepState('step4', null, paso4 ? 'active' : '');
+}
+
+function setStepState(stepId, lineId, state) {
+  const step = document.getElementById(stepId);
+  const line = lineId ? document.getElementById(lineId) : null;
+  if (!step) return;
+
+  step.classList.remove('active', 'done');
+  if (line) line.classList.remove('done');
+
+  if (state === 'done') {
+    step.classList.add('done');
+    if (line) line.classList.add('done');
+  } else if (state === 'active') {
+    step.classList.add('active');
+  }
+}
+
+// Observar cambios en el formulario para actualizar stepper
+document.addEventListener('DOMContentLoaded', function() {
+  const campos = ['poliza', 'tasaNegociacion', 'radioA', 'radioB'];
+  campos.forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', actualizarStepper);
+    if (el) el.addEventListener('input', actualizarStepper);
+  });
+});
+
+
+// ============================================================
+//  10: CONFETTI DE CELEBRACIÓN AL ÉXITO
+//  Implementación ligera sin librería externa (canvas puro)
+// ============================================================
+
+function lanzarConfetti() {
+  const canvas = document.getElementById('confettiCanvas');
+  if (!canvas) return;
+
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const colores = ['#BD0F14', '#253150', '#16A34A', '#F59E0B', '#3B82F6', '#8B5CF6'];
+  const particulas = [];
+  const TOTAL = 120;
+
+  for (let i = 0; i < TOTAL; i++) {
+    particulas.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 200,
+      y: canvas.height / 2 - 100,
+      vx: (Math.random() - 0.5) * 12,
+      vy: -(Math.random() * 10 + 4),
+      w: Math.random() * 8 + 4,
+      h: Math.random() * 4 + 2,
+      color: colores[Math.floor(Math.random() * colores.length)],
+      rotation: Math.random() * 360,
+      rotSpeed: (Math.random() - 0.5) * 10,
+      gravity: 0.25 + Math.random() * 0.1,
+      opacity: 1
+    });
+  }
+
+  let frame = 0;
+  const maxFrames = 150;
+
+  function animar() {
+    frame++;
+    if (frame > maxFrames) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    particulas.forEach(function(p) {
+      p.x += p.vx;
+      p.vy += p.gravity;
+      p.y += p.vy;
+      p.vx *= 0.99;
+      p.rotation += p.rotSpeed;
+
+      if (frame > maxFrames - 30) {
+        p.opacity = Math.max(0, p.opacity - 0.03);
+      }
+
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation * Math.PI / 180);
+      ctx.globalAlpha = p.opacity;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    });
+
+    requestAnimationFrame(animar);
+  }
+
+  animar();
 }
 
 </script>

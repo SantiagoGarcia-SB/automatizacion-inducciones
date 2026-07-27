@@ -21,11 +21,7 @@ function sincronizarLoteAutomatico() {
   try {
 
   // ── 1. CONEXIONES ──────────────────────────────────────────────────────────
-  var libroOrigen = SpreadsheetApp.getActiveSpreadsheet();
-  if (!libroOrigen) {
-    Logger.log("Error: Ejecuta el script desde Extensiones > Apps Script del Sheet de origen.");
-    return;
-  }
+  var libroOrigen = SpreadsheetApp.openById(ID_HOJA_CONTROL);
 
   var hojaRadicacion = libroOrigen.getSheetByName("Control_General");
   var libroDestino   = SpreadsheetApp.openById(ID_ARCHIVO_ANALISIS);
@@ -129,6 +125,10 @@ function sincronizarLoteAutomatico() {
   }
 
   // ── 7. PROCESAR CADA LOTE EN ORDEN ────────────────────────────────────────
+  var filasNuevasBuffer   = []; // { filaFisica, datosParaEscribir[] }
+  var actualizacionesBuf  = []; // { filaFisica, col, valor }
+  var cambiosEstadoOrigen = []; // { fila, valor }
+
   for (var l = 0; l < ordenDeLotes.length; l++) {
     var idLote           = ordenDeLotes[l];
     var registrosDelLote = lotes[idLote];
@@ -148,12 +148,35 @@ function sincronizarLoteAutomatico() {
       if (uuidYaExiste) {
         // ── CASO A: EL REGISTRO YA EXISTE EN DESTINO → ACTUALIZAR ───────────
         var indiceArr = mapaUUIDDestino[uuidOrigen];
-        actualizarFila(hojaAnalisis, datosAnalisis, filaOrigen, indiceArr, indicesRad, indicesAnl, MAPEO_COLUMNAS);
+        for (var colRad in MAPEO_COLUMNAS) {
+          var colAnl = MAPEO_COLUMNAS[colRad];
+          if (indicesRad[colRad] !== undefined && indicesAnl[colAnl] !== undefined) {
+            var valorNuevo  = filaOrigen[indicesRad[colRad]];
+            var valorActual = datosAnalisis[indiceArr][indicesAnl[colAnl]];
+            if (valorActual !== valorNuevo) {
+              actualizacionesBuf.push({ fila: indiceArr + 1, col: indicesAnl[colAnl] + 1, valor: valorNuevo });
+            }
+          }
+        }
         Logger.log("  [ACTUALIZADO] UUID: " + uuidOrigen + " | Estado: " + estadoFila);
 
       } else {
         // ── CASO B: REGISTRO NUEVO → INSERTAR CONSECUTIVO AL LOTE ───────────
-        escribirFilaNueva(hojaAnalisis, filaOrigen, filaParaNuevos, indicesRad, indicesAnl, MAPEO_COLUMNAS);
+        var nuevaFila = [];
+        var maxCol = Object.keys(indicesAnl).reduce(function(max, k) { return Math.max(max, indicesAnl[k]); }, 0) + 1;
+        for (var c = 0; c < maxCol; c++) nuevaFila.push("");
+
+        for (var colRad2 in MAPEO_COLUMNAS) {
+          var colAnl2 = MAPEO_COLUMNAS[colRad2];
+          if (indicesRad[colRad2] !== undefined && indicesAnl[colAnl2] !== undefined) {
+            var valor = filaOrigen[indicesRad[colRad2]];
+            if (valor !== "" && valor !== null && valor !== undefined) {
+              nuevaFila[indicesAnl[colAnl2]] = valor;
+            }
+          }
+        }
+
+        filasNuevasBuffer.push({ filaFisica: filaParaNuevos, datos: nuevaFila });
         mapaUUIDDestino[uuidOrigen] = filaParaNuevos - 1;
         Logger.log("  [INSERTADO] UUID: " + uuidOrigen + " | Estado: " + estadoFila + " → fila " + filaParaNuevos);
         filaParaNuevos++;
@@ -161,16 +184,39 @@ function sincronizarLoteAutomatico() {
 
       // ── CAMBIO DE ESTADO EN ORIGEN: solo si el registro es RADICADO ───────
       if (estadoFila === "RADICADO") {
-        hojaRadicacion
-          .getRange(indiceOriginal + 1, indicesRad["Estado"] + 1)
-          .setValue("PENDIENTE ASIGNAR");
+        cambiosEstadoOrigen.push({ fila: indiceOriginal + 1, valor: "PENDIENTE ASIGNAR" });
         Logger.log("  [ESTADO] Fila " + (indiceOriginal + 1) + " → PENDIENTE ASIGNAR");
       }
-      // ERROR EN TERCEROS: no se toca el estado en origen, queda en espera
     }
   }
 
-  Logger.log("✅ Sincronización completada.");
+  // ── 8. ESCRITURA EN LOTE (batch) — DESTINO ────────────────────────────────
+  // Inserciones nuevas: se escriben todas de una vez si son consecutivas
+  if (filasNuevasBuffer.length > 0) {
+    var primeraFilaNueva = filasNuevasBuffer[0].filaFisica;
+    var matrizNuevas = filasNuevasBuffer.map(function(fb) { return fb.datos; });
+    var numCols = matrizNuevas[0].length;
+    hojaAnalisis.getRange(primeraFilaNueva, 1, matrizNuevas.length, numCols).setValues(matrizNuevas);
+  }
+
+  // Actualizaciones individuales (solo celdas que cambiaron)
+  // Agrupamos por fila para minimizar llamadas
+  if (actualizacionesBuf.length > 0) {
+    actualizacionesBuf.forEach(function(upd) {
+      hojaAnalisis.getRange(upd.fila, upd.col).setValue(upd.valor);
+    });
+  }
+
+  // ── 9. ESCRITURA EN LOTE — ORIGEN (cambios de estado) ─────────────────────
+  if (cambiosEstadoOrigen.length > 0) {
+    cambiosEstadoOrigen.forEach(function(ce) {
+      hojaRadicacion.getRange(ce.fila, indicesRad["Estado"] + 1).setValue(ce.valor);
+    });
+  }
+
+  Logger.log("✅ Sincronización completada. Nuevos: " + filasNuevasBuffer.length +
+             " | Actualizados: " + actualizacionesBuf.length +
+             " | Estados cambiados: " + cambiosEstadoOrigen.length);
 
   } finally {
     lock.releaseLock();
@@ -181,6 +227,9 @@ function sincronizarLoteAutomatico() {
 // ── FUNCIONES AUXILIARES ───────────────────────────────────────────────────────
 
 /**
+ * @deprecated Reemplazada por escritura batch en el paso 8.
+ * Se conserva como referencia; puede eliminarse en el futuro.
+ *
  * Escribe una fila nueva celda por celda en las columnas mapeadas.
  * Omite valores vacíos para no romper fórmulas VSTACK/LAMBDA del destino.
  */
@@ -197,6 +246,9 @@ function escribirFilaNueva(hoja, filaOrigen, filaFisica, indicesRad, indicesAnl,
 }
 
 /**
+ * @deprecated Reemplazada por escritura batch en el paso 8.
+ * Se conserva como referencia; puede eliminarse en el futuro.
+ *
  * Actualiza solo las celdas que cambiaron en una fila ya existente.
  */
 function actualizarFila(hoja, datosDestino, filaOrigen, indiceArr, indicesRad, indicesAnl, mapeo) {
@@ -324,6 +376,7 @@ function sincronizarEstadoDesdeAnalisis() {
 
   // ── 5. ACTUALIZAR ESTADOS EN Control_General ───────────────────────────────
   var actualizaciones = 0;
+  var cambiosPorLote = {}; // A4: Agrupar cambios por lote para notificar al comercial
 
   for (var j = 1; j < datosControl.length; j++) {
     var solicitudControl = String(datosControl[j][colSolicitudControl] || "").trim();
@@ -339,7 +392,24 @@ function sincronizarEstadoDesdeAnalisis() {
       actualizaciones++;
       Logger.log("  [ESTADO] Fila " + (j + 1) + " | Solicitud: " + solicitudControl +
                  " | " + estadoActual + " → " + nuevoEstado);
+
+      // A4: Recopilar cambios para notificar
+      var idLoteControl = String(datosControl[j][0] || "").trim();
+      if (idLoteControl && (nuevoEstado === "EN ANÁLISIS" || nuevoEstado === "TERMINADO")) {
+        if (!cambiosPorLote[idLoteControl]) {
+          cambiosPorLote[idLoteControl] = { nuevoEstado: nuevoEstado, estadoAnterior: estadoActual };
+        }
+        // Priorizar TERMINADO sobre EN ANÁLISIS si el lote tiene ambos
+        if (nuevoEstado === "TERMINADO") {
+          cambiosPorLote[idLoteControl].nuevoEstado = "TERMINADO";
+        }
+      }
     }
+  }
+
+  // ── A4: NOTIFICAR AL COMERCIAL DE CAMBIOS DE ESTADO ────────────────────────
+  if (actualizaciones > 0) {
+    _notificarCambiosEstadoComerciales_(cambiosPorLote);
   }
 
   Logger.log("✅ Sincronización de estados completada. Actualizaciones: " + actualizaciones);
@@ -347,4 +417,115 @@ function sincronizarEstadoDesdeAnalisis() {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// A4: NOTIFICAR CAMBIOS DE ESTADO AL COMERCIAL
+//
+// Cuando un lote pasa a "EN ANÁLISIS" o "TERMINADO", envía un correo breve
+// al comercial que lo radicó. Se usa CacheService para no repetir la misma
+// notificación si el trigger corre varias veces seguidas.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
+  if (!cambiosPorLote || Object.keys(cambiosPorLote).length === 0) return;
+
+  var cache = CacheService.getScriptCache();
+
+  // Buscar el email del comercial en Hoja_Control
+  var ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
+  var hojaHC = ss.getSheetByName("Hoja_Control");
+  if (!hojaHC) return;
+
+  var dataHC = hojaHC.getDataRange().getValues();
+  var mapaLoteEmail = {};
+  for (var i = 1; i < dataHC.length; i++) {
+    var idLoteHC = String(dataHC[i][5] || "").trim();
+    var emailHC  = String(dataHC[i][1] || "").trim();
+    if (idLoteHC && emailHC.includes("@")) {
+      mapaLoteEmail[idLoteHC] = emailHC;
+    }
+  }
+
+  for (var idLote in cambiosPorLote) {
+    var info = cambiosPorLote[idLote];
+    var emailComercial = mapaLoteEmail[idLote];
+    if (!emailComercial) continue;
+
+    // Evitar duplicados con cache (24h)
+    var cacheKey = "notif_estado_" + idLote + "_" + info.nuevoEstado;
+    if (cache.get(cacheKey)) continue;
+    cache.put(cacheKey, "enviado", 86400); // 24 horas
+
+    var nombreComercial = obtenerNombreDeComercial(emailComercial);
+    var icono = info.nuevoEstado === "TERMINADO" ? "✅" : "📋";
+    var colorBarra = info.nuevoEstado === "TERMINADO" ? "#3B6D11" : _C_NAVY;
+    var textoEstado = info.nuevoEstado === "TERMINADO"
+      ? "Análisis finalizado"
+      : "En análisis por el equipo";
+    var descripcion = info.nuevoEstado === "TERMINADO"
+      ? "El an&aacute;lisis de tu lote ha sido completado por el equipo de inducciones. Pronto recibir&aacute;s la comunicaci&oacute;n con los resultados."
+      : "Tu lote fue asignado a un analista y est&aacute; siendo revisado. Te notificaremos cuando haya una actualizaci&oacute;n.";
+
+    var htmlBody = _envolver_([
+      _bloque_cabecera_("Actualizaci&oacute;n de estado"),
+      _bloque_barra_estado_(colorBarra, info.nuevoEstado === "TERMINADO" ? "&#10003;" : "&#128203;", textoEstado),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        descripcion
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "Nuevo estado", valor: info.nuevoEstado, colorVal: colorBarra }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    try {
+      GmailApp.sendEmail(emailComercial, icono + " Tu lote " + idLote + " pasó a " + info.nuevoEstado, "", {
+        htmlBody: htmlBody,
+        bcc: BCC_AUDITORIA,
+        name: "Inducciones · El Libertador SA"
+      });
+      Logger.log("  [A4] Notificación enviada a " + emailComercial + " — Lote " + idLote + " → " + info.nuevoEstado);
+    } catch (e) {
+      Logger.log("  [A4] Error al notificar " + emailComercial + ": " + e.message);
+    }
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CONFIGURACIÓN DE TRIGGERS — Ejecutar UNA VEZ desde el editor
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Crea los triggers de sincronización (si no existen).
+ * - sincronizarLoteAutomatico: cada 10 minutos
+ * - sincronizarEstadoDesdeAnalisis: cada 10 minutos (desfasado)
+ *
+ * Idempotente: borra triggers previos de estas funciones antes de crearlos.
+ */
+function configurarTriggersSincronizacion() {
+  const funciones = ['sincronizarLoteAutomatico', 'sincronizarEstadoDesdeAnalisis'];
+
+  // Limpiar triggers existentes de estas funciones
+  ScriptApp.getProjectTriggers()
+    .filter(t => funciones.includes(t.getHandlerFunction()))
+    .forEach(t => ScriptApp.deleteTrigger(t));
+
+  // sincronizarLoteAutomatico: cada 10 minutos
+  ScriptApp.newTrigger('sincronizarLoteAutomatico')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+
+  // sincronizarEstadoDesdeAnalisis: cada 10 minutos
+  ScriptApp.newTrigger('sincronizarEstadoDesdeAnalisis')
+    .timeBased()
+    .everyMinutes(10)
+    .create();
+
+  Logger.log('Triggers creados: sincronizarLoteAutomatico y sincronizarEstadoDesdeAnalisis (cada 10 min).');
 }
