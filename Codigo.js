@@ -545,13 +545,12 @@ function motorDeAuditoria(formData) {
 
   } catch (e) {
     console.error("Error crítico durante la radicación: ", e);
+    _registrarEvento_("ERROR", "Codigo.js", "Error crítico en motorDeAuditoria", e.toString());
 
-    // SALVAVIDAS 3: Mostramos en pantalla el error técnico exacto en vez del mensaje amigable.
-    const errorReal = e.toString();
-
+    // Mensaje amigable para el usuario (sin exponer detalles técnicos)
     return {
       status: "ERROR",
-      detalles: [{ fila: "SISTEMA", campo: "DEBUG (ERROR REAL)", motivo: errorReal }]
+      detalles: [{ fila: "SISTEMA", campo: "Error de procesamiento", motivo: "No fue posible completar la radicación en este momento. Por favor intenta de nuevo en unos minutos. Si el problema persiste, contacta al equipo de inducciones." }]
     };
 
   } finally {
