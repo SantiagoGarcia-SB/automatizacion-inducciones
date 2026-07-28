@@ -48,24 +48,27 @@ function _normalizarFecha_(valor) {
 }
 
 /**
- * Desglose de "Resultado Final Lote" del día, como badges (reutiliza
- * _badge_estado_generico_ de Notificaciones.js — sirve para cualquier
- * etiqueta con conteo, no solo estados de Control_General).
- * Si no hay resultados hoy, no se muestra el bloque (devuelve "").
+ * Bloque unificado de resultados enviados hoy: muestra el total y el desglose
+ * por categoría en un solo bloque visual cohesivo. Si no hay resultados hoy,
+ * no se muestra el bloque (devuelve "").
  */
-function _bloque_resultados_por_categoria_(porResultado) {
-  const claves = Object.keys(porResultado);
-  if (claves.length === 0) return "";
+function _bloque_resultados_enviados_(resultados) {
+  if (!resultados || resultados.lotes === 0) return "";
 
-  const badges = claves.sort().map(k => _badge_estado_generico_(k, porResultado[k])).join("");
+  const claves = Object.keys(resultados.porResultado);
+  const badges = claves.sort().map(k => _badge_estado_generico_(k, resultados.porResultado[k])).join("");
 
   return `
   <tr>
     <td style="padding:20px 28px 0;">
       <div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>
       <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
-                  color:#94a3b8;margin-bottom:8px;font-family:Arial,sans-serif;">
-        Resultado final de lotes emitidos hoy
+                  color:#94a3b8;margin-bottom:6px;font-family:Arial,sans-serif;">
+        Resultados enviados hoy
+      </div>
+      <div style="font-size:22px;font-weight:900;color:#3B6D11;font-family:Arial,sans-serif;
+                  margin-bottom:10px;">
+        ${resultados.lotes} <span style="font-size:12px;font-weight:400;color:#94a3b8;">lotes</span>
       </div>
       <div>${badges}</div>
     </td>
@@ -296,11 +299,7 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
       { label: "Pendientes error terceros",           valor: String(m.pendientesErroresTerceros),  colorVal: _C_ROJO   }
     ]),
 
-    _bloque_chips_([
-      { label: "Resultados enviados hoy",  valor: String(m.resultadosEnviadosHoy.lotes), colorVal: "#3B6D11" }
-    ]),
-
-    _bloque_resultados_por_categoria_(m.resultadosEnviadosHoy.porResultado),
+    _bloque_resultados_enviados_(m.resultadosEnviadosHoy),
 
     _bloque_tabla_seguimiento_(m.lotesActivos),
 
