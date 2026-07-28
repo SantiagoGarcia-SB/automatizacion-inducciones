@@ -740,12 +740,21 @@ function _obtenerDatosCorreos_() {
 function _correoANombre(correo) {
   if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
   const partes = correo.split("@")[0].split(".");
-  // Solo el primer nombre, capitalizado
+  // Solo el primer nombre, capitalizado (para saludos en correos)
   return partes[0].charAt(0).toUpperCase() + partes[0].slice(1).toLowerCase();
+}
+
+function _correoANombreCompleto(correo) {
+  if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
+  return correo.split("@")[0].split(".").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
 }
 
 function obtenerNombreDeComercial(email) {
   return _correoANombre(email);
+}
+
+function obtenerNombreCompletoDeComercial(email) {
+  return _correoANombreCompleto(email);
 }
 
 function obtenerCorreoDeDirector(emailComercial) {
