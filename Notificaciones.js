@@ -718,6 +718,159 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
 
 // ============================================================
+//  EMAIL 5 — RECORDATORIO DIARIO DE ERROR EN TERCEROS
+// ============================================================
+
+/**
+ * Revisa diariamente los lotes en estado "ERROR EN TERCEROS" y envía
+ * recordatorio al comercial (CC líderes + director) para que corrija
+ * los datos de terceros. Mismo escalamiento que paz y salvo (3/7/14/21 días).
+ * Usa columna BI (61) como fecha de último aviso.
+ */
+function enviarRecordatoriosErrorTercerosDiario() {
+
+  const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
+  const sheetCG = ss.getSheetByName("Control_General");
+  const sheetHC = ss.getSheetByName("Hoja_Control");
+
+  if (!sheetCG || !sheetHC) {
+    console.error("No se encontraron las hojas necesarias.");
+    _registrarEvento_("ERROR", "Notificaciones.js", "enviarRecordatoriosErrorTercerosDiario: hojas no encontradas");
+    return;
+  }
+
+  // 1. Mapa ID Lote → Email del comercial (Hoja_Control col F → col B)
+  const dataHC = sheetHC.getDataRange().getValues();
+  const mapaEmailsLote = {};
+  for (let i = 1; i < dataHC.length; i++) {
+    const emailHC = String(dataHC[i][1]).trim();
+    const idLoteHC = String(dataHC[i][5]).trim();
+    if (idLoteHC) mapaEmailsLote[idLoteHC] = emailHC;
+  }
+
+  // 2. Leer Control_General — filtrar ERROR EN TERCEROS
+  const ultimaFilaCG = sheetCG.getLastRow();
+  const dataCG = sheetCG.getRange(1, 1, ultimaFilaCG, 61).getValues();
+
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const lotesParaAvisar = {};
+
+  for (let i = 1; i < dataCG.length; i++) {
+    const idLote = String(dataCG[i][0]).trim();
+    const estado = String(dataCG[i][9]).trim().toUpperCase();
+    const fIngreso = dataCG[i][2];
+    const fAviso = dataCG[i][60]; // Columna BI
+
+    if (!idLote || estado !== "ERROR EN TERCEROS") continue;
+
+    if (!lotesParaAvisar[idLote]) {
+      let fechaRef = (fAviso instanceof Date && !isNaN(fAviso)) ? fAviso : fIngreso;
+      if (!(fechaRef instanceof Date) && typeof fechaRef === 'string') {
+        const p = fechaRef.split(/[/ -]/);
+        if (p.length >= 3) fechaRef = new Date(p[2], p[1] - 1, p[0]);
+      }
+
+      lotesParaAvisar[idLote] = {
+        timestamp: (fechaRef instanceof Date && !isNaN(fechaRef)) ? new Date(fechaRef).setHours(0,0,0,0) : null,
+        filas: []
+      };
+    }
+    lotesParaAvisar[idLote].filas.push(i + 1);
+  }
+
+  // 3. Procesar y enviar
+  const lotesIds = Object.keys(lotesParaAvisar);
+
+  if (!_verificarCuotaEmail_(lotesIds.length)) {
+    _registrarEvento_("WARN", "Notificaciones.js", "Recordatorios error terceros no enviados: cuota insuficiente", "Lotes pendientes: " + lotesIds.length);
+    return;
+  }
+
+  for (const idLote in lotesParaAvisar) {
+    const lote = lotesParaAvisar[idLote];
+    if (!lote.timestamp) continue;
+
+    const diffDias = Math.floor((hoy.getTime() - lote.timestamp) / (1000 * 60 * 60 * 24));
+
+    if (diffDias >= 3) {
+      let nivelEscalamiento = "recordatorio";
+      let asuntoEmoji = "🔔";
+      let mensajeExtra = "";
+
+      if (diffDias >= 21) {
+        nivelEscalamiento = "critico";
+        asuntoEmoji = "🚨";
+        mensajeExtra = `<br><br><strong style="color:#BD0F14;">⚠️ ALERTA CR&Iacute;TICA:</strong> Este lote lleva m&aacute;s de 21 d&iacute;as con error en terceros sin corregir. Se requiere acci&oacute;n inmediata para evitar el cierre del tr&aacute;mite.`;
+      } else if (diffDias >= 14) {
+        nivelEscalamiento = "urgente";
+        asuntoEmoji = "⚠️";
+        mensajeExtra = `<br><br><strong style="color:#E65100;">Atenci&oacute;n:</strong> Este lote lleva m&aacute;s de 14 d&iacute;as sin correcci&oacute;n. Por favor priorizar la actualizaci&oacute;n de los datos.`;
+      } else if (diffDias >= 7) {
+        nivelEscalamiento = "elevado";
+        asuntoEmoji = "📌";
+        mensajeExtra = `<br><br><strong style="color:#253150;">Nota:</strong> Este lote supera los 7 d&iacute;as sin correcci&oacute;n. El equipo de inducciones est&aacute; monitoreando.`;
+      }
+
+      const emailReal = mapaEmailsLote[idLote];
+
+      if (!emailReal || !emailReal.includes("@")) {
+        console.warn(`⚠️ Lote ${idLote} omitido (error terceros): No se encontró email real en Hoja_Control.`);
+        continue;
+      }
+
+      const nombreComercial = _correoANombre(emailReal);
+      const correoDirector = obtenerCorreoDeDirector(emailReal);
+      const correoBackup   = obtenerCorreoDeBackup(emailReal);
+
+      const ccsBase = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@"));
+      const ccs = ccsBase.join(",");
+
+      const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
+
+      const htmlBody = _envolver_([
+        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci&oacute;n urgente" : "Recordatorio"),
+        _bloque_barra_estado_(barraColor, "&#9888;", `Error en terceros hace ${diffDias} d&iacute;as`),
+        _bloque_cuerpo_inicio_(
+          `Hola, ${nombreComercial}`,
+          `El lote <strong>${idLote}</strong> presenta errores en los datos de terceros que impiden continuar con el proceso de inducci&oacute;n. La operaci&oacute;n ya solicit&oacute; la correcci&oacute;n correspondiente.${mensajeExtra}`
+        ),
+        _bloque_chips_([
+          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+          { label: "D&iacute;as pendiente", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
+        ]),
+        _bloque_nota_(
+          `<strong style="color:#253150;">Acci&oacute;n requerida:</strong>
+           Verifica y corrige los datos de terceros solicitados por el equipo de inducciones.
+           Una vez corregidos, responde a este correo usando <strong>"Responder a todos"</strong>
+           para que la operaci&oacute;n pueda continuar con el tr&aacute;mite.`
+        ),
+        _bloque_pie_()
+      ].join(""));
+
+      try {
+        GmailApp.sendEmail(emailReal, `${asuntoEmoji} Error en terceros ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'pendiente de corrección'} · Lote ${idLote}`, "", {
+          htmlBody: htmlBody,
+          cc: ccs,
+          bcc: BCC_AUDITORIA,
+          name: "Inducciones · El Libertador SA"
+        });
+
+        // Marcamos fecha de aviso en BI para que el conteo reinicie
+        lote.filas.forEach(f => sheetCG.getRange(f, 61).setValue(new Date()));
+
+        console.log(`✅ Recordatorio error terceros enviado a ${emailReal} para lote ${idLote}`);
+        _registrarEvento_("INFO", "Notificaciones.js", "Recordatorio error terceros enviado", "Lote: " + idLote + " | Destino: " + emailReal);
+      } catch (e) {
+        console.error(`❌ Error en lote ${idLote} (error terceros): ${e.message}`);
+        _registrarEvento_("ERROR", "Notificaciones.js", "Error al enviar recordatorio error terceros", "Lote: " + idLote + " | Error: " + e.message);
+      }
+    }
+  }
+}
+
+
+// ============================================================
 //  FUNCIONES AUXILIARES
 // ============================================================
 
@@ -898,7 +1051,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
  * Idempotente: borra triggers previos de estas funciones antes de crearlos.
  */
 function configurarTriggersNotificaciones() {
-  const funciones = ['enviarCorreoPazYSalvo', 'enviarRecordatoriosPazYSalvoDiario'];
+  const funciones = ['enviarCorreoPazYSalvo', 'enviarRecordatoriosPazYSalvoDiario', 'enviarRecordatoriosErrorTercerosDiario'];
 
   // Limpiar triggers existentes de estas funciones
   ScriptApp.getProjectTriggers()
@@ -919,5 +1072,13 @@ function configurarTriggersNotificaciones() {
     .nearMinute(0)
     .create();
 
-  Logger.log('Triggers creados: enviarCorreoPazYSalvo (onEdit) y enviarRecordatoriosPazYSalvoDiario (diario 8am).');
+  // enviarRecordatoriosErrorTercerosDiario: todos los días a las 8am (junto con paz y salvo)
+  ScriptApp.newTrigger('enviarRecordatoriosErrorTercerosDiario')
+    .timeBased()
+    .everyDays(1)
+    .atHour(8)
+    .nearMinute(0)
+    .create();
+
+  Logger.log('Triggers creados: enviarCorreoPazYSalvo (onEdit), enviarRecordatoriosPazYSalvoDiario (diario 8am), enviarRecordatoriosErrorTercerosDiario (diario 8am).');
 }
