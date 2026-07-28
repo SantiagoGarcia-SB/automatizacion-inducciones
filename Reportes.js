@@ -61,7 +61,8 @@ function _bloque_resultados_por_categoria_(porResultado) {
 
   return `
   <tr>
-    <td style="padding:16px 28px 0;">
+    <td style="padding:20px 28px 0;">
+      <div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>
       <div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;
                   color:#94a3b8;margin-bottom:8px;font-family:Arial,sans-serif;">
         Resultado final de lotes emitidos hoy
@@ -116,7 +117,7 @@ function _recolectarMetricasGestion_(fechaRef) {
     .filter(l => Object.keys(l.estados).some(e => e !== "TERMINADO"))
     .map(l => ({
       idLote:         l.idLote,
-      comercial:      l.comercial,
+      comercial:      _correoANombreCompleto(l.comercial),
       fechaIngresoStr: l.fechaIngreso instanceof Date
         ? Utilities.formatDate(l.fechaIngreso, "GMT-5", "d/MM/yyyy")
         : String(l.fechaIngreso || ""),
@@ -144,18 +145,15 @@ function _recolectarMetricasGestion_(fechaRef) {
   hoy.setHours(0, 0, 0, 0);
 
   let analizadasHoy = 0;
-  if (colRegistroSAI !== -1 && colFechaEval !== -1) {
+  if (colFechaEval !== -1) {
     for (let i = 1; i < dataAnalisis.length; i++) {
-      const registroSAI = String(dataAnalisis[i][colRegistroSAI] || "").trim();
-      if (!registroSAI) continue;
-
       const f = _normalizarFecha_(dataAnalisis[i][colFechaEval]);
       if (!f) continue;
 
       if (f.getTime() === hoy.getTime()) analizadasHoy++;
     }
   } else {
-    Logger.log("Aviso: no se encontró 'REGISTRO ANALISTA SAI' o 'Fecha Evaluacion' en 'registro analisis'. 'Analizadas hoy' quedará en 0.");
+    Logger.log("Aviso: no se encontró 'Fecha Evaluacion' en 'registro analisis'. 'Analizadas hoy' quedará en 0.");
   }
 
   return {
@@ -278,20 +276,26 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
     ),
 
     _bloque_chips_([
-      { label: "Analizadas hoy",              valor: String(m.analizadasHoy),             colorVal: "#3B6D11" },
+      // ── Actividad del día ──
+      { label: "Analizadas hoy",              valor: String(m.analizadasHoy),              colorVal: "#3B6D11" },
+      { label: "Resultados enviados hoy",     valor: String(m.resultadosEnviadosHoy.lotes)                     },
+      // ── Pipeline (en orden de flujo del proceso) ──
       { label: "Pendientes por radicar",      valor: String(m.pendientesRadicar)                               },
       { label: "Pendientes paz y salvo",      valor: String(m.pendientesPazYSalvo),        colorVal: "#E65100" },
       { label: "Pendiente por asignar",       valor: String(m.pendientesAsignar)                               },
-      { label: "En análisis",                 valor: String(m.enAnalisis)                                      },
-      { label: "Pendientes error terceros",   valor: String(m.pendientesErroresTerceros),  colorVal: _C_ROJO   },
-      { label: "Resultados enviados",         valor: String(m.resultadosEnviadosHoy.lotes)                     },
-      { label: "Solicitudes aprobadas hoy",   valor: String(m.resultadosEnviadosHoy.solicitudesAprobadas), colorVal: "#3B6D11" },
-      { label: "Solicitudes negadas hoy",     valor: String(m.resultadosEnviadosHoy.solicitudesNegadas),   colorVal: _C_ROJO   }
+      { label: "En an&aacute;lisis",          valor: String(m.enAnalisis)                                      },
+      { label: "Pendientes error terceros",   valor: String(m.pendientesErroresTerceros),  colorVal: _C_ROJO   }
     ]),
 
     _bloque_resultados_por_categoria_(m.resultadosEnviadosHoy.porResultado),
 
     _bloque_tabla_seguimiento_(m.lotesActivos),
+
+    _bloque_nota_(
+      `<strong style="color:#253150;">Seguimiento:</strong> Los lotes con m&aacute;s de 7 d&iacute;as
+       sin avance requieren gesti&oacute;n inmediata. Verifique los estados
+       <strong>Pendiente Paz y Salvo</strong> y <strong>Error en Terceros</strong> para priorizar acciones.`
+    ),
 
     _bloque_pie_()
 
