@@ -304,9 +304,10 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
     _bloque_tabla_seguimiento_(m.lotesActivos),
 
     _bloque_nota_(
-      `<strong style="color:#253150;">Seguimiento:</strong> Los lotes con m&aacute;s de 7 d&iacute;as
-       sin avance requieren gesti&oacute;n inmediata. Verifique los estados
-       <strong>Pendiente Paz y Salvo</strong> y <strong>Error en Terceros</strong> para priorizar acciones.`
+      `<strong style="color:#253150;">Nota:</strong> Los lotes en estado
+       <strong>Pendiente Paz y Salvo</strong> dependen del env&iacute;o del documento por parte
+       de la inmobiliaria al comercial. Los estados <strong>Error en Terceros</strong> requieren
+       correcci&oacute;n de datos por parte del ejecutivo comercial para continuar el tr&aacute;mite.`
     ),
 
     _bloque_pie_()
