@@ -113,11 +113,23 @@ function _recolectarMetricasGestion_(fechaRef) {
   }
 
   // Lotes activos = tienen al menos un contrato en un estado distinto de TERMINADO.
+  // Cruzamos con Hoja_Control para obtener el email real del comercial (col B por ID Lote en col F)
+  const hojaHC = ssControl.getSheetByName("Hoja_Control");
+  const mapaLoteEmail = {};
+  if (hojaHC) {
+    const dataHC = retry(() => hojaHC.getDataRange().getValues());
+    for (let i = 1; i < dataHC.length; i++) {
+      const idLoteHC = String(dataHC[i][5] || "").trim(); // Col F
+      const emailHC  = String(dataHC[i][1] || "").trim(); // Col B
+      if (idLoteHC && emailHC.includes("@")) mapaLoteEmail[idLoteHC] = emailHC;
+    }
+  }
+
   const lotesActivos = Object.values(lotes)
     .filter(l => Object.keys(l.estados).some(e => e !== "TERMINADO"))
     .map(l => ({
       idLote:         l.idLote,
-      comercial:      _correoANombreCompleto(l.comercial),
+      comercial:      _correoANombreCompleto(mapaLoteEmail[l.idLote] || l.comercial),
       fechaIngresoStr: l.fechaIngreso instanceof Date
         ? Utilities.formatDate(l.fechaIngreso, "GMT-5", "d/MM/yyyy")
         : String(l.fechaIngreso || ""),
@@ -276,15 +288,16 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
     ),
 
     _bloque_chips_([
-      // ── Actividad del día ──
-      { label: "Analizadas hoy",              valor: String(m.analizadasHoy),              colorVal: "#3B6D11" },
-      { label: "Resultados enviados hoy",     valor: String(m.resultadosEnviadosHoy.lotes)                     },
-      // ── Pipeline (en orden de flujo del proceso) ──
-      { label: "Pendientes por radicar",      valor: String(m.pendientesRadicar)                               },
-      { label: "Pendientes paz y salvo",      valor: String(m.pendientesPazYSalvo),        colorVal: "#E65100" },
-      { label: "Pendiente por asignar",       valor: String(m.pendientesAsignar)                               },
-      { label: "En an&aacute;lisis",          valor: String(m.enAnalisis)                                      },
-      { label: "Pendientes error terceros",   valor: String(m.pendientesErroresTerceros),  colorVal: _C_ROJO   }
+      { label: "Analizadas hoy",                      valor: String(m.analizadasHoy),              colorVal: "#3B6D11" },
+      { label: "Pendientes por radicar",              valor: String(m.pendientesRadicar)                               },
+      { label: "Pendiente por asignar",               valor: String(m.pendientesAsignar)                               },
+      { label: "Analizadas pendiente por resultado",  valor: String(m.enAnalisis)                                      },
+      { label: "Pendientes paz y salvo",              valor: String(m.pendientesPazYSalvo),        colorVal: "#E65100" },
+      { label: "Pendientes error terceros",           valor: String(m.pendientesErroresTerceros),  colorVal: _C_ROJO   }
+    ]),
+
+    _bloque_chips_([
+      { label: "Resultados enviados hoy",  valor: String(m.resultadosEnviadosHoy.lotes), colorVal: "#3B6D11" }
     ]),
 
     _bloque_resultados_por_categoria_(m.resultadosEnviadosHoy.porResultado),
