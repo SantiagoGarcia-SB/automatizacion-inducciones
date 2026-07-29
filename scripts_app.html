@@ -1,0 +1,2304 @@
+<script>
+/**
+ * ============================================================
+ * App.js — Inicialización y orquestación de la SPA
+ * ============================================================
+ */
+
+/** Datos del usuario logueado (se llenan al iniciar) */
+var APP_USUARIO = null;
+
+/** Menús por rol */
+var MENUS_POR_ROL = {
+  COMERCIAL: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Mis lotes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+  ],
+  AUXILIAR: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'cola-auxiliar', icon: '📥', label: 'Cola' },
+    { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' }
+  ],
+  ANALISTA: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' }
+  ],
+  LIDER: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Lotes' },
+    { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
+    { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
+    { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
+    { id: 'sep1', icon: '', label: '---' },
+    { id: 'usuarios', icon: '👥', label: 'Usuarios' },
+    { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
+    { id: 'reportes', icon: '📈', label: 'Reportes' }
+  ],
+  ADMIN: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Lotes' },
+    { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
+    { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
+    { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
+    { id: 'sep1', icon: '', label: '---' },
+    { id: 'usuarios', icon: '👥', label: 'Usuarios' },
+    { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
+    { id: 'reportes', icon: '📈', label: 'Reportes' },
+    { id: 'sep2', icon: '', label: '---' },
+    { id: 'logs', icon: '🔧', label: 'Logs sistema' },
+    { id: 'config', icon: '⚙️', label: 'Configuración' }
+  ]
+};
+
+/**
+ * Inicialización de la app (se ejecuta al cargar el DOM).
+ * Usa datos pre-cargados en __INIT__ (inyectados server-side en doGet).
+ * NO hace llamada al servidor para obtener el usuario — ya lo tiene.
+ */
+function inicializarApp() {
+  var initData = window.__INIT__ || {};
+  var usuario = initData.usuario || {};
+
+  if (!usuario || !usuario.autorizado) {
+    mostrarVista('viewNoAcceso');
+    return;
+  }
+
+  APP_USUARIO = usuario;
+  renderizarHeader(usuario);
+  renderizarMenu(usuario.rol);
+
+  // Cache local de datos pre-cargados
+  _cacheLocal.resumen = initData.resumen || null;
+  _cacheLocal.lotes = initData.lotes || null;
+
+  // Renderizar dashboard inmediatamente con datos pre-cargados (0 latencia)
+  if (_cacheLocal.resumen) {
+    _renderizarDashboardConDatos(_cacheLocal.resumen);
+  } else {
+    _mostrarSkeletonDashboard();
+    cargarDashboard();
+  }
+}
+
+/** Cache en memoria del frontend para evitar re-llamadas innecesarias */
+var _cacheLocal = { resumen: null, lotes: null, ttl: 0 };
+var CACHE_TTL_MS = 30000; // 30 segundos
+
+function _cacheValido() {
+  return _cacheLocal.ttl > Date.now();
+}
+
+function _invalidarCache() {
+  _cacheLocal.resumen = null;
+  _cacheLocal.lotes = null;
+  _cacheLocal.ttl = 0;
+}
+
+function renderizarHeader(usuario) {
+  var elUser = document.getElementById('headerUser');
+  var elRol = document.getElementById('headerRol');
+  if (elUser) elUser.textContent = usuario.nombre || usuario.email;
+  if (elRol) {
+    elRol.textContent = usuario.rol;
+    elRol.className = 'badge';
+    elRol.style.cssText = 'background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.9);font-size:11px;padding:3px 10px;';
+  }
+}
+
+function _mostrarSkeletonDashboard() {
+  var container = document.getElementById('viewDashboard');
+  var nombre = APP_USUARIO ? APP_USUARIO.nombre : '';
+  var hora = new Date().getHours();
+  var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
+
+  container.innerHTML = '<div class="stack" style="gap:var(--spacing-lg);">'
+    // Hero real (ya tenemos el nombre)
+    + '<div class="card card--hero" style="padding:var(--spacing-xl) var(--spacing-lg);">'
+    + '<h2 style="font-size:var(--text-2xl); margin-bottom:6px;">' + saludo + ', ' + nombre + '</h2>'
+    + '<p style="margin:0; font-size:var(--text-sm);">Cargando tu resumen...</p>'
+    + '</div>'
+    // Skeleton KPIs
+    + '<div class="grid grid--4">'
+    + '<div class="card card--flat skeleton-card"></div>'
+    + '<div class="card card--flat skeleton-card"></div>'
+    + '<div class="card card--flat skeleton-card"></div>'
+    + '<div class="card card--flat skeleton-card"></div>'
+    + '</div>'
+    + '</div>';
+  mostrarVista('viewDashboard');
+}
+
+function renderizarMenu(rol) {
+  var menu = MENUS_POR_ROL[rol] || MENUS_POR_ROL['COMERCIAL'];
+  var nav = document.getElementById('navMenu');
+  if (!nav) return;
+
+  var html = '';
+  for (var i = 0; i < menu.length; i++) {
+    var item = menu[i];
+    if (item.label === '---') {
+      html += '<li class="app-sidebar__separator"></li>';
+    } else {
+      html += '<li><a class="app-sidebar__link" href="#/' + item.id + '" data-view="' + item.id + '">'
+        + '<span class="app-sidebar__icon">' + item.icon + '</span>'
+        + '<span>' + item.label + '</span>'
+        + '</a></li>';
+    }
+  }
+  nav.innerHTML = html;
+
+  // Event listeners para navegación
+  var links = nav.querySelectorAll('.app-sidebar__link');
+  for (var j = 0; j < links.length; j++) {
+    links[j].addEventListener('click', function(e) {
+      e.preventDefault();
+      var view = this.getAttribute('data-view');
+      navegarA(view);
+    });
+  }
+}
+
+function mostrarVista(vistaId) {
+  // Ocultar todas las vistas
+  var vistas = document.querySelectorAll('[id^="view"]');
+  for (var i = 0; i < vistas.length; i++) {
+    vistas[i].style.display = 'none';
+  }
+  // Mostrar la solicitada
+  var vista = document.getElementById(vistaId);
+  if (vista) vista.style.display = 'block';
+
+  // Marcar item activo en sidebar
+  var links = document.querySelectorAll('.app-sidebar__link');
+  for (var j = 0; j < links.length; j++) {
+    links[j].classList.remove('app-sidebar__link--active');
+  }
+}
+
+function navegarA(seccion) {
+  mostrarVista('viewLoading');
+
+  // Marcar como activo
+  var link = document.querySelector('[data-view="' + seccion + '"]');
+  if (link) link.classList.add('app-sidebar__link--active');
+
+  // Cerrar sidebar en mobile
+  var sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.classList.remove('app-layout__sidebar--open');
+
+  switch (seccion) {
+    case 'dashboard':
+      cargarDashboard();
+      break;
+    case 'lotes':
+      cargarMisLotes(1);
+      break;
+    case 'usuarios':
+      cargarVistaUsuarios();
+      break;
+    case 'solicitudes':
+      cargarVistaSolicitudes();
+      break;
+    case 'errores':
+      cargarVistaErroresComercial();
+      break;
+    case 'asignaciones':
+      cargarVistaAsignaciones();
+      break;
+    case 'reportes':
+      cargarVistaReportes();
+      break;
+    case 'cola-auxiliar':
+      cargarColaAuxiliar();
+      break;
+    case 'mis-solicitudes':
+      cargarMisSolicitudesAuxiliar();
+      break;
+    case 'radicar':
+      mostrarVistaRadicar();
+      break;
+    default:
+      mostrarVistaEnConstruccion(seccion);
+      break;
+  }
+}
+
+function cargarDashboard() {
+  // Si tenemos datos en cache local (pre-cargados o recientes), usar directamente
+  if (_cacheLocal.resumen && _cacheValido()) {
+    _renderizarDashboardConDatos(_cacheLocal.resumen);
+    return;
+  }
+
+  // Si tenemos pre-carga de doGet (primera vez), usar y marcar TTL
+  if (_cacheLocal.resumen) {
+    _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
+    _renderizarDashboardConDatos(_cacheLocal.resumen);
+    return;
+  }
+
+  // Si no hay cache, pedir al servidor
+  callServer('api_obtenerResumenDashboard')
+    .then(function(r) {
+      _cacheLocal.resumen = r;
+      _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
+      _renderizarDashboardConDatos(r);
+    })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar el resumen.'); });
+}
+
+function _renderizarDashboardConDatos(r) {
+      var hora = new Date().getHours();
+      var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
+      var nombre = APP_USUARIO ? APP_USUARIO.nombre : '';
+      var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN');
+
+      var html = '<div class="stack" style="gap:var(--spacing-lg);">'
+        + '<div class="card card--hero" style="padding:var(--spacing-xl) var(--spacing-lg);">'
+        + '<h2 style="font-size:var(--text-2xl); margin-bottom:6px;">' + saludo + ', ' + nombre + '</h2>'
+        + '<p style="margin:0; font-size:var(--text-sm);">Panel de gestión de inducciones</p>'
+        + '</div>';
+
+      if (esAdmin) {
+        // Fila 1
+        html += '<div class="grid grid--4">'
+          + _kpiAdmin('Pólizas Totales', r.totalPolizas, 'navy', '')
+          + _kpiAdmin('Pendiente radicación', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
+          + _kpiAdmin('Radicado', r.radicado, 'navy', 'RADICADO')
+          + _kpiAdmin('Pendiente asignar', r.pendienteAsignar, 'navy', 'PENDIENTE ASIGNAR')
+          + '</div>';
+        // Fila 2
+        html += '<div class="grid grid--4">'
+          + _kpiAdmin('Inducciones Totales', r.inducciones, 'navy', '')
+          + _kpiAdmin('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
+          + _kpiAdmin('Envío formato LMI', r.envioFormatoLMI, 'gray', 'ENVÍO FORMATO LMI')
+          + _kpiAdmin('Envío carta LMI', r.envioCartaLMI, 'gray', 'ENVÍO CARTA LMI')
+          + '</div>';
+        // Fila 3
+        html += '<div class="grid grid--4">'
+          + _kpiAdmin('Lotes Totales', r.totalLotes, 'navy', '')
+          + _kpiAdmin('Errores en terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
+          + _kpiAdmin('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
+          + _kpiAdmin('Terminado', r.terminados, 'green', 'TERMINADO')
+          + '</div>';
+      } else {
+        html += '<div class="grid grid--4">'
+          + _kpiCard('📤', 'Radicados', r.radicadosSemana || 0, 'esta semana', '#253150')
+          + _kpiCard('🔍', 'En análisis', r.enAnalisis, 'solicitudes', '#1a5276')
+          + _kpiCard('⏳', 'Pend. P&S', r.pendientePS, 'solicitudes', '#e65100')
+          + _kpiCard('✅', 'Terminados', r.terminados, 'solicitudes', '#1b7a3d')
+          + '</div>';
+        if (r.errorTerceros > 0) {
+          html += '<div class="card card--flat" style="border-left:4px solid var(--color-primary-red); background:rgba(189,15,20,0.03);">'
+            + '<strong style="color:var(--color-primary-red);">⚠️ ' + r.errorTerceros + ' solicitud(es) con error en terceros</strong></div>';
+        }
+      }
+
+      html += '<div class="grid grid--2">'
+        + '<a onclick="navegarA(\'lotes\')" class="card card--flat" style="cursor:pointer; text-align:center; padding:var(--spacing-xl);">'
+        + '<div style="font-size:2rem; margin-bottom:8px;">📋</div><strong style="color:var(--color-primary-navy);">Ver lotes</strong></a>'
+        + '<a onclick="navegarA(\'solicitudes\')" class="card card--flat" style="cursor:pointer; text-align:center; padding:var(--spacing-xl);">'
+        + '<div style="font-size:2rem; margin-bottom:8px;">📄</div><strong style="color:var(--color-primary-navy);">Ver solicitudes</strong></a>'
+        + '</div></div>';
+
+      document.getElementById('viewDashboard').innerHTML = html;
+      mostrarVista('viewDashboard');
+}
+
+function _kpiAdmin(titulo, valor, tema, filtroEstado) {
+  var bgs = { navy: 'rgba(37,49,80,0.9)', red: 'rgba(189,15,20,0.85)', orange: 'rgba(230,81,0,0.85)', green: 'rgba(13,122,84,0.85)', gray: 'rgba(128,126,126,0.7)' };
+  var esClickable = filtroEstado && filtroEstado.length > 0;
+  var cursorStyle = esClickable ? 'cursor:pointer;' : '';
+  var onclickAttr = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
+  return '<div' + onclickAttr + ' style="background:' + bgs[tema] + '; border-radius:var(--radius-md); padding:16px 12px; text-align:center; ' + cursorStyle + ' transition:transform 0.15s, opacity 0.15s;" onmouseover="this.style.transform=\'scale(1.03)\'" onmouseout="this.style.transform=\'scale(1)\'">'
+    + '<p style="margin:0 0 6px; font-size:11px; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">' + titulo + '</p>'
+    + '<p style="margin:0; font-size:1.8rem; font-weight:800; color:#fff; line-height:1;">' + _fmtNum(valor) + '</p>'
+    + '</div>';
+}
+
+function _fmtNum(n) { return (n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+
+function _filtrarLotesPorEstado(estado) {
+  // Navegar a lotes con filtro pre-aplicado
+  _filtroEstadoActivo = estado;
+  navegarA('lotes');
+}
+
+var _filtroEstadoActivo = '';
+
+// Hamburger menu toggle (mobile)
+document.addEventListener('DOMContentLoaded', function() {
+  var toggle = document.getElementById('menuToggle');
+  var sidebar = document.getElementById('sidebar');
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', function() {
+      sidebar.classList.toggle('app-layout__sidebar--open');
+    });
+  }
+});
+
+// ============================================================
+//  VISTA: MIS LOTES (con filtro local — sin re-llamar al servidor)
+// ============================================================
+
+var _lotesPageActual = 1;
+var _todosLosLotes = null; // Cache de todos los lotes (se pide 1 vez)
+
+function cargarMisLotes(pagina) {
+  _lotesPageActual = pagina || 1;
+
+  // Si ya tenemos todos los lotes en memoria, filtrar localmente
+  if (_todosLosLotes) {
+    _renderizarLotesFiltrados();
+    return;
+  }
+
+  // Si tenemos pre-carga de doGet (primera vez), usarla
+  if (_cacheLocal.lotes && !_filtroEstadoActivo && !_busquedaLoteActiva) {
+    _todosLosLotes = _cacheLocal.lotes.datos;
+    _cacheLocal.lotes = null;
+    _renderizarLotesFiltrados();
+    return;
+  }
+
+  // Primera carga: pedir TODOS los lotes al servidor (sin filtro, sin paginación servidor)
+  callServer('api_obtenerTodosLosLotes')
+    .then(function(datos) {
+      _todosLosLotes = datos || [];
+      _renderizarLotesFiltrados();
+    })
+    .catch(function(err) { console.error('Error lotes:', err); _mostrarError('No pudimos cargar los lotes.'); });
+}
+
+function _renderizarLotesFiltrados() {
+  var filtrados = _todosLosLotes || [];
+
+  // Filtrar por estado
+  if (_filtroEstadoActivo) {
+    filtrados = filtrados.filter(function(l) { return l.estados && l.estados[_filtroEstadoActivo]; });
+  }
+
+  // Filtrar por búsqueda de ID
+  if (_busquedaLoteActiva) {
+    var busq = _busquedaLoteActiva.toUpperCase();
+    filtrados = filtrados.filter(function(l) { return l.idLote.toUpperCase().indexOf(busq) !== -1; });
+  }
+
+  // Sort solo si el usuario lo activó (default: orden del servidor = más recientes primero)
+  if (_lotesSort.campo) {
+    filtrados = filtrados.slice(); // copia para no mutar el original
+    _sortArray(filtrados, _lotesSort.campo, _lotesSort.dir);
+  }
+
+  // Paginación local
+  var porPagina = 10;
+  var total = filtrados.length;
+  var totalPaginas = Math.ceil(total / porPagina);
+  if (_lotesPageActual > totalPaginas) _lotesPageActual = 1;
+  var inicio = (_lotesPageActual - 1) * porPagina;
+  var paginados = filtrados.slice(inicio, inicio + porPagina);
+
+  _renderizarLotesConDatos({ datos: paginados, total: total, pagina: _lotesPageActual, totalPaginas: totalPaginas });
+}
+
+var _lotesSort = { campo: '', dir: '' }; // campo y dirección de ordenamiento
+
+function _renderizarLotesConDatos(resultado) {
+      var container = document.getElementById('viewDashboard');
+      if (!resultado || resultado.datos.length === 0) {
+        var msgVacio = _busquedaLoteActiva ? 'No se encontró el lote "' + _busquedaLoteActiva + '".'
+          : _filtroEstadoActivo ? 'No hay lotes con estado "' + _filtroEstadoActivo + '".'
+          : 'No hay lotes para mostrar.';
+        container.innerHTML = '<div class="stack">' + _filtroHeader()
+          + '<div class="card card--flat" style="text-align:center; padding:var(--spacing-2xl);">'
+          + '<div style="font-size:2.5rem; margin-bottom:var(--spacing-md);">📋</div>'
+          + '<h3>' + msgVacio + '</h3></div></div>';
+        mostrarVista('viewDashboard');
+        return;
+      }
+
+      var html = '<div class="stack">' + _filtroHeader()
+        + '<div class="flex flex--between"><h2>Lotes</h2>'
+        + '<small>' + resultado.total + ' lote(s)</small></div>'
+        + '<div class="card card--flat" style="padding:0; overflow:hidden;"><table class="table">'
+        + '<thead><tr>' + _thSort('idLote','ID Lote','lotes') + _thSort('fecha','Fecha','lotes') + _thSort('comercial','Comercial','lotes') + _thSort('contratos','Contratos','lotes') + _thSort('estadoPrincipal','Estado','lotes') + '</tr></thead><tbody>';
+
+      for (var i = 0; i < resultado.datos.length; i++) {
+        var lote = resultado.datos[i];
+        html += '<tr style="cursor:pointer;" onclick="_verDetalleLote(\'' + lote.idLote + '\')">'
+          + '<td style="font-family:var(--font-mono); font-size:var(--text-sm);">' + lote.idLote + '</td>'
+          + '<td>' + lote.fecha + '</td>'
+          + '<td>' + (lote.comercial || '-') + '</td>'
+          + '<td style="text-align:center;">' + lote.contratos + '</td>'
+          + '<td>' + _badgeEstado(lote.estadoPrincipal) + '</td></tr>';
+      }
+
+      html += '</tbody></table></div>';
+      if (resultado.totalPaginas > 1) {
+        html += '<div class="flex flex--center flex--gap-md">'
+          + '<button class="btn btn--ghost" ' + (_lotesPageActual <= 1 ? 'disabled' : '') + ' onclick="cargarMisLotes(' + (_lotesPageActual - 1) + ')">← Anterior</button>'
+          + '<span style="font-size:var(--text-sm); color:var(--color-mono-500);">Página ' + _lotesPageActual + ' de ' + resultado.totalPaginas + '</span>'
+          + '<button class="btn btn--ghost" ' + (_lotesPageActual >= resultado.totalPaginas ? 'disabled' : '') + ' onclick="cargarMisLotes(' + (_lotesPageActual + 1) + ')">Siguiente →</button></div>';
+      }
+      html += '</div>';
+      container.innerHTML = html;
+      mostrarVista('viewDashboard');
+}
+
+function _filtroHeader() {
+  var html = '<div class="flex flex--gap-md" style="align-items:center; flex-wrap:wrap;">';
+
+  // Barra de búsqueda
+  html += '<div class="flex flex--gap-sm" style="flex:1; min-width:200px;">'
+    + '<input class="input" id="inputBuscarLote" type="text" placeholder="Buscar por ID de lote..." value="' + (_busquedaLoteActiva || '') + '" style="flex:1; padding:10px 14px; font-size:var(--text-sm);" onkeydown="if(event.key===\'Enter\')_buscarLote()">'
+    + '<button class="btn btn--primary" style="padding:10px 16px;" onclick="_buscarLote()">Buscar</button>'
+    + '</div>';
+
+  // Select de estado
+  html += '<select class="input" style="width:auto; min-width:180px; padding:10px 14px; font-size:var(--text-sm);" onchange="_filtrarPorSelect(this.value)">'
+    + '<option value="">Todos los estados</option>'
+    + '<option value="PENDIENTE RADICAR"' + (_filtroEstadoActivo === 'PENDIENTE RADICAR' ? ' selected' : '') + '>Pendiente radicar</option>'
+    + '<option value="RADICADO"' + (_filtroEstadoActivo === 'RADICADO' ? ' selected' : '') + '>Radicado</option>'
+    + '<option value="PENDIENTE ASIGNAR"' + (_filtroEstadoActivo === 'PENDIENTE ASIGNAR' ? ' selected' : '') + '>Pendiente asignar</option>'
+    + '<option value="EN ANÁLISIS"' + (_filtroEstadoActivo === 'EN ANÁLISIS' ? ' selected' : '') + '>En análisis</option>'
+    + '<option value="ERROR EN TERCEROS"' + (_filtroEstadoActivo === 'ERROR EN TERCEROS' ? ' selected' : '') + '>Error en terceros</option>'
+    + '<option value="PENDIENTE PAZ Y SALVO"' + (_filtroEstadoActivo === 'PENDIENTE PAZ Y SALVO' ? ' selected' : '') + '>Pendiente paz y salvo</option>'
+    + '<option value="TERMINADO"' + (_filtroEstadoActivo === 'TERMINADO' ? ' selected' : '') + '>Terminado</option>'
+    + '</select>';
+
+  // Botón limpiar (si hay algún filtro activo)
+  if (_filtroEstadoActivo || _busquedaLoteActiva) {
+    html += '<button class="btn btn--ghost" style="font-size:var(--text-sm); padding:8px 12px;" onclick="_limpiarFiltro()">✕ Limpiar</button>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function _filtrarPorSelect(valor) {
+  _filtroEstadoActivo = valor;
+  _lotesPageActual = 1;
+  _renderizarLotesFiltrados();
+}
+
+function _buscarLote() {
+  var input = document.getElementById('inputBuscarLote');
+  var valor = (input ? input.value : '').trim();
+  _filtroEstadoActivo = '';
+  _busquedaLoteActiva = valor;
+  _lotesPageActual = 1;
+  _renderizarLotesFiltrados();
+}
+
+var _busquedaLoteActiva = '';
+
+function _limpiarFiltro() {
+  _filtroEstadoActivo = '';
+  _busquedaLoteActiva = '';
+  _lotesPageActual = 1;
+  _renderizarLotesFiltrados();
+}
+
+function _badgeEstado(estado) {
+  var cls = 'badge--gray';
+  if (estado === 'TERMINADO') cls = 'badge--success';
+  else if (estado === 'EN ANÁLISIS') cls = 'badge--navy';
+  else if (estado === 'ERROR EN TERCEROS') cls = 'badge--red';
+  else if (estado === 'PENDIENTE PAZ Y SALVO') cls = 'badge--orange';
+  else if (estado === 'RADICADO') cls = 'badge--teal';
+  return '<span class="badge ' + cls + '">' + estado + '</span>';
+}
+
+// ============================================================
+//  VISTA: COLA DEL AUXILIAR
+// ============================================================
+
+var _colaAuxiliarCache = null;
+
+function cargarColaAuxiliar() {
+  // Mostrar skeleton
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack">'
+    + '<h2>Cola de solicitudes</h2>'
+    + '<p style="color:var(--color-mono-500);margin:0;">Solicitudes pendientes de radicar en SAI</p>'
+    + '<div class="card card--flat" style="padding:0;overflow:hidden;"><table class="table">'
+    + '<thead><tr><th>Arrendatario</th><th>Lote</th><th>Destino</th><th>Dirección</th><th>Canon</th><th></th></tr></thead><tbody>'
+    + _skeletonFilas(6)
+    + '</tbody></table></div></div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerColaAuxiliar')
+    .then(function(datos) {
+      _colaAuxiliarCache = datos || [];
+      _renderizarColaAuxiliar();
+    })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar la cola.'); });
+}
+
+function _renderizarColaAuxiliar() {
+  var datos = _colaAuxiliarCache || [];
+  var container = document.getElementById('viewDashboard');
+
+  var html = '<div class="stack">'
+    + '<div class="flex flex--between"><h2>Cola de solicitudes</h2><small>' + datos.length + ' pendiente(s)</small></div>'
+    + '<p style="color:var(--color-mono-500);margin:0;">Solicitudes listas para radicar en SAI. Haz clic en una para ver los datos y marcar el resultado.</p>';
+
+  if (datos.length === 0) {
+    html += '<div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
+      + '<div style="font-size:2.5rem;margin-bottom:var(--spacing-md);">✅</div>'
+      + '<h3>No hay solicitudes pendientes</h3>'
+      + '<p>Todas las solicitudes fueron radicadas. ¡Buen trabajo!</p></div>';
+  } else {
+    html += '<div class="card card--flat" style="padding:0;overflow:hidden;"><table class="table">'
+      + '<thead><tr><th>Arrendatario</th><th>Lote</th><th>Destino</th><th>Dirección</th><th>Canon</th><th></th></tr></thead><tbody>';
+
+    for (var i = 0; i < datos.length; i++) {
+      var s = datos[i];
+      html += '<tr>'
+        + '<td><strong>' + s.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + s.tipoDoc + ' ' + s.identificacion + '</small></td>'
+        + '<td style="font-size:var(--text-sm);font-family:var(--font-mono);">' + s.idLote + '</td>'
+        + '<td style="font-size:var(--text-sm);">' + s.destino + '</td>'
+        + '<td style="font-size:var(--text-sm);">' + s.ciudad + '<br><small>' + s.direccion + '</small></td>'
+        + '<td style="font-size:var(--text-sm);">$' + _fmtNum(s.canon) + '</td>'
+        + '<td><button class="btn btn--primary" style="padding:6px 12px;font-size:var(--text-sm);" onclick="_abrirSolicitudAuxiliar(' + i + ')">Abrir</button></td>'
+        + '</tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _abrirSolicitudAuxiliar(idx) {
+  var s = _colaAuxiliarCache[idx];
+  if (!s) return;
+
+  // Mostrar modal con spinner mientras carga datos completos
+  var modal = document.createElement('div');
+  modal.id = 'modalAuxiliar';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;';
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModalAuxiliar(); });
+  modal.innerHTML = '<div style="background:white;border-radius:var(--radius-lg);padding:40px;text-align:center;"><div class="spinner" style="margin:0 auto;"></div><p style="margin-top:12px;color:var(--color-mono-500);">Cargando solicitud...</p></div>';
+  document.body.appendChild(modal);
+
+  // Cargar datos completos de la solicitud
+  callServer('api_obtenerSolicitudAuxiliar', s.fila)
+    .then(function(datos) {
+      if (!datos) { _cerrarModalAuxiliar(); alert('No se pudo cargar la solicitud.'); return; }
+      _renderizarModalAuxiliar(datos);
+    })
+    .catch(function(err) { _cerrarModalAuxiliar(); alert('Error: ' + (err.message || err)); });
+}
+
+function _renderizarModalAuxiliar(s) {
+  var modal = document.getElementById('modalAuxiliar');
+  if (!modal) return;
+
+  // Guardar referencia para error en terceros
+  window._solicitudAuxiliarActual = s;
+
+  var html = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:700px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
+    // Header
+    + '<div style="padding:20px 24px;background:var(--color-primary-navy);border-radius:var(--radius-lg) var(--radius-lg) 0 0;color:white;">'
+    + '<div class="flex flex--between"><h3 style="margin:0;color:white;">' + s.arrendatario + '</h3>'
+    + '<button onclick="_cerrarModalAuxiliar()" style="background:rgba(255,255,255,0.2);border:none;width:28px;height:28px;border-radius:50%;color:white;cursor:pointer;">✕</button></div>'
+    + '<div style="opacity:0.75;font-size:var(--text-sm);margin-top:4px;">' + s.tipoDoc + ' ' + s.identificacion + ' · Lote: ' + s.idLote + '</div>'
+    + '</div>'
+    + '<div style="padding:24px;">';
+
+  // Sección: Datos del lote
+  html += '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:10px;">📋 Datos del lote</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">'
+    + _chipModal('ID Lote', s.idLote) + _chipModal('Póliza', s.poliza)
+    + _chipModal('Tipo negociación', s.tipoNegociacion) + _chipModal('Comercial', s.comercial)
+    + _chipModal('Tasa', s.tasaNegociacion) + _chipModal('Amparo integral', s.amparo)
+    + _chipModal('Fecha inicio contrato', s.fechaInicio)
+    + '</div>';
+
+  // Sección: Inmueble
+  html += '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:10px;">📍 Inmueble</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">'
+    + _chipModal('Destino', s.destino) + _chipModal('Ciudad', s.ciudad)
+    + _chipModal('Canon', '$' + _fmtNum(s.canon)) + _chipModal('Administración', '$' + _fmtNum(s.administracion))
+    + _chipModal('IVA', '$' + _fmtNum(s.iva))
+    + '</div>'
+    + '<div style="margin-bottom:20px;">' + _chipModal('Dirección', s.direccion) + '</div>';
+
+  // Sección: Inquilino
+  html += '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:10px;">👤 Inquilino</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:8px;">'
+    + _chipModal('Nombre', s.arrendatario) + _chipModal('Tipo doc', s.tipoDoc) + _chipModal('Identificación', s.identificacion)
+    + _chipModal('Celular', s.celular) + _chipModal('Correo', s.correo)
+    + '<div style="font-size:var(--text-sm);"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.3px;color:var(--color-mono-500);margin-bottom:2px;">Nro. Solicitud SAI</div>'
+    + '<input class="input" id="aux_solicitudInq" value="' + (s.solicitudInquilino || '') + '" placeholder="Ingresa el número de SAI" style="padding:8px 10px;font-size:var(--text-sm);"></div>'
+    + '</div>'
+    + '<div style="padding:8px 0 16px;font-size:var(--text-sm);">'
+    + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-size:var(--text-sm);letter-spacing:0;">'
+    + '<input type="checkbox" id="aux_siniestro_INQ" onchange="_toggleSiniestro(\'INQ\')"> ⚠️ Este solicitante tiene siniestros</label>'
+    + '<div id="aux_siniestro_field_INQ" style="display:none;margin-top:6px;padding-left:24px;">'
+    + '<input class="input" id="aux_siniestro_nums_INQ" placeholder="Nros. solicitud con siniestro (separados por coma)" style="padding:8px 10px;font-size:var(--text-sm);">'
+    + '</div></div>';
+
+  // Sección: Codeudores
+  if (s.codeudores && s.codeudores.length > 0) {
+    html += '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:10px;">👥 Codeudores</h4>';
+    for (var c = 0; c < s.codeudores.length; c++) {
+      var coa = s.codeudores[c];
+      html += '<div style="padding:10px;background:rgba(0,0,0,0.02);border-radius:var(--radius-sm);margin-bottom:8px;">'
+        + '<div style="font-size:11px;color:var(--color-mono-500);text-transform:uppercase;margin-bottom:6px;">' + coa.label + '</div>'
+        + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+        + _chipModal('Nombre', coa.nombre) + _chipModal('Tipo doc', coa.tipoDoc) + _chipModal('ID', coa.identificacion)
+        + _chipModal('Celular', coa.celular) + _chipModal('Correo', coa.correo)
+        + '<div style="font-size:var(--text-sm);"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.3px;color:var(--color-mono-500);margin-bottom:2px;">Nro. Solicitud SAI</div>'
+        + '<input class="input" id="aux_nro_' + coa.label + '" value="' + (coa.nro || '') + '" placeholder="Nro. SAI" style="padding:8px 10px;font-size:var(--text-sm);"></div>'
+        + '</div>'
+        + '<div style="padding:8px 0 4px;font-size:var(--text-sm);">'
+        + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-size:var(--text-sm);letter-spacing:0;">'
+        + '<input type="checkbox" id="aux_siniestro_' + coa.label + '" onchange="_toggleSiniestro(\'' + coa.label + '\')"> ⚠️ Tiene siniestros</label>'
+        + '<div id="aux_siniestro_field_' + coa.label + '" style="display:none;margin-top:6px;padding-left:24px;">'
+        + '<input class="input" id="aux_siniestro_nums_' + coa.label + '" placeholder="Nros. solicitud con siniestro (coma)" style="padding:8px 10px;font-size:var(--text-sm);">'
+        + '</div></div>'
+        + '</div>';
+    }
+  }
+
+  // Acciones
+  html += '</div>'
+    + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;position:sticky;bottom:0;background:white;">'
+    + '<button class="btn btn--ghost" onclick="_cerrarModalAuxiliar()">Cancelar</button>'
+    + '<button class="btn btn--danger" onclick="_marcarErrorTerceros(-1)">✗ Error en terceros</button>'
+    + '<button class="btn btn--primary" onclick="_marcarRadicadoAuxiliar(\'' + s.uuid + '\')">✓ Radicado en SAI</button>'
+    + '</div></div>';
+
+  modal.innerHTML = html;
+}
+
+function _marcarRadicadoAuxiliar(uuid) {
+  // Recoger números de solicitud SAI
+  var solicitudInq = document.getElementById('aux_solicitudInq');
+  var numeros = {
+    solicitudInquilino: solicitudInq ? solicitudInq.value.trim() : ''
+  };
+
+  // Recoger NRO de cada codeudor
+  for (var n = 1; n <= 5; n++) {
+    var input = document.getElementById('aux_nro_COA' + n);
+    if (input) numeros['nroCoa' + n] = input.value.trim();
+  }
+
+  // Recoger siniestros
+  var siniestros = '';
+  var partes = [];
+  // Inquilino
+  var chkInq = document.getElementById('aux_siniestro_INQ');
+  if (chkInq && chkInq.checked) {
+    var numsInq = document.getElementById('aux_siniestro_nums_INQ');
+    if (numsInq && numsInq.value.trim()) {
+      partes.push('INQ:' + numsInq.value.trim());
+    }
+  }
+  // Codeudores
+  for (var s = 1; s <= 5; s++) {
+    var chkCoa = document.getElementById('aux_siniestro_COA' + s);
+    if (chkCoa && chkCoa.checked) {
+      var numsCoa = document.getElementById('aux_siniestro_nums_COA' + s);
+      if (numsCoa && numsCoa.value.trim()) {
+        partes.push('COA' + s + ':' + numsCoa.value.trim());
+      }
+    }
+  }
+  if (partes.length > 0) siniestros = partes.join('|');
+  numeros.siniestros = siniestros;
+
+  // Validar que al menos el inquilino tenga número
+  if (!numeros.solicitudInquilino) {
+    alert('Ingresa el número de solicitud SAI del inquilino antes de marcar como radicado.');
+    return;
+  }
+
+  callServer('api_marcarRadicado', uuid, numeros)
+    .then(function(res) {
+      _cerrarModalAuxiliar();
+      if (res && res.ok) {
+        _colaAuxiliarCache = null;
+        cargarColaAuxiliar();
+      } else {
+        alert(res ? res.mensaje : 'Error al marcar como radicado.');
+      }
+    })
+    .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+function _toggleSiniestro(id) {
+  var chk = document.getElementById('aux_siniestro_' + id);
+  var field = document.getElementById('aux_siniestro_field_' + id);
+  if (chk && field) {
+    field.style.display = chk.checked ? 'block' : 'none';
+  }
+}
+
+function _marcarErrorTerceros(idx) {
+  var s = idx >= 0 ? _colaAuxiliarCache[idx] : window._solicitudAuxiliarActual;
+  if (!s) return;
+
+  // Cerrar modal actual y abrir el de error en terceros
+  _cerrarModalAuxiliar();
+
+  var modal = document.createElement('div');
+  modal.id = 'modalErrorTerceros';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;';
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModalError(); });
+
+  var html = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:640px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
+    // Header
+    + '<div style="padding:20px 24px;background:var(--color-primary-red);border-radius:var(--radius-lg) var(--radius-lg) 0 0;color:white;">'
+    + '<div class="flex flex--between"><h3 style="margin:0;color:white;">Error en terceros</h3>'
+    + '<button onclick="_cerrarModalError()" style="background:rgba(255,255,255,0.2);border:none;width:28px;height:28px;border-radius:50%;color:white;cursor:pointer;">✕</button></div>'
+    + '<div style="opacity:0.85;font-size:var(--text-sm);margin-top:4px;">' + s.arrendatario + ' · Lote: ' + s.idLote + '</div>'
+    + '</div>'
+    + '<div style="padding:24px;">'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin-bottom:16px;">Selecciona quién tiene error y qué necesitas que envíe el comercial:</p>';
+
+  // Inquilino
+  html += _bloqueParticipanteError('INQ', s.arrendatario + ' (Inquilino)');
+
+  // Codeudores
+  if (s.codeudores) {
+    for (var c = 0; c < s.codeudores.length; c++) {
+      var coa = s.codeudores[c];
+      html += _bloqueParticipanteError(coa.label, coa.nombre + ' (' + coa.label + ')');
+    }
+  }
+
+  // Nota interna
+  html += '<div style="margin-top:16px;">'
+    + '<label style="font-size:11px;text-transform:uppercase;color:var(--color-mono-500);letter-spacing:0.3px;">Nota interna (solo visible para el equipo)</label>'
+    + '<textarea class="input" id="et_nota" rows="3" placeholder="Ej: SAI reporta que el celular es inválido..." style="margin-top:4px;resize:vertical;"></textarea>'
+    + '</div>';
+
+  // Acciones
+  html += '</div>'
+    + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;">'
+    + '<button class="btn btn--ghost" onclick="_cerrarModalError()">Cancelar</button>'
+    + '<button class="btn btn--danger" onclick="_enviarErrorTerceros(\'' + s.uuid + '\')">Guardar error y notificar</button>'
+    + '</div></div>';
+
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function _bloqueParticipanteError(id, nombre) {
+  return '<div style="border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);padding:12px;margin-bottom:10px;">'
+    + '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:var(--text-sm);font-weight:600;color:var(--color-mono-900);">'
+    + '<input type="checkbox" id="et_check_' + id + '" onchange="_toggleReqs(\'' + id + '\')">'
+    + ' ' + nombre + '</label>'
+    + '<div id="et_reqs_' + id + '" style="display:none;margin-top:10px;padding-left:26px;">'
+    + '<div style="display:flex;flex-direction:column;gap:6px;font-size:var(--text-sm);">'
+    + '<label><input type="checkbox" class="et_req_' + id + '" value="celular_correo"> Confirmar celular o correo</label>'
+    + '<label><input type="checkbox" class="et_req_' + id + '" value="doc_identidad"> Adjuntar documento de identidad</label>'
+    + '<label><input type="checkbox" class="et_req_' + id + '" value="cert_existencia"> Adjuntar cert. existencia y representación legal</label>'
+    + '<label><input type="checkbox" class="et_req_' + id + '" value="confirmar_destino"> Confirmar destino específico del inmueble</label>'
+    + '<label><input type="checkbox" class="et_req_' + id + '" value="confirmar_direccion"> Confirmar la dirección</label>'
+    + '</div></div></div>';
+}
+
+function _toggleReqs(id) {
+  var checked = document.getElementById('et_check_' + id).checked;
+  document.getElementById('et_reqs_' + id).style.display = checked ? 'block' : 'none';
+}
+
+function _enviarErrorTerceros(uuid) {
+  // Recoger datos del formulario
+  var participantes = [];
+  var checks = document.querySelectorAll('[id^="et_check_"]');
+  for (var i = 0; i < checks.length; i++) {
+    if (!checks[i].checked) continue;
+    var id = checks[i].id.replace('et_check_', '');
+    var reqs = [];
+    var reqChecks = document.querySelectorAll('.et_req_' + id + ':checked');
+    for (var r = 0; r < reqChecks.length; r++) {
+      reqs.push(reqChecks[r].value);
+    }
+    if (reqs.length === 0) {
+      alert('Selecciona al menos un requerimiento para ' + id);
+      return;
+    }
+    participantes.push({ participante: id, requerimientos: reqs.join('|') });
+  }
+
+  if (participantes.length === 0) {
+    alert('Selecciona al menos un participante con error.');
+    return;
+  }
+
+  var nota = document.getElementById('et_nota').value.trim();
+
+  callServer('api_marcarErrorTerceros', uuid, participantes, nota)
+    .then(function(res) {
+      _cerrarModalError();
+      if (res && res.ok) {
+        _colaAuxiliarCache = null;
+        cargarColaAuxiliar();
+      } else {
+        alert(res ? res.mensaje : 'Error al guardar.');
+      }
+    })
+    .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+function _cerrarModalError() {
+  var modal = document.getElementById('modalErrorTerceros');
+  if (modal) modal.remove();
+}
+
+function _cerrarModalAuxiliar() {
+  var modal = document.getElementById('modalAuxiliar');
+  if (modal) modal.remove();
+}
+
+// ============================================================
+//  SORTING (ordenar columnas con click en header)
+// ============================================================
+
+function _thSort(campo, label, tabla) {
+  var sortVar = tabla === 'lotes' ? _lotesSort : _solicitudesSort;
+  var arrow = '';
+  if (sortVar.campo === campo) {
+    arrow = sortVar.dir === 'asc' ? ' ▲' : ' ▼';
+  }
+  return '<th style="cursor:pointer;user-select:none;" onclick="_ordenar(\'' + campo + '\',\'' + tabla + '\')">' + label + '<span style="opacity:0.5;font-size:10px;margin-left:4px;">' + arrow + '</span></th>';
+}
+
+var _solicitudesSort = { campo: '', dir: '' };
+
+function _ordenar(campo, tabla) {
+  var sortVar = tabla === 'lotes' ? _lotesSort : _solicitudesSort;
+
+  if (sortVar.campo === campo) {
+    sortVar.dir = sortVar.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortVar.campo = campo;
+    sortVar.dir = 'asc';
+  }
+
+  if (tabla === 'lotes') {
+    _lotesSort = sortVar;
+    _renderizarLotesFiltrados();
+  } else {
+    _solicitudesSort = sortVar;
+    _renderizarSolicitudesFiltradas();
+  }
+}
+
+function _sortArray(arr, campo, dir) {
+  if (!arr) return;
+  arr.sort(function(a, b) {
+    var va = a[campo] || '';
+    var vb = b[campo] || '';
+    // Intentar comparar como números
+    var na = parseFloat(String(va).replace(/[^0-9.-]/g, ''));
+    var nb = parseFloat(String(vb).replace(/[^0-9.-]/g, ''));
+    if (!isNaN(na) && !isNaN(nb)) {
+      return dir === 'asc' ? na - nb : nb - na;
+    }
+    // Comparar como strings
+    va = String(va).toUpperCase();
+    vb = String(vb).toUpperCase();
+    if (va < vb) return dir === 'asc' ? -1 : 1;
+    if (va > vb) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+function cargarMisSolicitudesAuxiliar() {
+  // Cualquier rol con cupo puede usar la vista del analista
+  _cargarVistaAnalista();
+}
+
+// ============================================================
+//  VISTA: ANALISTA (Pedir solicitud + evaluar)
+// ============================================================
+
+function _cargarVistaAnalista() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack"><h2>Mis solicitudes</h2>'
+    + '<div class="card card--flat skeleton-card" style="height:60px;"></div>'
+    + _skeletonFilas(4) + '</div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerMisSolicitudesAnalista')
+    .then(function(data) { _renderizarVistaAnalista(data); })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar tus solicitudes.'); });
+}
+
+function _renderizarVistaAnalista(data) {
+  var container = document.getElementById('viewDashboard');
+  var cupoRestante = data.cupo - data.activas;
+  var btnDisabled = cupoRestante <= 0 ? 'disabled' : '';
+  var btnLabel = cupoRestante <= 0 ? 'Cupo lleno' : 'Pedir solicitud';
+
+  var html = '<div class="stack">'
+    + '<div class="flex flex--between" style="align-items:center;">'
+    + '<h2>Mis solicitudes</h2>'
+    + '<div class="flex flex--gap-md" style="align-items:center;">'
+    + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);">' + data.activas + ' de ' + data.cupo + ' cupos</span>'
+    + '<button class="btn btn--primary" ' + btnDisabled + ' onclick="_pedirSolicitudAnalista()">' + btnLabel + '</button>'
+    + '</div></div>';
+
+  if (data.solicitudes.length === 0) {
+    html += '<div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
+      + '<div style="font-size:2.5rem;margin-bottom:var(--spacing-md);">📋</div>'
+      + '<h3>No tienes solicitudes asignadas</h3>'
+      + '<p>Haz clic en "Pedir solicitud" para que se te asigne una.</p>'
+      + '</div>';
+  } else {
+    for (var i = 0; i < data.solicitudes.length; i++) {
+      var s = data.solicitudes[i];
+      html += '<div class="card card--flat" style="cursor:pointer;" onclick="_abrirEvaluacion(' + s.fila + ')">'
+        + '<div class="flex flex--between" style="align-items:center;">'
+        + '<div>'
+        + '<strong style="font-family:var(--font-mono); font-size:var(--text-lg);">' + (s.solicitudInquilino || 'Sin número') + '</strong>'
+        + '<br><span style="font-weight:600;">' + s.arrendatario + '</span>'
+        + '<br><small style="color:var(--color-mono-500);">' + s.codigoLote + ' · Póliza ' + s.poliza + ' · ' + s.ciudad + '</small>'
+        + '</div>'
+        + '<button class="btn btn--primary" style="padding:6px 14px;font-size:var(--text-sm);">Evaluar →</button>'
+        + '</div></div>';
+    }
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _pedirSolicitudAnalista() {
+  // Feedback inmediato — deshabilitar botón y mostrar estado
+  var btns = document.querySelectorAll('button');
+  for (var b = 0; b < btns.length; b++) {
+    if (btns[b].textContent.indexOf('Pedir') !== -1) {
+      btns[b].disabled = true;
+      btns[b].textContent = '⏳ Asignando...';
+      break;
+    }
+  }
+
+  callServer('api_pedirSolicitudAnalista')
+    .then(function(res) {
+      if (res && res.ok) {
+        _cargarVistaAnalista();
+      } else {
+        alert(res ? res.mensaje : 'No se pudo asignar solicitud.');
+        _cargarVistaAnalista(); // Recargar para restaurar botón
+      }
+    })
+    .catch(function(err) {
+      alert('Error: ' + (err.message || err));
+      _cargarVistaAnalista();
+    });
+}
+
+function _abrirEvaluacion(filaNum) {
+  mostrarVista('viewLoading');
+  callServer('api_obtenerSolicitudParaEvaluar', filaNum)
+    .then(function(data) {
+      if (!data) { _mostrarError('No se pudo cargar la solicitud.'); return; }
+      _renderizarFormEvaluacion(filaNum, data);
+    })
+    .catch(function(err) { console.error(err); _mostrarError('Error al cargar solicitud.'); });
+}
+
+function _renderizarFormEvaluacion(filaNum, d) {
+  var container = document.getElementById('viewDashboard');
+
+  var html = '<div class="stack">'
+    + '<button class="btn btn--ghost" onclick="_cargarVistaAnalista()">← Volver a mis solicitudes</button>'
+    // Header con número de solicitud prominente
+    + '<div class="card card--flat" style="border-left:4px solid var(--color-primary-navy);">'
+    + '<div style="font-family:var(--font-mono);font-size:var(--text-lg);font-weight:700;color:var(--color-primary-navy);margin-bottom:4px;">' + (d.inquilino.solicitud || 'Sin número de solicitud') + '</div>'
+    + '<h3 style="margin-bottom:4px;">' + d.inquilino.nombre + '</h3>'
+    + '<small style="color:var(--color-mono-500);">' + d.inquilino.tipoDoc + ' ' + d.inquilino.identificacion + ' · ' + d.inmueble.ciudad + ' · ' + d.inmueble.destino + '</small>'
+    + '</div>';
+
+  // Datos del inmueble (siempre visible)
+  html += '<div class="card card--flat">'
+    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:12px;">📍 Datos del inmueble</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
+    + _chipModal('Póliza', d.inmueble.poliza) + _chipModal('Canon', '$' + _fmtNum(d.inmueble.canon))
+    + _chipModal('Ciudad', d.inmueble.ciudad) + _chipModal('Dirección', d.inmueble.direccion)
+    + _chipModal('Destino', d.inmueble.destino) + _chipModal('Inmobiliaria', d.inmueble.inmobiliaria)
+    + '</div></div>';
+
+  // Formulario: Inquilino
+  html += '<div class="card card--flat">'
+    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:12px;">👤 Evaluación — ' + d.inquilino.nombre + '</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'
+    + _inputEval('Ingresos *', 'eval_Ingresos', d.inquilino.ingresos, 'number')
+    + _inputEval('Acierta * (0-999)', 'eval_Acierta', d.inquilino.acierta, 'number')
+    + _selectEval('Ocupación *', 'eval_ocupacion', d.inquilino.ocupacion, _opcionesOcupacion())
+    + _selectEval('Resp. modelo *', 'eval_Respuesta modelo inquilino', d.inquilino.respuestaModelo, _opcionesRespModeloInquilino())
+    + _selectEval('Regla Dura', 'eval_Regla Dura Inquilino', d.inquilino.reglaDura, _opcionesReglaDura())
+    + '</div></div>';
+
+  // Formulario: Codeudores
+  for (var c = 0; c < d.codeudores.length; c++) {
+    var coa = d.codeudores[c];
+    var n = coa.numero;
+    html += '<div class="card card--flat">'
+      + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:12px;">👥 Codeudor ' + n + ' — ' + coa.nombre + '</h4>'
+      + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'
+      + _inputEval('Ingresos', 'eval_Ingresos COA' + n, coa.ingresos, 'number')
+      + _inputEval('Acierta (0-999)', 'eval_Acierta COA' + n, coa.acierta, 'number')
+      + _selectEval('Ocupación', 'eval_ocupacion COA' + n, coa.ocupacion, _opcionesOcupacion())
+      + _selectEval('Resp. modelo', 'eval_Respuesta modelo COA' + n, coa.respuestaModelo, _opcionesRespModeloCoa())
+      + _selectEval('Regla Dura', 'eval_Regla Dura COA' + n, coa.reglaDura, _opcionesReglaDura())
+      + '</div></div>';
+  }
+
+  // Comentarios
+  html += '<div class="card card--flat">'
+    + '<label>Comentarios del analista</label>'
+    + '<textarea class="input" id="eval_comentarios del analista" rows="3" style="resize:vertical;">' + (d.resultado.comentarios || '') + '</textarea>'
+    + '</div>';
+
+  // Acciones (sticky al fondo)
+  html += '<div style="position:sticky;bottom:0;background:white;padding:16px 0;border-top:1px solid rgba(0,0,0,0.06);margin-top:var(--spacing-lg);">'
+    + '<div class="flex flex--gap-md" style="justify-content:flex-end;">'
+    + '<button class="btn btn--primary" onclick="_finalizarEvaluacion(' + filaNum + ')">✓ Finalizar evaluación</button>'
+    + '</div></div></div>';
+
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+// ── Opciones de desplegables (datos reales del sheet) ──
+
+function _opcionesOcupacion() {
+  return ['', 'INDEPENDIENTE'];
+}
+
+function _opcionesRespModeloInquilino() {
+  return ['', 'REQUIERE_1_CODEUDOR', 'REQUIERE_2_CODEUDORES', 'RECHAZADO'];
+}
+
+function _opcionesRespModeloCoa() {
+  return ['', 'APROBADO', 'INGRESOS INSUFICIENTES', 'RECHAZADO'];
+}
+
+function _opcionesReglaDura() {
+  return [
+    '',
+    'Reporte CR > 1Mill',
+    'Reporte CR > 1Mill, Moras Libertador > 100Mil',
+    'Reporte CR > 1Mill, Ctas Embargadas > 0',
+    'Reporte CR > 1Mill, Moras Libertador > 100Mil, Ctas Embargadas > 0',
+    'Moras Libertador > 100Mil',
+    'Moras Libertador > 100Mil, Ctas Embargadas > 0',
+    'Ctas Embargadas > 0',
+    'Anterior(es) Negada(s) por Inconsistencias en validacion (AVS) o fraude',
+    'Cliente consultable - 06',
+    'Uso no Asegurable',
+    'Cámara de comercio No renovada al año vigente',
+    'Solicitud asegurada con la misma dirección'
+  ];
+}
+
+function _inputEval(label, id, valor, tipo) {
+  return '<div><label>' + label + '</label><input class="input" id="' + id + '" type="' + tipo + '" value="' + (valor || '') + '" style="padding:10px 12px;"></div>';
+}
+
+function _selectEval(label, id, valorActual, opciones) {
+  var html = '<div><label>' + label + '</label><select class="input" id="' + id + '" style="padding:10px 12px;">';
+  for (var i = 0; i < opciones.length; i++) {
+    var sel = opciones[i] === valorActual ? ' selected' : '';
+    html += '<option value="' + opciones[i] + '"' + sel + '>' + (opciones[i] || '-- Seleccionar --') + '</option>';
+  }
+  return html + '</select></div>';
+}
+
+function _recogerCamposEval() {
+  var campos = {};
+  var inputs = document.querySelectorAll('[id^="eval_"]');
+  for (var i = 0; i < inputs.length; i++) {
+    var campo = inputs[i].id.replace('eval_', '');
+    campos[campo] = inputs[i].value;
+  }
+  return campos;
+}
+
+function _guardarEvalBorrador(filaNum) {
+  var campos = _recogerCamposEval();
+  callServer('api_guardarEvaluacion', filaNum, campos, false)
+    .then(function(res) {
+      if (res && res.ok) alert('Borrador guardado ✓');
+      else alert(res ? res.mensaje : 'Error al guardar.');
+    })
+    .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+function _finalizarEvaluacion(filaNum) {
+  if (!confirm('¿Estás seguro? La solicitud se marcará como evaluada y no podrás modificarla.')) return;
+  var campos = _recogerCamposEval();
+  callServer('api_guardarEvaluacion', filaNum, campos, true)
+    .then(function(res) {
+      if (res && res.ok) {
+        _cargarVistaAnalista();
+      } else {
+        alert(res ? res.mensaje : 'Error al finalizar.');
+      }
+    })
+    .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+// ============================================================
+//  VISTA: REPORTES (Exportar)
+// ============================================================
+
+function cargarVistaReportes() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack">'
+    + '<h2>Reportes</h2>'
+    + '<div class="grid grid--2">'
+    // Reporte de gestión
+    + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-xl);">'
+    + '<div style="font-size:2rem;margin-bottom:8px;">📊</div>'
+    + '<strong>Reporte de gestión</strong>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:8px 0;">Estado general de inducciones (el mismo que se envía por correo)</p>'
+    + '<button class="btn btn--primary" style="margin-top:8px;" onclick="_enviarReporteGestion()">📧 Enviar por correo</button>'
+    + '</div>'
+    // Rendimiento del equipo
+    + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-xl);">'
+    + '<div style="font-size:2rem;margin-bottom:8px;">👥</div>'
+    + '<strong>Rendimiento del equipo</strong>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:8px 0;">Solicitudes gestionadas por auxiliar y analista</p>'
+    + '<button class="btn btn--secondary" style="margin-top:8px;" disabled>Próximamente</button>'
+    + '</div>'
+    + '</div>'
+    + '</div>';
+  mostrarVista('viewDashboard');
+}
+
+function _enviarReporteGestion() {
+  if (!confirm('¿Enviar el reporte de gestión a los líderes ahora?')) return;
+  callServer('api_enviarReporteGestion')
+    .then(function(res) {
+      if (res && res.ok) alert('Reporte enviado ✓');
+      else alert(res ? res.mensaje : 'Error al enviar.');
+    })
+    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+}
+
+// ============================================================
+//  VISTA: ASIGNACIONES (Líder reasigna/libera)
+// ============================================================
+
+function cargarVistaAsignaciones() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack"><h2>Asignaciones</h2>' + _skeletonFilas(5) + '</div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerAsignaciones')
+    .then(function(datos) { _renderizarAsignaciones(datos || []); })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar las asignaciones.'); });
+}
+
+function _renderizarAsignaciones(datos) {
+  var container = document.getElementById('viewDashboard');
+
+  // Agrupar por analista
+  var porAnalista = {};
+  for (var i = 0; i < datos.length; i++) {
+    var a = datos[i].asignadaA;
+    if (!porAnalista[a]) porAnalista[a] = [];
+    porAnalista[a].push(datos[i]);
+  }
+
+  var html = '<div class="stack">'
+    + '<div class="flex flex--between"><h2>Asignaciones</h2><small>' + datos.length + ' solicitud(es) en evaluación</small></div>';
+
+  if (datos.length === 0) {
+    html += '<div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
+      + '<h3>No hay solicitudes asignadas</h3></div>';
+  } else {
+    var analistas = Object.keys(porAnalista).sort();
+    for (var a = 0; a < analistas.length; a++) {
+      var email = analistas[a];
+      var sols = porAnalista[email];
+      html += '<div class="card card--flat" style="padding:0;overflow:hidden;">'
+        + '<div style="padding:12px 16px;background:rgba(37,49,80,0.03);border-bottom:1px solid rgba(0,0,0,0.06);">'
+        + '<strong>' + email.split('@')[0] + '</strong> <small style="color:var(--color-mono-500);">(' + sols.length + ' activas)</small>'
+        + '</div><table class="table"><tbody>';
+
+      for (var s = 0; s < sols.length; s++) {
+        var sol = sols[s];
+        html += '<tr>'
+          + '<td><strong>' + sol.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + sol.solicitud + '</small></td>'
+          + '<td style="font-size:var(--text-sm);font-family:var(--font-mono);">' + sol.codigoLote + '</td>'
+          + '<td style="width:120px;">'
+          + '<button class="btn btn--ghost" style="padding:4px 8px;font-size:11px;" onclick="_liberarSolicitud(' + sol.fila + ')">Liberar</button>'
+          + '</td></tr>';
+      }
+
+      html += '</tbody></table></div>';
+    }
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _liberarSolicitud(filaNum) {
+  if (!confirm('¿Liberar esta solicitud? Volverá a la cola de disponibles.')) return;
+  callServer('api_reasignarSolicitud', filaNum, '')
+    .then(function(res) {
+      if (res && res.ok) cargarVistaAsignaciones();
+      else alert(res ? res.mensaje : 'Error al liberar.');
+    })
+    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+}
+
+// ============================================================
+//  VISTA: ERRORES PENDIENTES (Comercial responde)
+// ============================================================
+
+function cargarVistaErroresComercial() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack"><h2>Pendientes de corrección</h2>'
+    + _skeletonFilas(4) + '</div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerMisErroresPendientes')
+    .then(function(errores) {
+      _renderizarErroresComercial(errores || []);
+    })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar los pendientes.'); });
+}
+
+function _renderizarErroresComercial(errores) {
+  var container = document.getElementById('viewDashboard');
+
+  if (errores.length === 0) {
+    container.innerHTML = '<div class="stack">'
+      + '<h2>Pendientes de corrección</h2>'
+      + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
+      + '<div style="font-size:2.5rem;margin-bottom:var(--spacing-md);">✅</div>'
+      + '<h3>No tienes correcciones pendientes</h3>'
+      + '<p>Todas tus solicitudes están en orden.</p>'
+      + '</div></div>';
+    mostrarVista('viewDashboard');
+    return;
+  }
+
+  var html = '<div class="stack">'
+    + '<h2>Pendientes de corrección</h2>'
+    + '<p style="color:var(--color-mono-500);margin:0;">Solicitudes que necesitan información adicional para continuar.</p>';
+
+  for (var i = 0; i < errores.length; i++) {
+    var e = errores[i];
+    var reqs = _traducirRequerimientos(e.participantes);
+    html += '<div class="card card--flat" style="border-left:4px solid var(--color-primary-red);">'
+      + '<div class="flex flex--between" style="align-items:flex-start;">'
+      + '<div>'
+      + '<strong>' + e.arrendatario + '</strong>'
+      + '<br><small style="color:var(--color-mono-500);">Lote: ' + e.idLote + ' · Reportado: ' + e.fechaError + '</small>'
+      + '<div style="margin-top:8px;font-size:var(--text-sm);">' + reqs + '</div>'
+      + '</div>'
+      + '<button class="btn btn--primary" style="padding:6px 14px;font-size:var(--text-sm);" onclick=\'_abrirCorreccion(' + JSON.stringify(e).replace(/'/g, "\\'") + ')\'>Responder →</button>'
+      + '</div></div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _traducirRequerimientos(participantes) {
+  var traducciones = {
+    'celular_correo': 'Confirmar celular o correo',
+    'doc_identidad': 'Adjuntar documento de identidad',
+    'cert_existencia': 'Adjuntar cert. existencia y representación legal',
+    'confirmar_destino': 'Confirmar destino del inmueble',
+    'confirmar_direccion': 'Confirmar dirección'
+  };
+  var html = '';
+  for (var p = 0; p < participantes.length; p++) {
+    var part = participantes[p];
+    var label = part.participante === 'INQ' ? 'Inquilino' : part.participante;
+    var reqs = (part.requerimientos || '').split('|').map(function(r) {
+      return traducciones[r] || r;
+    }).join(', ');
+    html += '<div>• <strong>' + label + '</strong>: ' + reqs + '</div>';
+  }
+  return html;
+}
+
+function _abrirCorreccion(error) {
+  var modal = document.createElement('div');
+  modal.id = 'modalCorreccion';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;';
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModalCorreccion(); });
+
+  var html = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:600px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
+    + '<div style="padding:20px 24px;background:var(--color-primary-red);border-radius:var(--radius-lg) var(--radius-lg) 0 0;color:white;">'
+    + '<div class="flex flex--between"><h3 style="margin:0;color:white;">Corrección requerida</h3>'
+    + '<button onclick="_cerrarModalCorreccion()" style="background:rgba(255,255,255,0.2);border:none;width:28px;height:28px;border-radius:50%;color:white;cursor:pointer;">✕</button></div>'
+    + '<div style="opacity:0.85;font-size:var(--text-sm);margin-top:4px;">' + error.arrendatario + ' · Lote: ' + error.idLote + '</div>'
+    + '</div><div style="padding:24px;">';
+
+  // Por cada participante con error
+  for (var p = 0; p < error.participantes.length; p++) {
+    var part = error.participantes[p];
+    var label = part.participante === 'INQ' ? 'Inquilino' : part.participante;
+    var reqs = _traducirRequerimientos([part]);
+
+    html += '<div style="margin-bottom:16px;padding:12px;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);">'
+      + '<strong style="font-size:var(--text-sm);">' + label + '</strong>'
+      + '<div style="font-size:var(--text-sm);color:var(--color-mono-500);margin:6px 0;">' + reqs + '</div>'
+      + '<label style="font-size:var(--text-xs);">Tu respuesta:</label>'
+      + '<textarea class="input correccion-resp" data-participante="' + part.participante + '" rows="2" placeholder="Escribe la corrección aquí..." style="resize:vertical;"></textarea>'
+      + '</div>';
+  }
+
+  html += '</div>'
+    + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;">'
+    + '<button class="btn btn--ghost" onclick="_cerrarModalCorreccion()">Cancelar</button>'
+    + '<button class="btn btn--primary" onclick="_enviarCorreccion(\'' + error.uuid + '\')">Enviar corrección</button>'
+    + '</div></div>';
+
+  modal.innerHTML = html;
+  document.body.appendChild(modal);
+}
+
+function _enviarCorreccion(uuid) {
+  var textareas = document.querySelectorAll('.correccion-resp');
+  var respuestas = [];
+  for (var i = 0; i < textareas.length; i++) {
+    var resp = textareas[i].value.trim();
+    if (!resp) { alert('Completa la respuesta para todos los participantes.'); return; }
+    respuestas.push({
+      participante: textareas[i].getAttribute('data-participante'),
+      respuesta: resp
+    });
+  }
+
+  callServer('api_enviarCorreccion', uuid, respuestas)
+    .then(function(res) {
+      _cerrarModalCorreccion();
+      if (res && res.ok) {
+        cargarVistaErroresComercial();
+      } else {
+        alert(res ? res.mensaje : 'Error al enviar.');
+      }
+    })
+    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+}
+
+function _cerrarModalCorreccion() {
+  var modal = document.getElementById('modalCorreccion');
+  if (modal) modal.remove();
+}
+
+// ============================================================
+//  VISTA: SOLICITUDES (registro analisis)
+// ============================================================
+
+var _solicitudesCache = null;
+var _solicitudesFiltroEstado = '';
+var _solicitudesBusqueda = '';
+var _solicitudesPage = 1;
+var _solicitudesTotal = 0;
+
+function cargarVistaSolicitudes() {
+  if (_solicitudesCache) {
+    _renderizarSolicitudesFiltradas();
+    return;
+  }
+
+  // Reset sort al cargar por primera vez
+  _solicitudesSort = { campo: '', dir: '' };
+
+  // Mostrar skeleton mientras carga
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack">'
+    + '<div class="flex flex--between"><h2>Solicitudes</h2><small style="color:var(--color-mono-500);">Cargando las más recientes...</small></div>'
+    + '<div class="card card--flat" style="padding:0; overflow:hidden;">'
+    + '<table class="table"><thead><tr><th>Arrendatario</th><th>Solicitud</th><th>Lote</th><th>Canon</th><th>Asignada a</th><th>Resultado análisis</th><th>Estado</th></tr></thead>'
+    + '<tbody>'
+    + _skeletonFilas(8)
+    + '</tbody></table></div></div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerSolicitudes', 0, 500)
+    .then(function(res) {
+      _solicitudesCache = res.datos || [];
+      _solicitudesTotal = res.total || 0;
+      _renderizarSolicitudesFiltradas();
+    })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar las solicitudes.'); });
+}
+
+function _skeletonFilas(n) {
+  var html = '';
+  for (var i = 0; i < n; i++) {
+    html += '<tr><td colspan="7" style="padding:0;"><div class="skeleton-row"></div></td></tr>';
+  }
+  return html;
+}
+
+function _cargarMasSolicitudes() {
+  var cargadas = _solicitudesCache ? _solicitudesCache.length : 0;
+  callServer('api_obtenerSolicitudes', cargadas, 500)
+    .then(function(res) {
+      if (res.datos && res.datos.length > 0) {
+        _solicitudesCache = _solicitudesCache.concat(res.datos);
+      }
+      _renderizarSolicitudesFiltradas();
+    })
+    .catch(function(err) { console.error(err); });
+}
+
+function _renderizarSolicitudesFiltradas() {
+  var filtradas = _solicitudesCache || [];
+
+  if (_solicitudesFiltroEstado) {
+    filtradas = filtradas.filter(function(s) { return s.estado === _solicitudesFiltroEstado; });
+  }
+  if (_solicitudesBusqueda) {
+    var busq = _solicitudesBusqueda.toUpperCase();
+    filtradas = filtradas.filter(function(s) {
+      return s.arrendatario.toUpperCase().indexOf(busq) !== -1
+        || s.codigoLote.toUpperCase().indexOf(busq) !== -1
+        || s.identificacion.indexOf(busq) !== -1
+        || (s.solicitudInquilino && s.solicitudInquilino.toUpperCase().indexOf(busq) !== -1);
+    });
+  }
+
+  // Sort solo si el usuario lo activó
+  if (_solicitudesSort.campo) {
+    filtradas = filtradas.slice();
+    _sortArray(filtradas, _solicitudesSort.campo, _solicitudesSort.dir);
+  }
+
+  var porPagina = 15;
+  var total = filtradas.length;
+  var totalPaginas = Math.ceil(total / porPagina);
+  if (_solicitudesPage > totalPaginas) _solicitudesPage = 1;
+  var inicio = (_solicitudesPage - 1) * porPagina;
+  var paginadas = filtradas.slice(inicio, inicio + porPagina);
+
+  var container = document.getElementById('viewDashboard');
+
+  // Header con filtros
+  var cargadasInfo = _solicitudesCache ? _solicitudesCache.length : 0;
+  var html = '<div class="stack">'
+    + '<div class="flex flex--between"><h2>Solicitudes</h2><small>' + cargadasInfo + ' de ' + _solicitudesTotal + ' solicitud(es)</small></div>'
+    + '<div class="flex flex--gap-md" style="align-items:center; flex-wrap:wrap;">'
+    + '<input class="input" style="flex:1; min-width:200px; padding:10px 14px; font-size:var(--text-sm);" placeholder="Buscar por arrendatario, lote, ID o solicitud..." value="' + (_solicitudesBusqueda || '') + '" onkeydown="if(event.key===\'Enter\'){_solicitudesBusqueda=this.value;_solicitudesPage=1;_renderizarSolicitudesFiltradas();}">'
+    + '<select class="input" style="width:auto; min-width:160px; padding:10px 14px; font-size:var(--text-sm);" onchange="_solicitudesFiltroEstado=this.value;_solicitudesPage=1;_renderizarSolicitudesFiltradas();">'
+    + '<option value="">Todos los estados</option>'
+    + '<option value="PENDIENTE"' + (_solicitudesFiltroEstado === 'PENDIENTE' ? ' selected' : '') + '>Pendiente</option>'
+    + '<option value="EN EVALUACIÓN"' + (_solicitudesFiltroEstado === 'EN EVALUACIÓN' ? ' selected' : '') + '>En evaluación</option>'
+    + '<option value="EVALUADA"' + (_solicitudesFiltroEstado === 'EVALUADA' ? ' selected' : '') + '>Evaluada</option>'
+    + '</select>';
+
+  if (_solicitudesFiltroEstado || _solicitudesBusqueda) {
+    html += '<button class="btn btn--ghost" style="font-size:var(--text-sm);" onclick="_solicitudesFiltroEstado=\'\';_solicitudesBusqueda=\'\';_solicitudesPage=1;_renderizarSolicitudesFiltradas();">✕ Limpiar</button>';
+  }
+  html += '</div>';
+
+  if (paginadas.length === 0) {
+    html += '<div class="card card--flat" style="text-align:center; padding:var(--spacing-2xl);"><h3>No hay solicitudes para mostrar</h3></div>';
+  } else {
+    html += '<div class="card card--flat" style="padding:0; overflow:hidden;"><table class="table">'
+      + '<thead><tr>' + _thSort('arrendatario','Arrendatario','solicitudes') + _thSort('solicitudInquilino','Solicitud','solicitudes') + _thSort('codigoLote','Lote','solicitudes') + _thSort('canon','Canon','solicitudes') + _thSort('asignadaA','Asignada a','solicitudes') + _thSort('resultadoSolicitud','Resultado análisis','solicitudes') + _thSort('estado','Estado','solicitudes') + '</tr></thead><tbody>';
+
+    for (var i = 0; i < paginadas.length; i++) {
+      var s = paginadas[i];
+      var estadoBadge = s.estado === 'EVALUADA' ? 'badge--success' : s.estado === 'EN EVALUACIÓN' ? 'badge--navy' : 'badge--gray';
+      html += '<tr style="cursor:pointer;" onclick="_verDetalleSolicitud(' + s.fila + ')">'
+        + '<td><strong>' + s.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + s.identificacion + '</small></td>'
+        + '<td style="font-size:var(--text-sm); font-family:var(--font-mono);">' + (s.solicitudInquilino || '-') + '</td>'
+        + '<td style="font-size:var(--text-sm); font-family:var(--font-mono);">' + s.codigoLote + '</td>'
+        + '<td style="font-size:var(--text-sm);">$' + _fmtNum(s.canon) + '</td>'
+        + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + (s.asignadaA ? s.asignadaA.split('@')[0] : '-') + '</td>'
+        + '<td style="font-size:var(--text-sm);">' + (s.resultadoSolicitud || '-') + '</td>'
+        + '<td><span class="badge ' + estadoBadge + '">' + s.estado + '</span></td>'
+        + '</tr>';
+    }
+    html += '</tbody></table></div>';
+  }
+
+  // Paginación
+  if (totalPaginas > 1) {
+    html += '<div class="flex flex--center flex--gap-md">'
+      + '<button class="btn btn--ghost" ' + (_solicitudesPage <= 1 ? 'disabled' : '') + ' onclick="_solicitudesPage--;_renderizarSolicitudesFiltradas();">← Anterior</button>'
+      + '<span style="font-size:var(--text-sm); color:var(--color-mono-500);">Página ' + _solicitudesPage + ' de ' + totalPaginas + '</span>'
+      + '<button class="btn btn--ghost" ' + (_solicitudesPage >= totalPaginas ? 'disabled' : '') + ' onclick="_solicitudesPage++;_renderizarSolicitudesFiltradas();">Siguiente →</button></div>';
+  }
+
+  // Botón cargar más si no se han cargado todas
+  if (_solicitudesCache && _solicitudesCache.length < _solicitudesTotal) {
+    html += '<div style="text-align:center;"><button class="btn btn--secondary" onclick="_cargarMasSolicitudes()">Cargar 500 más (' + (_solicitudesTotal - _solicitudesCache.length) + ' restantes)</button></div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+// ============================================================
+//  MODAL: DETALLE DE SOLICITUD (resumen del análisis)
+// ============================================================
+
+function _verDetalleSolicitud(filaNum) {
+  // Mostrar modal con spinner mientras carga
+  var modal = document.createElement('div');
+  modal.id = 'modalSolicitud';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;';
+  modal.innerHTML = '<div style="background:white;border-radius:var(--radius-lg);padding:40px;text-align:center;"><div class="spinner" style="margin:0 auto;"></div><p style="margin-top:12px;color:var(--color-mono-500);">Cargando detalle...</p></div>';
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModalSolicitud(); });
+  document.body.appendChild(modal);
+
+  callServer('api_obtenerDetalleSolicitud', filaNum)
+    .then(function(data) {
+      if (!data) { _cerrarModalSolicitud(); alert('No se pudo cargar el detalle.'); return; }
+      _renderizarModalSolicitud(data);
+    })
+    .catch(function(err) { _cerrarModalSolicitud(); console.error(err); });
+}
+
+function _renderizarModalSolicitud(d) {
+  var modal = document.getElementById('modalSolicitud');
+  if (!modal) return;
+
+  // Badge de resultado
+  var resultBadge = '';
+  var res = (d.resultado.resultadoSolicitud || '').toUpperCase();
+  if (res === 'APROBADO') resultBadge = '<span class="badge badge--success" style="font-size:13px; padding:6px 14px;">APROBADO</span>';
+  else if (res === 'NEGADO') resultBadge = '<span class="badge badge--red" style="font-size:13px; padding:6px 14px;">NEGADO</span>';
+  else if (res) resultBadge = '<span class="badge badge--gray" style="font-size:13px; padding:6px 14px;">' + res + '</span>';
+
+  var html = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:720px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
+    // Header con gradiente
+    + '<div style="padding:24px;background:var(--color-primary-navy);border-radius:var(--radius-lg) var(--radius-lg) 0 0;color:white;position:sticky;top:0;z-index:1;">'
+    + '<div class="flex flex--between" style="margin-bottom:8px;"><h3 style="margin:0;color:white;font-size:var(--text-lg);">' + d.inquilino.nombre + '</h3>'
+    + '<button onclick="_cerrarModalSolicitud()" style="background:rgba(255,255,255,0.2);border:none;width:28px;height:28px;border-radius:50%;color:white;font-size:14px;cursor:pointer;">✕</button></div>'
+    + '<div style="opacity:0.75;font-size:var(--text-sm);">' + d.inquilino.tipoDoc + ' ' + d.inquilino.identificacion + ' · Solicitud: ' + d.inquilino.solicitud + '</div>'
+    + (resultBadge ? '<div style="margin-top:12px;">' + resultBadge + '</div>' : '')
+    + '</div>'
+    + '<div style="padding:24px;">';
+
+  // Sección: Inmueble (colapsada por defecto, más compacta)
+  html += '<details style="margin-bottom:20px;">'
+    + '<summary style="cursor:pointer;font-weight:600;color:var(--color-primary-navy);font-size:var(--text-sm);padding:8px 0;">📍 Datos del inmueble</summary>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 0;">'
+    + _chipModal('Ciudad', d.inmueble.ciudad) + _chipModal('Dirección', d.inmueble.direccion) + _chipModal('Destino', d.inmueble.destino)
+    + _chipModal('Canon', '$' + _fmtNum(d.inmueble.canon)) + _chipModal('Póliza', d.inmueble.poliza) + _chipModal('Inmobiliaria', d.inmueble.inmobiliaria)
+    + '</div></details>';
+
+  // Sección: Evaluación Inquilino
+  html += _seccionEvaluacion('👤 Evaluación — ' + d.inquilino.nombre, d.inquilino);
+
+  // Sección: Codeudores
+  for (var c = 0; c < d.codeudores.length; c++) {
+    var coa = d.codeudores[c];
+    html += _seccionEvaluacion('👥 Codeudor ' + coa.numero + ' — ' + coa.nombre, coa);
+  }
+
+  // Sección: Resultado final
+  html += '<div style="margin-top:20px;padding:16px;background:rgba(37,49,80,0.03);border-radius:var(--radius-md);border:1px solid rgba(37,49,80,0.08);">'
+    + '<h4 style="margin:0 0 12px;font-size:var(--text-sm);color:var(--color-primary-navy);">📊 Resultado de la solicitud</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+    + _chipModal('Política ingresos', d.resultado.politicaIngresos)
+    + _chipModal('Resultado solicitud', d.resultado.resultadoSolicitud, true)
+    + _chipModal('Resultado lote', d.resultado.resultadoLote, true)
+    + _chipModal('COAs aprobados', d.resultado.numCoaAprob)
+    + _chipModal('COAs negados', d.resultado.numCoaNeg)
+    + _chipModal('COAs evaluados', d.resultado.coaEvaluados)
+    + '</div>';
+
+  if (d.resultado.detalleResultado) {
+    html += '<div style="margin-top:12px;padding:10px 12px;background:white;border-radius:var(--radius-sm);font-size:var(--text-sm);">'
+      + '<strong style="color:var(--color-mono-500);font-size:11px;text-transform:uppercase;">Detalle</strong><br>'
+      + d.resultado.detalleResultado + '</div>';
+  }
+  if (d.resultado.comentarios) {
+    html += '<div style="margin-top:8px;padding:10px 12px;background:white;border-radius:var(--radius-sm);font-size:var(--text-sm);">'
+      + '<strong style="color:var(--color-mono-500);font-size:11px;text-transform:uppercase;">Comentarios del analista</strong><br>'
+      + d.resultado.comentarios + '</div>';
+  }
+
+  // Footer con asignación y registro SAI
+  html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(0,0,0,0.06);display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;font-size:var(--text-sm);color:var(--color-mono-500);">'
+    + '<div>Asignada a: <strong style="color:var(--color-mono-900);">' + (d.asignacion.asignadaA || 'Sin asignar') + '</strong></div>'
+    + '<div>Registro SAI: <strong style="color:var(--color-mono-900);">' + (d.resultado.registroSAI || 'Pendiente') + '</strong></div>'
+    + '<div>Fecha evaluación: <strong style="color:var(--color-mono-900);">' + (d.resultado.fechaEvaluacion || 'Pendiente') + '</strong></div>'
+    + '</div></div>';
+
+  html += '</div></div>';
+  modal.innerHTML = html;
+}
+
+function _seccionEvaluacion(titulo, persona) {
+  var resFinal = (persona.resultadoFinal || '').toUpperCase();
+  var resBadge = resFinal === 'APROBADO' ? '<span class="badge badge--success" style="margin-left:8px;">' + resFinal + '</span>'
+    : resFinal === 'NEGADO' ? '<span class="badge badge--red" style="margin-left:8px;">' + resFinal + '</span>'
+    : resFinal ? '<span class="badge badge--gray" style="margin-left:8px;">' + resFinal + '</span>' : '';
+
+  return '<div style="margin-bottom:16px;padding:16px;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);">'
+    + '<div class="flex" style="align-items:center;margin-bottom:10px;"><h4 style="margin:0;font-size:var(--text-sm);color:var(--color-primary-navy);">' + titulo + '</h4>' + resBadge + '</div>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'
+    + _chipModal('Ingresos', persona.ingresos ? '$' + _fmtNum(persona.ingresos) : '-')
+    + _chipModal('Acierta', persona.acierta)
+    + _chipModal('Ocupación', persona.ocupacion)
+    + _chipModal('Resp. modelo', persona.respuestaModelo)
+    + _chipModal('Regla Dura', persona.reglaDura)
+    + '</div></div>';
+}
+
+function _chipModal(label, valor, destacar) {
+  var valStyle = destacar && valor ? 'font-weight:700;color:var(--color-primary-navy);' : 'color:var(--color-mono-800);';
+  return '<div style="font-size:var(--text-sm);">'
+    + '<div style="font-size:10px;text-transform:uppercase;letter-spacing:0.3px;color:var(--color-mono-500);margin-bottom:2px;">' + label + '</div>'
+    + '<div style="' + valStyle + '">' + (valor || '-') + '</div></div>';
+}
+
+function _cerrarModalSolicitud() {
+  var modal = document.getElementById('modalSolicitud');
+  if (modal) modal.remove();
+}
+
+// ============================================================
+//  VISTA: USUARIOS (CRUD)
+// ============================================================
+
+var _usuariosCache = null;
+
+function cargarVistaUsuarios() {
+  if (_usuariosCache) {
+    _renderizarUsuarios(_usuariosCache);
+    return;
+  }
+  callServer('api_obtenerUsuarios')
+    .then(function(datos) {
+      _usuariosCache = datos || [];
+      _renderizarUsuarios(_usuariosCache);
+    })
+    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar los usuarios.'); });
+}
+
+function _renderizarUsuarios(usuarios) {
+  var container = document.getElementById('viewDashboard');
+
+  // Agrupar por rol
+  var grupos = { LIDER: [], ADMIN: [], AUXILIAR: [], ANALISTA: [], COMERCIAL: [] };
+  for (var i = 0; i < usuarios.length; i++) {
+    var rol = usuarios[i].rol || 'COMERCIAL';
+    if (!grupos[rol]) grupos[rol] = [];
+    grupos[rol].push(usuarios[i]);
+  }
+
+  var ordenRoles = [
+    { key: 'ADMIN', label: 'Administradores', badge: 'badge--red' },
+    { key: 'LIDER', label: 'Líderes', badge: 'badge--navy' },
+    { key: 'AUXILIAR', label: 'Auxiliares de Análisis', badge: 'badge--orange' },
+    { key: 'ANALISTA', label: 'Analistas', badge: 'badge--teal' },
+    { key: 'COMERCIAL', label: 'Comerciales', badge: 'badge--gray' }
+  ];
+
+  var html = '<div class="stack">'
+    + '<div class="flex flex--between"><h2>Usuarios</h2>'
+    + '<button class="btn btn--primary" onclick="_mostrarFormUsuario(null)">+ Nuevo usuario</button></div>';
+
+  for (var r = 0; r < ordenRoles.length; r++) {
+    var grupo = ordenRoles[r];
+    var lista = grupos[grupo.key] || [];
+    if (lista.length === 0) continue;
+
+    html += '<div class="card card--flat" style="padding:0; overflow:hidden;">'
+      + '<div style="padding:12px 16px; background:rgba(37,49,80,0.03); border-bottom:1px solid rgba(0,0,0,0.06);">'
+      + '<div class="flex flex--between" style="align-items:center;">'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<span class="badge ' + grupo.badge + '">' + grupo.key + '</span>'
+      + '<strong style="font-size:var(--text-sm);">' + grupo.label + '</strong>'
+      + '</div>'
+      + '<small style="color:var(--color-mono-500);">' + lista.length + ' usuario(s)</small>'
+      + '</div></div>'
+      + '<table class="table"><tbody>';
+
+    for (var j = 0; j < lista.length; j++) {
+      var u = lista[j];
+      var extraInfo = '';
+      if (u.rol === 'ANALISTA') extraInfo = 'Cupo: ' + u.cupo;
+      else if (u.rol === 'COMERCIAL' && u.director) extraInfo = 'Dir: ' + u.director.split('@')[0];
+
+      html += '<tr>'
+        + '<td style="width:200px;"><strong>' + u.nombre + '</strong></td>'
+        + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + u.email + '</td>'
+        + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + extraInfo + '</td>'
+        + '<td style="width:50px; text-align:center;">' + (u.activo ? '<span style="color:#0d7a54;">✓</span>' : '<span style="color:#bd0f14;">✗</span>') + '</td>'
+        + '<td style="width:60px;"><button class="btn btn--ghost" style="padding:4px 8px; font-size:var(--text-sm);" onclick=\'_mostrarFormUsuario(' + JSON.stringify(u).replace(/'/g, "\\'") + ')\'>Editar</button></td>'
+        + '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _mostrarFormUsuario(usuario) {
+  var esNuevo = !usuario;
+  var u = usuario || { email: '', nombre: '', rol: 'COMERCIAL', cupo: 0, director: '', backup: '', backupActivo: false, activo: true };
+
+  // Crear modal overlay
+  var modal = document.createElement('div');
+  modal.id = 'modalUsuario';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.5);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;';
+
+  modal.innerHTML = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
+    + '<div style="padding:20px 24px;border-bottom:1px solid rgba(0,0,0,0.06);">'
+    + '<div class="flex flex--between"><h3 style="margin:0;">' + (esNuevo ? 'Nuevo usuario' : 'Editar: ' + u.nombre) + '</h3>'
+    + '<button onclick="_cerrarModal()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--color-mono-500);">✕</button></div></div>'
+    + '<div style="padding:24px;">'
+    + '<div class="stack" style="gap:16px;">'
+    + '<div><label>Email *</label><input class="input" id="uf_email" value="' + u.email + '" ' + (esNuevo ? '' : 'readonly style="opacity:0.6;"') + '></div>'
+    + '<div><label>Nombre *</label><input class="input" id="uf_nombre" value="' + u.nombre + '"></div>'
+    + '<div><label>Rol *</label><select class="input" id="uf_rol" onchange="_toggleCamposRol()">'
+    + '<option value="COMERCIAL"' + (u.rol === 'COMERCIAL' ? ' selected' : '') + '>Comercial</option>'
+    + '<option value="AUXILIAR"' + (u.rol === 'AUXILIAR' ? ' selected' : '') + '>Auxiliar</option>'
+    + '<option value="ANALISTA"' + (u.rol === 'ANALISTA' ? ' selected' : '') + '>Analista</option>'
+    + '<option value="LIDER"' + (u.rol === 'LIDER' ? ' selected' : '') + '>Líder</option>'
+    + '<option value="ADMIN"' + (u.rol === 'ADMIN' ? ' selected' : '') + '>Admin</option>'
+    + '</select></div>'
+    + '<div id="uf_cupoWrap" style="' + (u.rol === 'ANALISTA' ? '' : 'display:none;') + '"><label>Cupo de solicitudes</label><input class="input" id="uf_cupo" type="number" value="' + u.cupo + '"></div>'
+    + '<div id="uf_dirWrap" style="' + (u.rol === 'COMERCIAL' ? '' : 'display:none;') + '"><label>Director</label><input class="input" id="uf_director" value="' + u.director + '"></div>'
+    + '<div id="uf_backWrap" style="' + (u.rol === 'COMERCIAL' ? '' : 'display:none;') + '"><label>Backup</label><input class="input" id="uf_backup" value="' + u.backup + '"><label style="margin-top:8px;text-transform:none;font-size:var(--text-sm);"><input type="checkbox" id="uf_backupActivo" ' + (u.backupActivo ? 'checked' : '') + '> Backup activo</label></div>'
+    + '<div><label style="text-transform:none;font-size:var(--text-sm);"><input type="checkbox" id="uf_activo" ' + (u.activo ? 'checked' : '') + '> Usuario activo</label></div>'
+    + '</div></div>'
+    + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;">'
+    + '<button class="btn btn--ghost" onclick="_cerrarModal()">Cancelar</button>'
+    + '<button class="btn btn--primary" onclick="_guardarUsuario(' + esNuevo + ')">Guardar</button>'
+    + '</div></div>';
+
+  document.body.appendChild(modal);
+
+  // Cerrar con Escape
+  modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') _cerrarModal(); });
+  // Cerrar al hacer clic fuera
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModal(); });
+}
+
+function _cerrarModal() {
+  var modal = document.getElementById('modalUsuario');
+  if (modal) modal.remove();
+}
+
+function _toggleCamposRol() {
+  var rol = document.getElementById('uf_rol').value;
+  document.getElementById('uf_cupoWrap').style.display = rol === 'ANALISTA' ? '' : 'none';
+  document.getElementById('uf_dirWrap').style.display = rol === 'COMERCIAL' ? '' : 'none';
+  document.getElementById('uf_backWrap').style.display = rol === 'COMERCIAL' ? '' : 'none';
+}
+
+function _guardarUsuario(esNuevo) {
+  var datos = {
+    email: document.getElementById('uf_email').value,
+    nombre: document.getElementById('uf_nombre').value,
+    rol: document.getElementById('uf_rol').value,
+    cupo: document.getElementById('uf_cupo').value,
+    director: document.getElementById('uf_director').value,
+    backup: document.getElementById('uf_backup').value,
+    backupActivo: document.getElementById('uf_backupActivo').checked,
+    activo: document.getElementById('uf_activo').checked
+  };
+
+  if (!datos.email || !datos.nombre) {
+    alert('Email y nombre son obligatorios.');
+    return;
+  }
+
+  callServer('api_guardarUsuario', datos, esNuevo)
+    .then(function(res) {
+      if (res && res.ok) {
+        _cerrarModal();
+        _usuariosCache = null;
+        cargarVistaUsuarios();
+      } else {
+        alert(res ? res.mensaje : 'Error desconocido.');
+      }
+    })
+    .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+// ============================================================
+//  VISTA: DETALLE DE LOTE
+// ============================================================
+
+function _verDetalleLote(idLote) {
+  mostrarVista('viewLoading');
+  callServer('api_obtenerDetalleLote', idLote)
+    .then(function(data) {
+      if (!data || !data.lote) {
+        _mostrarError('No se encontró el lote "' + idLote + '".');
+        return;
+      }
+      _renderizarDetalleLote(data);
+    })
+    .catch(function(err) { console.error(err); _mostrarError('Error al cargar detalle del lote.'); });
+}
+
+function _renderizarDetalleLote(data) {
+  var l = data.lote;
+  var container = document.getElementById('viewDashboard');
+
+  var html = '<div class="stack">'
+    + '<div><button class="btn btn--ghost" onclick="cargarMisLotes(_lotesPageActual)">← Volver a lotes</button></div>'
+    // Header del lote
+    + '<div class="card card--flat" style="border-left:4px solid var(--color-primary-navy);">'
+    + '<div class="flex flex--between" style="flex-wrap:wrap; gap:var(--spacing-sm);">'
+    + '<div>'
+    + '<h2 style="margin-bottom:4px; font-size:var(--text-lg);">' + l.idLote + '</h2>'
+    + '<p style="margin:0; font-size:var(--text-sm); color:var(--color-mono-500);">Comercial: <strong>' + l.comercial + '</strong> · Póliza: <strong>' + l.poliza + '</strong> · Fecha: ' + l.fecha + '</p>'
+    + '</div>'
+    + '<div class="flex flex--gap-sm">'
+    + '<span class="badge badge--navy">' + data.solicitudes.length + ' solicitud(es)</span>'
+    + '</div></div></div>'
+    // Tabla de solicitudes
+    + '<div class="card card--flat" style="padding:0; overflow:hidden;">'
+    + '<table class="table">'
+    + '<thead><tr><th>#</th><th>Arrendatario</th><th>Identificación</th><th>Dirección</th><th>Canon</th><th>Estado</th></tr></thead>'
+    + '<tbody>';
+
+  for (var i = 0; i < data.solicitudes.length; i++) {
+    var s = data.solicitudes[i];
+    html += '<tr>'
+      + '<td style="text-align:center; color:var(--color-mono-500);">' + (i + 1) + '</td>'
+      + '<td><strong>' + s.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + s.destino + '</small></td>'
+      + '<td style="font-size:var(--text-sm);">' + s.tipoDoc + ' ' + s.identificacion + '</td>'
+      + '<td style="font-size:var(--text-sm);">' + s.ciudad + '<br><small>' + s.direccion + '</small></td>'
+      + '<td style="font-size:var(--text-sm);">$' + _fmtNum(s.canon) + '</td>'
+      + '<td>' + _badgeEstado(s.estado) + '</td>'
+      + '</tr>';
+  }
+
+  html += '</tbody></table></div></div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+// ============================================================
+//  VISTAS PLACEHOLDER
+// ============================================================
+
+function mostrarVistaRadicar() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack">'
+    + '<h2>Ingreso de Inducciones</h2>'
+    // Barra de consulta de lotes
+    + '<div class="card card--flat" style="padding:14px 16px;">'
+    + '<div class="flex flex--gap-sm" style="align-items:center;">'
+    + '<span style="color:var(--color-mono-500);">🔍</span>'
+    + '<input class="input" id="rad_consultaLote" type="text" placeholder="Ingresa el ID de tu lote para consultar su estado, ej: 7/4/2026-1985-1456" style="flex:1;padding:10px 14px;">'
+    + '<button class="btn btn--primary" style="padding:10px 18px;" onclick="_consultarLoteRadicar()">Consultar lote</button>'
+    + '</div></div>'
+    // Formatos de apoyo
+    + '<div class="card card--flat" style="padding:12px 16px;">'
+    + '<div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:10px;">'
+    + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);font-weight:600;">📥 FORMATOS DE APOYO:</span>'
+    + '<div class="flex flex--gap-sm">'
+    + '<a href="https://docs.google.com/spreadsheets/d/1gqD--fm9B6xtlQHTiKtN8mcH9QNokuKvCy0MLKbATRo/export?format=xlsx" target="_blank" class="btn btn--primary" style="padding:8px 14px;font-size:var(--text-sm);background:#16A34A;">📊 Planilla de Radicación</a>'
+    + '<a href="https://docs.google.com/document/d/1-L7mwwyHxkicsOMSpgCctJRqExgC9qMq/export?format=docx" target="_blank" class="btn btn--primary" style="padding:8px 14px;font-size:var(--text-sm);">📄 Formato Paz y Salvo</a>'
+    + '</div></div></div>'
+    // Información del lote
+    + '<div class="card card--flat">'
+    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:14px;">📋 Información del Lote</h4>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+    + '<div><label>Número de póliza *</label><input class="input" id="rad_poliza" type="number" placeholder="Ej: 483"></div>'
+    + '<div><label>Tasa de inducción IVA incluido (%) *</label><input class="input" id="rad_tasa" type="text" placeholder="Ej: 2,3"></div>'
+    + '</div>'
+    + '<div style="margin-top:14px;"><label>Notas de radicación</label><textarea class="input" id="rad_observaciones" rows="3" placeholder="Información adicional que consideres importante para el equipo de inducciones..." style="resize:vertical;"></textarea></div>'
+    + '</div>'
+    // Certificación de Paz y Salvo
+    + '<div class="card card--flat" style="border:2px solid var(--color-primary-red);background:rgba(189,15,20,0.02);">'
+    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-red);margin-bottom:8px;">📝 Certificación de Paz y Salvo</h4>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:0 0 14px;">Selecciona cómo deseas certificar el estado de cartera de los contratos:</p>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
+    // Opción A
+    + '<label style="cursor:pointer;padding:16px;border:2px solid var(--color-mono-300);border-radius:var(--radius-md);background:white;display:flex;align-items:flex-start;gap:10px;" id="rad_labelA" onclick="_selPS(\'A\')">'
+    + '<input type="radio" name="rad_tipoPS" value="checkbox" style="margin-top:3px;flex-shrink:0;">'
+    + '<div><strong style="display:block;font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:4px;text-transform:none;letter-spacing:0;">✓ Certificación manual</strong>'
+    + '<span style="font-size:12px;color:var(--color-mono-500);line-height:1.4;text-transform:none;letter-spacing:0;">Como comercial, certifico que los contratos de este lote se encuentran al día sin obligaciones pendientes. <strong style="color:var(--color-primary-red);">El soporte será solicitado en caso de aprobación.</strong></span></div></label>'
+    // Opción B
+    + '<label style="cursor:pointer;padding:16px;border:2px solid var(--color-mono-300);border-radius:var(--radius-md);background:white;display:flex;align-items:flex-start;gap:10px;" id="rad_labelB" onclick="_selPS(\'B\')">'
+    + '<input type="radio" name="rad_tipoPS" value="adjunto" style="margin-top:3px;flex-shrink:0;">'
+    + '<div><strong style="display:block;font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:4px;text-transform:none;letter-spacing:0;">📄 Adjuntar paz y salvo (no mayor a 30 días)</strong>'
+    + '<span style="font-size:12px;color:var(--color-mono-500);line-height:1.4;text-transform:none;letter-spacing:0;">Adjunta el documento emitido por la inmobiliaria en PDF. <strong style="color:#16A34A;">Agiliza la gestión al incluir el soporte desde el inicio.</strong></span></div></label>'
+    + '</div>'
+    + '<div id="rad_pdfZone" style="display:none;margin-top:14px;"><input type="file" id="rad_filePdf" accept=".pdf" class="input" style="padding:10px;"></div>'
+    + '</div>'
+    // Planilla de inducción
+    + '<div class="card card--flat">'
+    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:14px;">📤 Documentos de Soporte</h4>'
+    + '<div id="rad_dropZone" onclick="document.getElementById(\'rad_fileExcel\').click()" style="cursor:pointer;border:2px dashed var(--color-mono-300);border-radius:var(--radius-md);padding:24px;display:flex;align-items:center;gap:16px;transition:border-color 0.2s;">'
+    + '<div style="width:50px;height:50px;border-radius:var(--radius-md);background:#DCFCE7;color:#16A34A;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">📊</div>'
+    + '<div><strong style="display:block;color:var(--color-primary-navy);text-transform:none;letter-spacing:0;">Planilla de Inducción</strong>'
+    + '<span id="rad_dropLabel" style="font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic o arrastra el archivo aquí (.xlsx)</span></div>'
+    + '</div>'
+    + '<input type="file" id="rad_fileExcel" accept=".xlsx,.xls" style="display:none;">'
+    + '<p id="rad_excelInfo" style="margin:8px 0 0;font-size:var(--text-sm);color:var(--color-mono-500);"></p>'
+    + '<p style="text-align:center;font-size:12px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:8px 14px;margin-top:14px;">Recuerda usar la <strong>planilla actualizada (formato rojo)</strong> disponible en la barra de descargas</p>'
+    + '</div>'
+    // Botones
+    + '<button class="btn btn--primary" id="rad_btnEnviar" onclick="_procesarRadicacion()" style="width:100%;padding:16px;font-size:var(--text-base);">⚡ Revisar y enviar a radicación</button>'
+    + '<button class="btn btn--ghost" onclick="_limpiarFormRadicacion()" style="width:100%;padding:12px;font-size:var(--text-sm);">🧹 Limpiar formulario</button>'
+    + '<div id="rad_errores" style="display:none;"></div>'
+    + '</div>';
+  mostrarVista('viewDashboard');
+
+  setTimeout(function() {
+    var f = document.getElementById('rad_fileExcel');
+    if (f) f.addEventListener('change', function() { _leerExcelRad(this.files[0]); });
+    // Restaurar borrador si existe
+    _restaurarBorradorRad();
+    // Drag & drop en zona de Excel
+    var dropZone = document.getElementById('rad_dropZone');
+    if (dropZone) {
+      dropZone.ondragover = function(e) { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary-navy)'; dropZone.style.background = 'rgba(37,49,80,0.03)'; };
+      dropZone.ondragleave = function() { dropZone.style.borderColor = 'var(--color-mono-300)'; dropZone.style.background = ''; };
+      dropZone.ondrop = function(e) { e.preventDefault(); dropZone.style.borderColor = ''; dropZone.style.background = '';
+        if (e.dataTransfer.files[0]) { document.getElementById('rad_fileExcel').files = e.dataTransfer.files; _leerExcelRad(e.dataTransfer.files[0]); }
+      };
+    }
+    // Auto-guardar borrador al escribir
+    ['rad_poliza', 'rad_tasa', 'rad_observaciones'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', _guardarBorradorRad);
+    });
+  }, 100);
+}
+
+function _limpiarFormRadicacion() {
+  document.getElementById('rad_poliza').value = '';
+  document.getElementById('rad_tasa').value = '';
+  document.getElementById('rad_observaciones').value = '';
+  var radios = document.querySelectorAll('input[name="rad_tipoPS"]');
+  for (var i = 0; i < radios.length; i++) radios[i].checked = false;
+  document.getElementById('rad_labelA').style.borderColor = 'var(--color-mono-300)';
+  document.getElementById('rad_labelA').style.background = 'white';
+  document.getElementById('rad_labelB').style.borderColor = 'var(--color-mono-300)';
+  document.getElementById('rad_labelB').style.background = 'white';
+  document.getElementById('rad_pdfZone').style.display = 'none';
+  document.getElementById('rad_fileExcel').value = '';
+  document.getElementById('rad_excelInfo').textContent = '';
+  document.getElementById('rad_dropLabel').textContent = 'Haz clic o arrastra el archivo aquí (.xlsx)';
+  document.getElementById('rad_dropZone').style.borderColor = 'var(--color-mono-300)';
+  var errPanel = document.getElementById('rad_errores');
+  if (errPanel) errPanel.style.display = 'none';
+  _radExcelParseado = null;
+}
+
+function _consultarLoteRadicar() {
+  var id = (document.getElementById('rad_consultaLote').value || '').trim();
+  if (!id) return;
+  _filtroEstadoActivo = '';
+  _busquedaLoteActiva = id;
+  navegarA('lotes');
+}
+
+var _radExcelParseado = null;
+
+function _selPS(op) {
+  var lA = document.getElementById('rad_labelA');
+  var lB = document.getElementById('rad_labelB');
+  var pz = document.getElementById('rad_pdfZone');
+  if (op === 'A') { lA.style.borderColor='var(--color-primary-navy)'; lA.style.background='rgba(37,49,80,0.03)'; lB.style.borderColor='var(--color-mono-300)'; lB.style.background=''; pz.style.display='none'; }
+  else { lB.style.borderColor='var(--color-primary-navy)'; lB.style.background='rgba(37,49,80,0.03)'; lA.style.borderColor='var(--color-mono-300)'; lA.style.background=''; pz.style.display='block'; }
+}
+
+function _leerExcelRad(file) {
+  if (!file) return;
+  var info = document.getElementById('rad_excelInfo');
+  var dropZone = document.getElementById('rad_dropZone');
+  var dropLabel = document.getElementById('rad_dropLabel');
+  _radExcelParseado = null;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var wb = XLSX.read(e.target.result, { type: 'array' });
+      var datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+      if (datos.length >= 4 && String(datos[3][2] || '').trim().toUpperCase() !== 'AMPARO INTEGRAL') {
+        info.textContent = '⚠️ Plantilla incorrecta'; info.style.color = '#bd0f14';
+        dropZone.style.borderColor = '#bd0f14'; return;
+      }
+      _radExcelParseado = datos;
+      var count = 0;
+      for (var i = 4; i < datos.length; i++) { if (datos[i] && String(datos[i][9] || '').trim()) count++; }
+      info.style.color = '#0d7a54';
+      info.textContent = '✅ ' + count + ' contrato(s) detectado(s)';
+      dropZone.style.borderColor = '#16A34A';
+      dropZone.style.background = 'rgba(22,163,74,0.02)';
+      dropLabel.textContent = file.name + ' ✓';
+    } catch (err) { info.textContent = '⚠️ No se pudo leer'; info.style.color = '#bd0f14'; }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function _procesarRadicacion() {
+  var poliza = (document.getElementById('rad_poliza').value || '').trim();
+  var tasa = (document.getElementById('rad_tasa').value || '').trim();
+  var fileExcel = document.getElementById('rad_fileExcel').files[0];
+  var radios = document.querySelectorAll('input[name="rad_tipoPS"]');
+  var tipoPS = ''; for (var r = 0; r < radios.length; r++) { if (radios[r].checked) tipoPS = radios[r].value; }
+  var filePdf = document.getElementById('rad_filePdf') ? document.getElementById('rad_filePdf').files[0] : null;
+
+  if (!poliza || !tasa) { alert('Completa póliza y tasa.'); return; }
+  if (!fileExcel || !_radExcelParseado) { alert('Carga la planilla Excel.'); return; }
+  if (!tipoPS) { alert('Selecciona una opción de paz y salvo.'); return; }
+  if (tipoPS === 'adjunto' && !filePdf) { alert('Adjunta el PDF de paz y salvo.'); return; }
+
+  // Pre-validación frontend (mismas reglas que el servidor, feedback instantáneo)
+  var erroresFront = _preValidarExcel(_radExcelParseado);
+  if (erroresFront.length > 0) {
+    _mostrarErroresRadicacion(erroresFront, null);
+    return;
+  }
+
+  var btn = document.getElementById('rad_btnEnviar');
+  btn.disabled = true; btn.textContent = '⏳ Procesando...';
+
+  // Mostrar modal de progreso
+  _mostrarModalProgreso();
+
+  _archivoABase64(fileExcel).then(function(excelObj) {
+    _avanzarProgreso(1);
+    var pdfPromise = (tipoPS === 'adjunto' && filePdf) ? _archivoABase64(filePdf) : Promise.resolve(null);
+    return pdfPromise.then(function(pdfObj) {
+      _avanzarProgreso(2);
+      var formData = {
+        poliza: poliza, tasaNegociacion: tasa, observaciones: document.getElementById('rad_observaciones').value,
+        excel: excelObj, excelParseado: _radExcelParseado,
+        tipoPazYSalvo: tipoPS, pazYSalvoPdf: pdfObj
+      };
+      _avanzarProgreso(3);
+      return callServer('motorDeAuditoria', formData);
+    });
+  }).then(function(res) {
+    _avanzarProgreso(5);
+    setTimeout(function() {
+      _cerrarModalProgreso();
+      btn.disabled = false; btn.textContent = '⚡ Revisar y enviar a radicación';
+
+      if (res.status === 'OK') {
+        // Limpiar borrador
+        localStorage.removeItem('borradorRadNuevo');
+        // Mostrar éxito
+        var cont = document.getElementById('viewDashboard');
+        cont.innerHTML = '<div class="stack"><div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
+          + '<div style="font-size:3rem;margin-bottom:var(--spacing-md);">🎉</div>'
+          + '<h2>¡Lote radicado con éxito!</h2>'
+          + '<p style="color:var(--color-mono-500);">Tu lote fue recibido y será procesado por el equipo de inducciones.</p>'
+          + '<div style="background:rgba(13,122,84,0.05);border:2px dashed #0d7a54;border-radius:var(--radius-md);padding:20px;margin:16px auto;max-width:300px;">'
+          + '<small style="color:var(--color-mono-500);text-transform:uppercase;letter-spacing:1px;">ID de Lote</small><br>'
+          + '<strong style="font-family:var(--font-mono);font-size:var(--text-xl);color:#0d7a54;">' + res.idLote + '</strong></div>'
+          + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);">Guarda este ID para consultar el estado en cualquier momento.</p>'
+          + '<button class="btn btn--primary" style="margin-top:16px;" onclick="navegarA(\'dashboard\')">Finalizar</button>'
+          + '</div></div>';
+      } else {
+        _mostrarErroresRadicacion(res.detalles || [], res.archivoMarcado);
+      }
+    }, 400);
+  }).catch(function(err) {
+    _cerrarModalProgreso();
+    btn.disabled = false; btn.textContent = '⚡ Revisar y enviar a radicación';
+    alert('Error: ' + (err.message || err));
+  });
+
+  // Guardar borrador
+  _guardarBorradorRad();
+}
+
+// ── Modal de progreso ──
+var _pasosProgreso = [
+  { pct: 0, titulo: 'Preparando tu radicación', sub: 'Un momento mientras alistamos todo...' },
+  { pct: 15, titulo: 'Leyendo la planilla', sub: 'Cargando los documentos adjuntos...' },
+  { pct: 30, titulo: 'Documentos recibidos', sub: 'Preparando la información del lote...' },
+  { pct: 50, titulo: 'Validando con inteligencia artificial', sub: 'Revisando campos de destino con IA generativa...' },
+  { pct: 85, titulo: 'Casi listo', sub: 'Guardando archivos y registrando el lote...' },
+  { pct: 100, titulo: 'Radicación completada', sub: 'Tu lote fue procesado exitosamente.' }
+];
+
+function _mostrarModalProgreso() {
+  var modal = document.createElement('div');
+  modal.id = 'modalProgreso';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.7);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;z-index:300;';
+  modal.innerHTML = '<div style="background:white;padding:40px;border-radius:var(--radius-lg);text-align:center;max-width:380px;width:100%;box-shadow:var(--shadow-lg);">'
+    + '<div class="spinner" style="margin:0 auto 20px;"></div>'
+    + '<h3 id="progTitulo" style="margin:0 0 6px;">Preparando tu radicación</h3>'
+    + '<p id="progSub" style="color:var(--color-mono-500);font-size:var(--text-sm);margin:0 0 16px;">Un momento mientras alistamos todo...</p>'
+    + '<div style="width:100%;background:var(--color-mono-100);border-radius:var(--radius-full);height:6px;overflow:hidden;">'
+    + '<div id="progBar" style="height:6px;width:0%;background:var(--gradient-brand);border-radius:var(--radius-full);transition:width 0.5s ease;"></div>'
+    + '</div></div>';
+  document.body.appendChild(modal);
+}
+
+function _avanzarProgreso(paso) {
+  var info = _pasosProgreso[paso] || _pasosProgreso[0];
+  var bar = document.getElementById('progBar');
+  var tit = document.getElementById('progTitulo');
+  var sub = document.getElementById('progSub');
+  if (bar) bar.style.width = info.pct + '%';
+  if (tit) tit.textContent = info.titulo;
+  if (sub) sub.textContent = info.sub;
+}
+
+function _cerrarModalProgreso() {
+  var m = document.getElementById('modalProgreso');
+  if (m) m.remove();
+}
+
+// ── Borrador en localStorage ──
+function _guardarBorradorRad() {
+  var data = {
+    poliza: document.getElementById('rad_poliza').value,
+    tasa: document.getElementById('rad_tasa').value,
+    observaciones: document.getElementById('rad_observaciones').value,
+    tipoPS: document.querySelector('input[name="rad_tipoPS"]:checked') ? document.querySelector('input[name="rad_tipoPS"]:checked').value : ''
+  };
+  localStorage.setItem('borradorRadNuevo', JSON.stringify(data));
+}
+
+function _restaurarBorradorRad() {
+  var saved = localStorage.getItem('borradorRadNuevo');
+  if (!saved) return;
+  var data = JSON.parse(saved);
+  var p = document.getElementById('rad_poliza');
+  var t = document.getElementById('rad_tasa');
+  var o = document.getElementById('rad_observaciones');
+  if (p && data.poliza) p.value = data.poliza;
+  if (t && data.tasa) t.value = data.tasa;
+  if (o && data.observaciones) o.value = data.observaciones;
+  if (data.tipoPS === 'checkbox') _selPS('A');
+  if (data.tipoPS === 'adjunto') _selPS('B');
+}
+
+// ── Pre-validación frontend ──
+function _preValidarExcel(data) {
+  var errores = [];
+  if (!data || data.length < 5) return errores;
+  var titulos = data[3] || [];
+  var mapaLlaves = {};
+
+  for (var i = 4; i < data.length; i++) {
+    var fila = data[i];
+    var nF = i + 1;
+    var inq = String(fila[9] || '').trim();
+    if (!inq) continue;
+
+    // Campos obligatorios
+    [1,2,4,5,6,9,10,11].forEach(function(idx) {
+      if (!String(fila[idx] || '').trim()) {
+        errores.push({ fila: nF, campo: String(titulos[idx] || 'Col '+(idx+1)), motivo: 'Dato faltante.' });
+      }
+    });
+
+    // Celular o correo
+    var cel = String(fila[12] || '').trim().replace(/[\s-]/g, '');
+    var cor = String(fila[13] || '').trim();
+    if (!cel && !cor) {
+      errores.push({ fila: nF, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
+    }
+
+    // Duplicados verticales
+    var llave = (String(fila[11] || '').trim() + '|' + String(fila[5] || '').trim()).toUpperCase();
+    if (mapaLlaves[llave]) {
+      errores.push({ fila: nF, campo: 'DUPLICADO', motivo: 'Contrato repetido (ver fila ' + mapaLlaves[llave] + ').' });
+    } else { mapaLlaves[llave] = nF; }
+  }
+  return errores;
+}
+
+// ── Mostrar errores con descarga de archivo marcado ──
+function _mostrarErroresRadicacion(errores, archivoMarcado) {
+  var panel = document.getElementById('rad_errores');
+  if (!panel) return;
+
+  var html = '<div class="card card--flat" style="border-left:4px solid var(--color-primary-red);margin-top:16px;">'
+    + '<div class="flex flex--between" style="align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">'
+    + '<h4 style="color:var(--color-primary-red);margin:0;">⚠️ Ajustes necesarios (' + errores.length + ')</h4>';
+
+  if (archivoMarcado && archivoMarcado.base64) {
+    html += '<button class="btn btn--danger" style="padding:8px 14px;font-size:var(--text-sm);" onclick="_descargarMarcado()">📥 Descargar planilla con observaciones</button>';
+  }
+
+  html += '</div><table class="table"><thead><tr><th>Fila</th><th>Campo</th><th>Observación</th></tr></thead><tbody>';
+  for (var i = 0; i < errores.length; i++) {
+    var e = errores[i];
+    html += '<tr><td style="text-align:center;">' + (e.fila || '-') + '</td><td><strong>' + (e.campo || '') + '</strong></td><td>' + (e.motivo || '') + '</td></tr>';
+  }
+  html += '</tbody></table></div>';
+
+  panel.innerHTML = html;
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth' });
+
+  // Guardar referencia al archivo marcado para descarga
+  if (archivoMarcado) window._archivoMarcadoActual = archivoMarcado;
+}
+
+function _descargarMarcado() {
+  var am = window._archivoMarcadoActual;
+  if (!am || !am.base64) return;
+  var byteChars = atob(am.base64);
+  var byteNums = new Array(byteChars.length);
+  for (var i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i);
+  var blob = new Blob([new Uint8Array(byteNums)], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url; a.download = am.nombre || 'Ajustes_Requeridos.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function mostrarVistaEnConstruccion(seccion) {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack">'
+    + '<div class="card" style="text-align:center; padding:var(--spacing-2xl);">'
+    + '<div style="font-size:2.5rem; margin-bottom:var(--spacing-md);">🚧</div>'
+    + '<h3>' + seccion + '</h3>'
+    + '<p>Esta sección está en construcción.</p>'
+    + '</div></div>';
+  mostrarVista('viewDashboard');
+}
+
+function _urlLegacy() {
+  // URL sin ?v=2 → va al frontend actual
+  return window.location.href.split('?')[0];
+}
+
+function _mostrarError(mensaje) {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="card" style="border-left:4px solid var(--color-primary-red); padding:var(--spacing-lg);">'
+    + '<p style="margin:0;">' + mensaje + '</p>'
+    + '</div>';
+  mostrarVista('viewDashboard');
+}
+
+// Iniciar la app
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', inicializarApp);
+} else {
+  inicializarApp();
+}
+</script>

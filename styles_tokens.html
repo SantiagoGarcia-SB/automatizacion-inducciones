@@ -1,0 +1,86 @@
+<style>
+/**
+ * ============================================================
+ * DESIGN TOKENS — El Libertador Brand Book
+ * Fuente única de verdad para todo el sistema visual.
+ * Nunca hardcodear colores, fuentes ni espaciados fuera de aquí.
+ * ============================================================
+ */
+:root {
+  /* ── Colores primarios (predominan siempre) ── */
+  --color-primary-navy: #253150;
+  --color-primary-red: #bd0f14;
+
+  /* ── Colores secundarios (solo acento puntual) ── */
+  --color-accent-darkred: #a1161b;
+  --color-accent-red: #e11f27;
+  --color-accent-orange: #ffa300;
+  --color-accent-teal: #0fbdb7;
+
+  /* ── Escala monocromática ── */
+  --color-mono-900: #231f20;
+  --color-mono-800: #403f3f;
+  --color-mono-500: #807e7e;
+  --color-mono-300: #bfbebe;
+  --color-mono-100: #ebe7e8;
+  --color-mono-0: #ffffff;
+
+  /* ── Gradiente corporativo (rojo izq → azul der) ── */
+  --gradient-brand: linear-gradient(90deg, var(--color-primary-red) 0%, var(--color-primary-navy) 100%);
+
+  /* ── Tipografía ── */
+  --font-body: 'Ciencuadras', 'Inter', system-ui, sans-serif;
+  --font-heading: 'Ciencuadras', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Roboto Mono', monospace;
+
+  /* ── Escala tipográfica ── */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 2rem;
+
+  /* ── Pesos tipográficos ── */
+  --font-light: 300;
+  --font-regular: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+
+  /* ── Espaciado ── */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  /* ── Radios de borde ── */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* ── Sombras ── */
+  --shadow-sm: 0 1px 3px rgba(35, 31, 32, 0.08);
+  --shadow-md: 0 4px 6px -1px rgba(35, 31, 32, 0.06), 0 2px 4px -2px rgba(35, 31, 32, 0.04);
+  --shadow-lg: 0 10px 20px -4px rgba(35, 31, 32, 0.1);
+
+  /* ── Layout ── */
+  --max-width-content: 960px;
+  --max-width-wide: 1200px;
+  --sidebar-width: 240px;
+  --header-height: 56px;
+
+  /* ── Transiciones ── */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+  --transition-slow: 400ms ease;
+}
+
+/* ── Google Font (Inter como fallback principal) ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap');
+</style>

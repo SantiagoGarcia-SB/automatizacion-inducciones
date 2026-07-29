@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Inducciones | El Libertador</title>
+  <link rel="icon" href="https://www.ellibertador.co/favicon.ico" type="image/x-icon">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <?!= include('styles_tokens'); ?>
+  <?!= include('styles_main'); ?>
+</head>
+<body>
+  <div class="app-layout" id="app">
+
+    <!-- Header -->
+    <header class="app-layout__header app-header">
+      <div class="app-header__left">
+        <button class="app-header__menu-btn" id="menuToggle" aria-label="Abrir menú">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12h18M3 6h18M3 18h18"/>
+          </svg>
+        </button>
+        <img src="https://www.ellibertador.co/assets/img/logo.svg"
+             alt="El Libertador" class="app-header__logo" height="28"
+             style="filter: brightness(0) invert(1);">
+        <span class="app-header__divider"></span>
+        <span class="app-header__title">Inducciones</span>
+      </div>
+      <div class="app-header__right">
+        <span class="app-header__user" id="headerUser">Cargando...</span>
+        <span class="badge badge--navy" id="headerRol"></span>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <nav class="app-layout__sidebar app-sidebar" id="sidebar">
+      <ul class="app-sidebar__nav" id="navMenu">
+        <!-- Se llena dinámicamente según rol -->
+      </ul>
+    </nav>
+
+    <!-- Contenido principal -->
+    <main class="app-layout__main" id="mainContent">
+      <!-- Vista por defecto: loading -->
+      <div class="flex flex--center" style="height:60vh;" id="viewLoading">
+        <div class="stack" style="align-items:center; gap:var(--spacing-md);">
+          <div class="spinner"></div>
+          <p style="color:var(--color-mono-500);">Cargando...</p>
+        </div>
+      </div>
+
+      <!-- Vistas se inyectan aquí dinámicamente -->
+      <div id="viewDashboard" style="display:none;"></div>
+      <div id="viewNoAcceso" style="display:none;">
+        <div class="card" style="text-align:center; padding:var(--spacing-2xl);">
+          <div style="font-size:3rem; margin-bottom:var(--spacing-md);">🔒</div>
+          <h2>No tienes acceso a este aplicativo</h2>
+          <p style="margin-top:var(--spacing-md);">
+            Tu correo no está registrado en el sistema.<br>
+            Contacta a tu líder para que te habilite el acceso.
+          </p>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <?!= include('scripts_apiClient'); ?>
+  <script>
+    // Datos pre-cargados en server-side (cero latencia para menú + usuario)
+    var __INIT__ = <?!= datosIniciales ?>;
+  </script>
+  <?!= include('scripts_app'); ?>
+</body>
+</html>

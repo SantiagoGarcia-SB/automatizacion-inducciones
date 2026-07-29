@@ -41,7 +41,36 @@ const DESTINOS_INVALIDOS = new Set([
 //  PUNTO DE ENTRADA WEB
 // ============================================================
 
-function doGet() {
+function doGet(e) {
+  // Nuevo frontend accesible con ?v=2 (no afecta operación actual)
+  if (e && e.parameter && e.parameter.v === '2') {
+    var template = HtmlService.createTemplateFromFile('IndexNuevo');
+    // Pre-cargar datos del usuario + dashboard en server-side
+    var usuario = obtenerUsuarioActual_v2();
+    var datosIniciales = { usuario: usuario };
+
+    // Si está autorizado, pre-cargar resumen y primeros lotes
+    if (usuario && usuario.autorizado) {
+      try {
+        var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
+        datosIniciales.resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
+        datosIniciales.lotes = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 10, '', '');
+      } catch (err) {
+        // Si falla la pre-carga, no bloquear — el frontend pedirá después
+        datosIniciales.resumen = null;
+        datosIniciales.lotes = null;
+      }
+    }
+
+    template.datosIniciales = JSON.stringify(datosIniciales);
+    return template.evaluate()
+      .setTitle('Inducciones | El Libertador')
+      .setFaviconUrl("https://www.ellibertador.co/favicon.ico")
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+
+  // Frontend actual (operación sin cambios)
   return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle('Ingreso de Inducciones | El Libertador')
     .setFaviconUrl("https://www.ellibertador.co/favicon.ico")

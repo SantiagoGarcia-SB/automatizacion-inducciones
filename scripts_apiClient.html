@@ -1,0 +1,84 @@
+<script>
+/**
+ * ============================================================
+ * API Client — Wrapper promisificado de google.script.run
+ * Con retry automático para errores transitorios.
+ * ============================================================
+ */
+
+var _requestsActivos = 0;
+
+/**
+ * Llama una función del backend con retry y manejo de errores.
+ * @param {string} fn - Nombre de la función en Api.js
+ * @param {...*} args - Argumentos para la función
+ * @returns {Promise<*>} Resultado de la función
+ */
+function callServer(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  var MAX_RETRIES = 2;
+  var BASE_DELAY = 1500;
+
+  return _intentarLlamada(fn, args, 0, MAX_RETRIES, BASE_DELAY);
+}
+
+function _intentarLlamada(fn, args, intento, maxRetries, baseDelay) {
+  return new Promise(function(resolve, reject) {
+    var runner = google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(function(error) {
+        var msg = String(error.message || error || '');
+        var esTransitorio = msg.indexOf('Service') !== -1
+          || msg.indexOf('Timeout') !== -1
+          || msg.indexOf('unavailable') !== -1;
+
+        if (intento < maxRetries && esTransitorio) {
+          var delay = baseDelay * Math.pow(2, intento);
+          setTimeout(function() {
+            _intentarLlamada(fn, args, intento + 1, maxRetries, baseDelay)
+              .then(resolve)
+              .catch(reject);
+          }, delay);
+        } else {
+          reject(error);
+        }
+      });
+
+    runner[fn].apply(runner, args);
+  });
+}
+
+/**
+ * Versión con spinner automático.
+ * @param {string} fn - Nombre de la función
+ * @param {...*} args - Argumentos
+ * @returns {Promise<*>}
+ */
+function callServerConSpinner(fn) {
+  var args = Array.prototype.slice.call(arguments);
+  _requestsActivos++;
+  if (_requestsActivos === 1) _mostrarSpinner();
+
+  return callServer.apply(null, args)
+    .then(function(result) {
+      _requestsActivos--;
+      if (_requestsActivos === 0) _ocultarSpinner();
+      return result;
+    })
+    .catch(function(error) {
+      _requestsActivos--;
+      if (_requestsActivos === 0) _ocultarSpinner();
+      throw error;
+    });
+}
+
+function _mostrarSpinner() {
+  var el = document.getElementById('viewLoading');
+  if (el) el.style.display = 'flex';
+}
+
+function _ocultarSpinner() {
+  var el = document.getElementById('viewLoading');
+  if (el) el.style.display = 'none';
+}
+</script>
