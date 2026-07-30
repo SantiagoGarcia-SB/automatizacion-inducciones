@@ -1,0 +1,129 @@
+<style>
+/**
+ * ============================================================
+ * LA LÍNEA DE VIDA — Elemento signature
+ * Barra de 3px bajo el header. Gradiente corporativo.
+ * Comunica progreso contextual según rol.
+ * ============================================================
+ */
+.lifeline {
+  position: relative;
+  width: 100%;
+  height: var(--lifeline-height);
+  background: var(--color-mono-100);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.lifeline__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--gradient-brand);
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  transition: width var(--duration-slow) var(--ease-out);
+  will-change: width;
+}
+
+/* Shimmer sutil cuando está activo (no en reduced motion) */
+.lifeline__fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: lifeline-shimmer 2.5s var(--ease-in-out) infinite;
+}
+
+@keyframes lifeline-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lifeline__fill::after {
+    animation: none;
+  }
+}
+</style>
+
+<!-- HTML del componente -->
+<div class="lifeline" id="lifeline" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso general">
+  <div class="lifeline__fill" id="lifelineFill" style="width: 0%;"></div>
+</div>
+
+<script>
+/**
+ * Actualiza La Línea de Vida según el contexto del usuario.
+ * Se llama después de obtener datos del dashboard/resumen.
+ *
+ * @param {string} rol - COMERCIAL | AUXILIAR | ANALISTA | LIDER | ADMIN
+ * @param {Object} datos - Datos de contexto según rol
+ */
+function actualizarLineasDeVida(rol, datos) {
+  var fill = document.getElementById('lifelineFill');
+  var bar = document.getElementById('lifeline');
+  if (!fill || !bar) return;
+
+  var pct = 0;
+  var label = '';
+
+  switch (rol) {
+    case 'COMERCIAL':
+      // Progreso del último lote: pendiente(0%) → radicado(25%) → análisis(50%) → terminado(100%)
+      if (datos && datos.terminados > 0) pct = 100;
+      else if (datos && datos.enAnalisis > 0) pct = 60;
+      else if (datos && datos.pendientePS > 0) pct = 40;
+      else if (datos && datos.radicadosSemana > 0) pct = 20;
+      else pct = 5; // Mínimo visible para que se vea que la barra existe
+      label = 'Progreso de tus inducciones';
+      break;
+
+    case 'AUXILIAR':
+      // Cuántas de la cola ha procesado hoy (simulado con datos disponibles)
+      if (datos && datos.inducciones > 0) {
+        var procesadas = (datos.terminados || 0) + (datos.enAnalisis || 0);
+        pct = Math.min(100, Math.round((procesadas / datos.inducciones) * 100));
+      } else { pct = 5; }
+      label = 'Solicitudes procesadas';
+      break;
+
+    case 'ANALISTA':
+      // Cupo usado vs disponible
+      if (datos && datos.cupo > 0) {
+        pct = Math.round(((datos.activas || 0) / datos.cupo) * 100);
+      } else { pct = 5; }
+      label = 'Cupo utilizado';
+      break;
+
+    case 'LIDER':
+    case 'ADMIN':
+      // Salud del pipeline: % terminados sobre total
+      if (datos && datos.inducciones > 0) {
+        pct = Math.min(100, Math.round((datos.terminados / datos.inducciones) * 100));
+      } else { pct = 5; }
+      label = 'Salud del pipeline';
+      break;
+
+    default:
+      pct = 5;
+      label = 'Progreso';
+  }
+
+  // Asegurar mínimo visible
+  pct = Math.max(3, Math.min(100, pct));
+
+  fill.style.width = pct + '%';
+  bar.setAttribute('aria-valuenow', pct);
+  bar.setAttribute('aria-label', label + ': ' + pct + '%');
+}
+</script>

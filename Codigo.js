@@ -45,21 +45,28 @@ function doGet(e) {
   // Nuevo frontend accesible con ?v=2 (no afecta operación actual)
   if (e && e.parameter && e.parameter.v === '2') {
     var template = HtmlService.createTemplateFromFile('IndexNuevo');
-    // Pre-cargar datos del usuario + dashboard en server-side
     var usuario = obtenerUsuarioActual_v2();
     var datosIniciales = { usuario: usuario };
 
-    // Si está autorizado, pre-cargar resumen y primeros lotes
+    // Pre-cargar solo el resumen (ligero, cacheado en CacheService)
     if (usuario && usuario.autorizado) {
       try {
         var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-        datosIniciales.resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
-        datosIniciales.lotes = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 10, '', '');
+        var cacheKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+        var cache = CacheService.getScriptCache();
+        var resumenCached = cache.get(cacheKey);
+
+        if (resumenCached) {
+          datosIniciales.resumen = JSON.parse(resumenCached);
+        } else {
+          datosIniciales.resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
+          cache.put(cacheKey, JSON.stringify(datosIniciales.resumen), 60);
+        }
       } catch (err) {
-        // Si falla la pre-carga, no bloquear — el frontend pedirá después
         datosIniciales.resumen = null;
-        datosIniciales.lotes = null;
       }
+      // NO pre-cargamos lotes (se cargan al navegar, con cache local en frontend)
+      datosIniciales.lotes = null;
     }
 
     template.datosIniciales = JSON.stringify(datosIniciales);
@@ -504,11 +511,17 @@ function motorDeAuditoria(formData) {
 
       filaFinal[61] = uuidUnicoFila; 
 
-      // SALVAVIDAS 1: Protegemos contra nulos y errores de tipeo
+      // SALVAVIDAS 1: Protegemos contra nulos, errores de tipeo e inyección de fórmulas
       const filaProcesada = filaFinal.map(dato => {
         if (dato === undefined || dato === null) return ""; 
-        if (typeof dato === 'string' && !dato.includes('@') && !dato.includes('/')) {
-          return dato.toUpperCase();
+        if (typeof dato === 'string') {
+          // Sanitizar inyección de fórmulas (prevenir =, +, -, @ al inicio)
+          if (/^[=+\-@]/.test(dato)) {
+            dato = "'" + dato;
+          }
+          if (!dato.includes('@') && !dato.includes('/')) {
+            return dato.toUpperCase();
+          }
         }
         return dato;
       });
@@ -588,10 +601,10 @@ function motorDeAuditoria(formData) {
     console.error("Error crítico durante la radicación: ", e);
     _registrarEvento_("ERROR", "Codigo.js", "Error crítico en motorDeAuditoria", e.toString());
 
-    // Mensaje con detalle técnico para diagnóstico (cambiar a amigable después de resolver)
+    // Mensaje amigable al usuario, detalle técnico solo en logs
     return {
       status: "ERROR",
-      detalles: [{ fila: "SISTEMA", campo: "Error de procesamiento", motivo: "Error interno: " + e.toString() }]
+      detalles: [{ fila: "SISTEMA", campo: "Error de procesamiento", motivo: "Ocurrió un problema al procesar tu radicación. Intenta de nuevo en unos minutos. Si el problema persiste, contacta al equipo de inducciones." }]
     };
 
   } finally {

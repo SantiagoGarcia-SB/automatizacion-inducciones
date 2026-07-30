@@ -1,5 +1,7 @@
 # Automatización de Inducciones — El Libertador
 
+> ⚠️ **Migración en curso**: Este proyecto tiene una arquitectura nueva en desarrollo que convive con el legacy. El frontend nuevo se accede con `?v=2` en la URL del deploy. Ver documentación completa en la carpeta `docs/` (arquitectura, UI/UX, migración, backlog, decisiones técnicas).
+
 ## Descripción General
 
 Sistema web desarrollado sobre **Google Apps Script** que automatiza el proceso de radicación de inducciones para la empresa **Investigaciones y Cobranzas El Libertador**. Permite a los ejecutivos comerciales cargar lotes de contratos de arrendamiento mediante una planilla Excel, ejecutar una auditoría automática de calidad de datos, registrar la información en una hoja de control centralizada y notificar a los equipos involucrados mediante correos electrónicos transaccionales con diseño corporativo.

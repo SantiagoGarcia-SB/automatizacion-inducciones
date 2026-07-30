@@ -1,9 +1,10 @@
 /**
  * @OnlyCurrentDoc
  *
- * Cumplimiento Ley 2300: genera archivos CSV de contacto (correo/celular) para las
- * solicitudes aprobadas en "registro analisis" y notifica al equipo de inducciones
- * para su envío manual a través de Infobip. Corre cada 15 días.
+ * Cumplimiento Ley 2300: procesa solicitudes aprobadas en "registro analisis".
+ * - Contactos con celular → SMS enviados automáticamente vía Infobip (API).
+ * - Contactos con correo  → genera CORREOS.csv adjunto para envío manual.
+ * Notifica a líderes con resumen del corte. Corre cada 15 días.
  */
 function procesarDatosMejorado() {
   // ── 0. LOCK — evita chocar con Sincronizacion.js mientras toca 'registro analisis' ──
@@ -119,16 +120,20 @@ function procesarDatosMejorado() {
       }
     }
 
+    // ── Envío automático de SMS (reemplaza la carga manual de CSV en Infobip) ──
+    var resultadoSms = { enviados: 0, fallidos: 0 };
+    if (datosCelulares.length > 1) {
+      resultadoSms = procesarEnvioSmsLey2300(datosCelulares);
+    }
+
+    // Adjuntar solo CORREOS.csv (los SMS ya se enviaron automáticamente)
     const adjuntos = [];
     if (datosCorreos.length > 1) {
       adjuntos.push(_csvBlob_(datosCorreos, 'CORREOS.csv'));
     }
-    if (datosCelulares.length > 1) {
-      adjuntos.push(_csvBlob_(datosCelulares, 'CELULARES.csv'));
-    }
 
-    // Enviar correo y marcar filas solo si se generaron datos nuevos
-    if (adjuntos.length === 0) {
+    // Si no hay correos para enviar manualmente NI SMS enviados, no hay nada que reportar
+    if (adjuntos.length === 0 && resultadoSms.enviados === 0 && resultadoSms.fallidos === 0) {
       Logger.log("No se encontraron datos nuevos para procesar.");
       return;
     }
@@ -141,7 +146,7 @@ function procesarDatosMejorado() {
 
     // Verificar cuota antes de enviar (Fase 2.2)
     if (!_verificarCuotaEmail_(1)) {
-      Logger.log("⚠️ Cuota de email insuficiente. Archivos Ley 2300 no enviados.");
+      Logger.log("⚠️ Cuota de email insuficiente. Reporte Ley 2300 no enviado.");
       return;
     }
 
@@ -156,14 +161,16 @@ function procesarDatosMejorado() {
 
     // Asunto dinámico, con el mismo estilo (emoji + separador) del resto de correos del sistema
     const asunto = rangoFechas
-      ? `📄 Generación de Archivos Ley 2300 · Corte ${rangoFechas}`
-      : '📄 Generación de Archivos Ley 2300';
+      ? `📄 Cumplimiento Ley 2300 · Corte ${rangoFechas}`
+      : '📄 Cumplimiento Ley 2300';
 
     const cuerpoHtml = _construirCuerpoLey2300_({
       rangoFechas: rangoFechas || "Sin fecha de evaluación",
       contratos: filasParaMarcar.length,
       contactosCorreo: datosCorreos.length - 1,
-      contactosCelular: datosCelulares.length - 1
+      contactosCelular: datosCelulares.length - 1,
+      smsEnviados: resultadoSms.enviados,
+      smsFallidos: resultadoSms.fallidos
     });
 
     // No se envuelve en retry(): un reintento tras un fallo ambiguo podría duplicar
@@ -173,7 +180,7 @@ function procesarDatosMejorado() {
       bcc: BCC_AUDITORIA,
       subject: asunto,
       htmlBody: cuerpoHtml,
-      attachments: adjuntos,
+      attachments: adjuntos.length > 0 ? adjuntos : undefined,
       replyTo: "noreply@ellibertador.co",
       name: "Inducciones · El Libertador SA"
     });
@@ -193,8 +200,9 @@ function procesarDatosMejorado() {
     retry(() => rangoMarca.setValues(valoresMarca));
 
     propiedades.setProperty('ultimaEjecucion', hoy.toUTCString());
-    Logger.log(`Proceso completado. Se procesaron ${filasParaMarcar.length} filas. Asunto enviado: ${asunto}`);
-    _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente", "Filas: " + filasParaMarcar.length + " | Asunto: " + asunto);
+    Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Asunto: ${asunto}`);
+    _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente",
+      "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Asunto: " + asunto);
 
   } catch (err) {
     Logger.log(`Error en procesarDatosMejorado: ${err.message}`);
@@ -254,40 +262,59 @@ function _csvBlob_(filas, nombreArchivo) {
  * Arma el cuerpo del correo de cumplimiento Ley 2300 usando los mismos
  * bloques modulares (cabecera, barra de estado, chips, nota, pie) que el
  * resto de notificaciones del sistema, definidos en Notificaciones.js.
- * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number}} datos
+ * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number, smsEnviados:number, smsFallidos:number}} datos
  * @returns {string} HTML completo listo para MailApp.
  */
 function _construirCuerpoLey2300_(datos) {
+  var smsEnviados = datos.smsEnviados || 0;
+  var smsFallidos = datos.smsFallidos || 0;
+  var totalSms = smsEnviados + smsFallidos;
+
+  var mensajeInicio = totalSms > 0
+    ? `Se proces&oacute; el cumplimiento de la <strong>Ley 2300</strong> para las
+       solicitudes <strong>aprobadas</strong> desde el &uacute;ltimo corte.
+       Los SMS fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`
+    : `Se gener&oacute; el archivo adjunto con los datos de contacto por correo para dar
+       cumplimiento a la <strong>Ley 2300</strong>. No se encontraron contactos con celular
+       en este corte.`;
+
+  var chips = [
+    { label: "Corte / Periodo",         valor: datos.rangoFechas,               colorVal: _C_ROJO },
+    { label: "Contratos incluidos",     valor: String(datos.contratos)                             },
+    { label: "Contactos con correo",    valor: String(datos.contactosCorreo)                       }
+  ];
+
+  if (totalSms > 0) {
+    chips.push({ label: "SMS enviados", valor: String(smsEnviados), colorVal: '#16a34a' });
+    if (smsFallidos > 0) {
+      chips.push({ label: "SMS fallidos", valor: String(smsFallidos), colorVal: _C_ROJO });
+    }
+  }
+
+  var notaHtml = datos.contactosCorreo > 0
+    ? `<strong style="color:#253150;">Pr&oacute;ximos pasos:</strong>
+       1) Descargar <strong>CORREOS.csv</strong> adjunto &middot;
+       2) Revisar la informaci&oacute;n &middot;
+       3) Realizar env&iacute;o de correos masivos.<br><br>
+       <strong>SMS:</strong> ya fueron enviados autom&aacute;ticamente &mdash; no se requiere acci&oacute;n manual.`
+    : `<strong style="color:#253150;">Resumen:</strong>
+       Todos los contactos fueron notificados autom&aacute;ticamente v&iacute;a SMS.
+       No se requiere acci&oacute;n adicional para este corte.`;
+
   return _envolver_([
 
     _bloque_cabecera_("Cumplimiento Ley 2300"),
 
-    _bloque_barra_estado_(_C_NAVY, "&#10003;", "Archivos generados"),
+    _bloque_barra_estado_(_C_NAVY, "&#10003;", totalSms > 0 ? "SMS enviados automáticamente" : "Archivo generado"),
 
     _bloque_cuerpo_inicio_(
       "Hola equipo de inducciones",
-      `Se generaron los archivos adjuntos con los datos de contacto para dar
-       cumplimiento a la <strong>Ley 2300</strong>. Incluyen &uacute;nicamente
-       las solicitudes <strong>aprobadas</strong> por el analista desde el
-       &uacute;ltimo corte.`
+      mensajeInicio
     ),
 
-    _bloque_chips_([
-      { label: "Corte / Periodo",         valor: datos.rangoFechas,               colorVal: _C_ROJO },
-      { label: "Contratos incluidos",     valor: String(datos.contratos)                             },
-      { label: "Contactos con correo",    valor: String(datos.contactosCorreo)                       },
-      { label: "Contactos con celular",   valor: String(datos.contactosCelular)                      }
-    ]),
+    _bloque_chips_(chips),
 
-    _bloque_nota_(
-      `<strong style="color:#253150;">Pr&oacute;ximos pasos:</strong>
-       1) Descargar los archivos adjuntos &middot;
-       2) Revisar la informaci&oacute;n contenida &middot;
-       3) Realizar el env&iacute;o manual a trav&eacute;s de la plataforma de Infobip.
-       <br><br>
-       <strong>CORREOS.csv:</strong> contactos con correo electr&oacute;nico.
-       <strong>CELULARES.csv:</strong> contactos sin correo pero con celular.`
-    ),
+    _bloque_nota_(notaHtml),
 
     _bloque_pie_()
 

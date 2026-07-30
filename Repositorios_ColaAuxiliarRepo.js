@@ -136,7 +136,7 @@ function obtenerSolicitudesAuxiliar(emailAuxiliar) {
 }
 
 /**
- * Auxiliar toma una solicitud: cambia estado a "EN PROCESO RADICACIÓN".
+ * Auxiliar toma una solicitud: cambia estado a "EN PROCESO RADICACIÓN" + escribe su email.
  * Usa LockService para evitar que dos auxiliares tomen la misma.
  * @param {string} idLote
  * @param {string} uuid
@@ -159,16 +159,15 @@ function tomarSolicitudAuxiliar(idLote, uuid, emailAuxiliar) {
 
     var fila = celda.getRow();
 
-    // Verificar que sigue en PENDIENTE RADICAR
+    // Verificar que sigue en PENDIENTE RADICAR (no tomada por otro)
     var estadoActual = String(hoja.getRange(fila, 10).getValue()).trim().toUpperCase();
     if (estadoActual !== 'PENDIENTE RADICAR') {
       return { ok: false, mensaje: 'Esta solicitud ya fue tomada por alguien más.' };
     }
 
-    // Cambiar estado (por ahora no cambiamos estado, solo la mostramos al auxiliar)
-    // El auxiliar la verá en "Mis solicitudes" y la marcará RADICADO o ERROR
-    // Para V1: no escribimos nada, solo retornamos OK
-    return { ok: true, mensaje: 'Solicitud tomada.' };
+    // Reservar: no cambiamos estado aún (se cambia al marcar RADICADO o ERROR),
+    // pero esto confirma que nadie más la tomó durante este lock.
+    return { ok: true, mensaje: 'Solicitud verificada y disponible.' };
   } finally {
     lock.releaseLock();
   }
@@ -181,16 +180,28 @@ function tomarSolicitudAuxiliar(idLote, uuid, emailAuxiliar) {
  * @returns {{ok:boolean, mensaje:string}}
  */
 function marcarSolicitudRadicada(uuid, numeros) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    return { ok: false, mensaje: 'Otro proceso está radicando. Intenta de nuevo.' };
+  }
 
-  var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
-  var celda = finder.findNext();
-  if (!celda) return { ok: false, mensaje: 'Solicitud no encontrada.' };
+  try {
+    var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
 
-  var fila = celda.getRow();
+    var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
+    var celda = finder.findNext();
+    if (!celda) return { ok: false, mensaje: 'Solicitud no encontrada.' };
 
-  // Cambiar estado a RADICADO (columna J = 10)
-  hoja.getRange(fila, 10).setValue('RADICADO');
+    var fila = celda.getRow();
+
+    // Verificar que no se haya radicado ya (idempotencia)
+    var estadoActual = String(hoja.getRange(fila, 10).getValue() || '').trim().toUpperCase();
+    if (estadoActual === 'RADICADO') {
+      return { ok: false, mensaje: 'Esta solicitud ya fue marcada como RADICADO.' };
+    }
+
+    // Cambiar estado a RADICADO (columna J = 10)
+    hoja.getRange(fila, 10).setValue('RADICADO');
 
   // Guardar número de solicitud del inquilino (columna 29 = Solicitud Inquilino)
   if (numeros && numeros.solicitudInquilino) {
@@ -214,7 +225,40 @@ function marcarSolicitudRadicada(uuid, numeros) {
     hoja.getRange(fila, 63).setValue(numeros.siniestros);
   }
 
+  // Insertar en COLA_ANALISIS para que el analista pueda tomarlo rápidamente
+  try {
+    var hojaColaA = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('COLA_ANALISIS');
+    if (hojaColaA) {
+      var arrendatario = String(hoja.getRange(fila, 24).getValue() || '');
+      var poliza = String(hoja.getRange(fila, 17).getValue() || '');
+      var ciudad = String(hoja.getRange(fila, 19).getValue() || '');
+      var destino = String(hoja.getRange(fila, 18).getValue() || '');
+      var idLote = String(hoja.getRange(fila, 1).getValue() || '');
+      var fechaLote = hoja.getRange(fila, 3).getValue();
+      var fechaStr = fechaLote instanceof Date ? Utilities.formatDate(fechaLote, 'GMT-5', 'yyyy-MM-dd') : '';
+
+      hojaColaA.appendRow([
+        uuid,           // UUID_SISTEMA
+        idLote,         // ID_LOTE
+        arrendatario,   // ARRENDATARIO
+        poliza,         // POLIZA
+        ciudad,         // CIUDAD
+        destino,        // DESTINO
+        fechaStr,       // FECHA_LOTE
+        fila,           // FILA_REG_ANALISIS (no aplica aquí, se llenará en sync)
+        'DISPONIBLE',   // ESTADO
+        '',             // ASIGNADA_A
+        ''              // FECHA_ASIGNACION
+      ]);
+    }
+  } catch (errCola) {
+    console.warn('No se pudo insertar en COLA_ANALISIS: ' + errCola.message);
+  }
+
   return { ok: true, mensaje: 'Solicitud marcada como RADICADO.' };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -277,9 +321,26 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
     hojaErrores.getRange(ultimaFila + 1, 1, filasNuevas.length, 11).setValues(filasNuevas);
   }
 
-  // Notificar al comercial por correo
+  // Notificar al comercial por correo (delegado al servicio de notificaciones)
   try {
-    _notificarErrorAlComercial(uuid, participantes);
+    var hojaCtrl = ss.getSheetByName('Control_General');
+    var finderCtrl = hojaCtrl.createTextFinder(uuid).matchEntireCell(true);
+    var celdaCtrl = finderCtrl.findNext();
+    if (celdaCtrl) {
+      var filaCtrl = celdaCtrl.getRow();
+      var arrendatarioNotif = String(hojaCtrl.getRange(filaCtrl, 24).getValue() || '');
+      var idLoteNotif = String(hojaCtrl.getRange(filaCtrl, 1).getValue() || '');
+      // Buscar email del comercial
+      var hojaLog = ss.getSheetByName('Hoja_Control');
+      var emailComercial = '';
+      if (hojaLog) {
+        var dataLog = hojaLog.getDataRange().getValues();
+        for (var lg = 1; lg < dataLog.length; lg++) {
+          if (String(dataLog[lg][5] || '').trim() === idLoteNotif) { emailComercial = String(dataLog[lg][1] || '').trim(); break; }
+        }
+      }
+      notificarErrorAlComercial(uuid, arrendatarioNotif, idLoteNotif, emailComercial);
+    }
   } catch (errMail) {
     console.warn('Notificación de error no enviada: ' + errMail.message);
   }
@@ -303,45 +364,97 @@ function obtenerErroresPendientesComercial(emailComercial) {
   var hojaErrores = ss.getSheetByName('Errores_Terceros');
   if (!hojaErrores || hojaErrores.getLastRow() < 2) return [];
 
+  // Leer catálogo de motivos para enriquecer con instrucciones
+  var motivos = _leerCatalogoMotivos();
+  var mapaMotivos = {};
+  for (var m = 0; m < motivos.length; m++) {
+    mapaMotivos[motivos[m].id] = motivos[m];
+  }
+
   // Leer todos los errores pendientes
   var datos = hojaErrores.getDataRange().getValues();
   var erroresPendientes = {};
 
+  // Para LIDER/ADMIN (nombre=null) mostrar PENDIENTE + CORRECCION_RECIBIDA
+  // Para COMERCIAL (nombre tiene valor) mostrar AMBOS también (pero con distintas vistas)
+  var estadosVisibles = ['PENDIENTE', 'CORRECCION_RECIBIDA'];
+
   for (var i = 1; i < datos.length; i++) {
-    if (String(datos[i][10] || '').trim() !== 'PENDIENTE') continue;
+    var estadoErr = String(datos[i][10] || '').trim();
+    if (estadosVisibles.indexOf(estadoErr) === -1) continue;
     var uuid = String(datos[i][0] || '').trim();
     if (!erroresPendientes[uuid]) {
-      erroresPendientes[uuid] = { uuid: uuid, participantes: [], fechaError: '' };
+      erroresPendientes[uuid] = {
+        uuid: uuid,
+        participantes: [],
+        fechaError: datos[i][6] instanceof Date ? Utilities.formatDate(datos[i][6], 'GMT-5', 'd/MM/yyyy') : ''
+      };
     }
+
+    // Parsear requerimientos y enriquecer con instrucciones
+    var reqIds = String(datos[i][3] || '').split('|').filter(function(r) { return r; });
+    var reqsEnriquecidos = [];
+    for (var rr = 0; rr < reqIds.length; rr++) {
+      var motivo = mapaMotivos[reqIds[rr]];
+      reqsEnriquecidos.push({
+        id: reqIds[rr],
+        label: motivo ? motivo.label : reqIds[rr],
+        instruccion: motivo ? motivo.instruccion : ''
+      });
+    }
+
     erroresPendientes[uuid].participantes.push({
       participante: String(datos[i][2] || ''),
       requerimientos: String(datos[i][3] || ''),
+      requerimientosDetalle: reqsEnriquecidos,
+      estadoError: estadoErr,
+      respuestaComercial: String(datos[i][7] || ''),
+      archivosPath: String(datos[i][8] || ''),
       fila: i + 1
     });
-    erroresPendientes[uuid].fechaError = datos[i][6] instanceof Date
-      ? Utilities.formatDate(datos[i][6], 'GMT-5', 'd/MM/yyyy') : '';
   }
 
-  // Cruzar con Control_General para saber cuáles son del comercial
+  // Cruzar con Control_General — SOLO para los UUIDs que tienen errores (pocos)
   var hojaControl = ss.getSheetByName('Control_General');
-  var nombre = _nombreComercialParaBusqueda(emailComercial);
+  var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
   var resultado = [];
 
-  for (var uuid in erroresPendientes) {
+  var uuids = Object.keys(erroresPendientes);
+  for (var u = 0; u < uuids.length; u++) {
+    var uuid = uuids[u];
     var finder = hojaControl.createTextFinder(uuid).matchEntireCell(true);
     var celda = finder.findNext();
     if (!celda) continue;
+
     var fila = celda.getRow();
+    // Leer solo las celdas que necesitamos de esa fila (no toda la hoja)
     var comercial = String(hojaControl.getRange(fila, 11).getValue() || '').toUpperCase().trim();
-    // Si es LIDER/ADMIN ve todos, si es COMERCIAL solo los suyos
     if (nombre && comercial !== nombre) continue;
 
     var arrendatario = String(hojaControl.getRange(fila, 24).getValue() || '');
     var idLote = String(hojaControl.getRange(fila, 1).getValue() || '');
+    var fechaRaw = hojaControl.getRange(fila, 3).getValue();
+    var fechaRadicacion = fechaRaw instanceof Date ? Utilities.formatDate(fechaRaw, 'GMT-5', 'd/MM/yyyy') : '';
+
+    var nombresParticipantes = {
+      'INQ': arrendatario,
+      'COA1': String(hojaControl.getRange(fila, 30).getValue() || ''),
+      'COA2': String(hojaControl.getRange(fila, 36).getValue() || ''),
+      'COA3': String(hojaControl.getRange(fila, 42).getValue() || ''),
+      'COA4': String(hojaControl.getRange(fila, 48).getValue() || ''),
+      'COA5': String(hojaControl.getRange(fila, 54).getValue() || '')
+    };
 
     var err = erroresPendientes[uuid];
     err.arrendatario = arrendatario;
     err.idLote = idLote;
+    err.fechaRadicacion = fechaRadicacion;
+
+    for (var p = 0; p < err.participantes.length; p++) {
+      var partCode = err.participantes[p].participante;
+      err.participantes[p].nombreReal = nombresParticipantes[partCode] || partCode;
+    }
+
     resultado.push(err);
   }
 
@@ -375,14 +488,49 @@ function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
         hojaErrores.getRange(i + 1, 8).setValue(respuestas[r].respuesta); // RESPUESTA_COMERCIAL
         hojaErrores.getRange(i + 1, 10).setValue(ahora); // FECHA_RESPUESTA
         hojaErrores.getRange(i + 1, 11).setValue('CORRECCION_RECIBIDA'); // ESTADO_ERROR
+
+        // Subir archivo a Drive si existe
+        if (respuestas[r].archivo && respuestas[r].archivo.bytes) {
+          try {
+            var archivoData = respuestas[r].archivo;
+            var base64 = archivoData.bytes.split(',')[1] || archivoData.bytes;
+            var blob = Utilities.newBlob(Utilities.base64Decode(base64), archivoData.tipo, archivoData.nombre);
+
+            // Crear carpeta de correcciones si no existe
+            var carpetaRaiz = DriveApp.getFolderById(getCarpetaRaizId());
+            var carpetasCorr = carpetaRaiz.getFoldersByName('correcciones');
+            var carpetaCorr = carpetasCorr.hasNext() ? carpetasCorr.next() : carpetaRaiz.createFolder('correcciones');
+
+            var archivo = carpetaCorr.createFile(blob);
+            archivo.setName(uuid + '_' + participante + '_' + archivoData.nombre);
+            var urlArchivo = archivo.getUrl();
+
+            hojaErrores.getRange(i + 1, 9).setValue(urlArchivo); // ARCHIVOS_DRIVE_PATH
+          } catch (errDrive) {
+            console.warn('No se pudo subir archivo: ' + errDrive.message);
+          }
+        }
         break;
       }
     }
   }
 
-  // Notificar al auxiliar que el comercial respondió
+  // Notificar al auxiliar que el comercial respondió (delegado al servicio)
   try {
-    _notificarCorreccionAlAuxiliar(uuid, emailComercial);
+    var hojaErr = ss.getSheetByName('Errores_Terceros');
+    var emailAux = '';
+    var arrNotif = '';
+    if (hojaErr) {
+      var datosErr = hojaErr.getDataRange().getValues();
+      for (var e = 1; e < datosErr.length; e++) {
+        if (String(datosErr[e][0] || '').trim() === uuid) { emailAux = String(datosErr[e][5] || '').trim(); break; }
+      }
+    }
+    var hojaCtrl2 = ss.getSheetByName('Control_General');
+    var finderCtrl2 = hojaCtrl2.createTextFinder(uuid).matchEntireCell(true);
+    var celdaCtrl2 = finderCtrl2.findNext();
+    if (celdaCtrl2) arrNotif = String(hojaCtrl2.getRange(celdaCtrl2.getRow(), 24).getValue() || '');
+    notificarCorreccionAlAuxiliar(arrNotif, emailAux, emailComercial);
   } catch (errMail) {
     console.warn('Notificación de corrección no enviada: ' + errMail.message);
   }
@@ -390,115 +538,3 @@ function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
   return { ok: true, mensaje: 'Corrección enviada. El equipo de inducciones la revisará.' };
 }
 
-// ============================================================
-//  NOTIFICACIONES POR CORREO
-// ============================================================
-
-/**
- * Notifica al comercial que una solicitud tiene error en terceros.
- * Correo breve que lo dirige al aplicativo.
- * @param {string} uuid
- * @param {Array} participantes
- */
-function _notificarErrorAlComercial(uuid, participantes) {
-  // Obtener email del comercial desde Control_General
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
-  var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
-  var celda = finder.findNext();
-  if (!celda) return;
-
-  var fila = celda.getRow();
-  var arrendatario = String(hoja.getRange(fila, 24).getValue() || '');
-  var idLote = String(hoja.getRange(fila, 1).getValue() || '');
-  var comercialNombre = String(hoja.getRange(fila, 11).getValue() || '');
-
-  // Buscar email del comercial en Hoja_Control
-  var hojaLog = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Hoja_Control');
-  var dataLog = hojaLog.getDataRange().getValues();
-  var emailComercial = '';
-  for (var i = 1; i < dataLog.length; i++) {
-    if (String(dataLog[i][5] || '').trim() === idLote) {
-      emailComercial = String(dataLog[i][1] || '').trim();
-      break;
-    }
-  }
-
-  if (!emailComercial || emailComercial.indexOf('@') === -1) return;
-
-  var nombre = emailComercial.split('@')[0].split('.')[0];
-  nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);
-
-  var htmlBody = _envolver_([
-    _bloque_cabecera_('Acción requerida'),
-    _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Necesitamos tu ayuda'),
-    _bloque_cuerpo_inicio_(
-      'Hola, ' + nombre,
-      'Encontramos un detalle que necesita corrección para la solicitud de <strong>' + arrendatario + '</strong> del lote <strong>' + idLote + '</strong>. Ingresa al aplicativo para ver qué necesitamos y enviar la información.'
-    ),
-    _bloque_nota_('<strong>Ingresa al aplicativo</strong> → sección "Pendientes" para ver el detalle y responder.'),
-    _bloque_pie_()
-  ].join(''));
-
-  MailApp.sendEmail({
-    to: emailComercial,
-    cc: CORREOS_LIDERES.join(','),
-    bcc: BCC_AUDITORIA,
-    subject: '⚠️ Necesitamos tu ayuda · ' + arrendatario,
-    htmlBody: htmlBody,
-    name: 'Inducciones · El Libertador SA'
-  });
-}
-
-/**
- * Notifica al auxiliar que el comercial envió una corrección.
- * @param {string} uuid
- * @param {string} emailComercial
- */
-function _notificarCorreccionAlAuxiliar(uuid, emailComercial) {
-  // Buscar quién registró el error (AUXILIAR_EMAIL en Errores_Terceros)
-  var hojaErrores = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Errores_Terceros');
-  if (!hojaErrores) return;
-
-  var datos = hojaErrores.getDataRange().getValues();
-  var emailAuxiliar = '';
-  var arrendatario = '';
-
-  for (var i = 1; i < datos.length; i++) {
-    if (String(datos[i][0] || '').trim() === uuid) {
-      emailAuxiliar = String(datos[i][5] || '').trim();
-      break;
-    }
-  }
-
-  if (!emailAuxiliar || emailAuxiliar.indexOf('@') === -1) return;
-
-  // Obtener arrendatario
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
-  var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
-  var celda = finder.findNext();
-  if (celda) arrendatario = String(hoja.getRange(celda.getRow(), 24).getValue() || '');
-
-  var nombreComercial = emailComercial.split('@')[0].split('.').map(function(p) {
-    return p.charAt(0).toUpperCase() + p.slice(1);
-  }).join(' ');
-
-  var htmlBody = _envolver_([
-    _bloque_cabecera_('Corrección recibida'),
-    _bloque_barra_estado_('#0fbdb7', '&#10003;', 'Respuesta del comercial'),
-    _bloque_cuerpo_inicio_(
-      'Corrección recibida',
-      '<strong>' + nombreComercial + '</strong> envió la corrección para la solicitud de <strong>' + arrendatario + '</strong>. Revísala en el aplicativo y procede con la radicación en SAI.'
-    ),
-    _bloque_nota_('Ingresa al aplicativo → sección "Cola radicación" para revisar la corrección.'),
-    _bloque_pie_()
-  ].join(''));
-
-  MailApp.sendEmail({
-    to: emailAuxiliar,
-    cc: CORREOS_LIDERES.join(','),
-    bcc: BCC_AUDITORIA,
-    subject: '⚡ Corrección recibida · ' + arrendatario,
-    htmlBody: htmlBody,
-    name: 'Inducciones · El Libertador SA'
-  });
-}

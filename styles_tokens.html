@@ -2,22 +2,24 @@
 /**
  * ============================================================
  * DESIGN TOKENS — El Libertador Brand Book
- * Fuente única de verdad para todo el sistema visual.
- * Nunca hardcodear colores, fuentes ni espaciados fuera de aquí.
+ * Fuente única de verdad. Ningún valor (hex, px, ms, cubic-bezier)
+ * puede aparecer hardcodeado fuera de este archivo.
  * ============================================================
  */
 :root {
-  /* ── Colores primarios (predominan siempre) ── */
+  /* ══ COLORES ══════════════════════════════════════════════ */
+
+  /* Primarios (predominan siempre) */
   --color-primary-navy: #253150;
   --color-primary-red: #bd0f14;
 
-  /* ── Colores secundarios (solo acento puntual) ── */
+  /* Secundarios (acento puntual: badges, alertas, CTAs) */
   --color-accent-darkred: #a1161b;
   --color-accent-red: #e11f27;
   --color-accent-orange: #ffa300;
   --color-accent-teal: #0fbdb7;
 
-  /* ── Escala monocromática ── */
+  /* Escala monocromática */
   --color-mono-900: #231f20;
   --color-mono-800: #403f3f;
   --color-mono-500: #807e7e;
@@ -25,24 +27,33 @@
   --color-mono-100: #ebe7e8;
   --color-mono-0: #ffffff;
 
-  /* ── Gradiente corporativo (rojo izq → azul der) ── */
+  /* Gradiente corporativo (rojo izq → azul der, horizontal) */
   --gradient-brand: linear-gradient(90deg, var(--color-primary-red) 0%, var(--color-primary-navy) 100%);
 
-  /* ── Tipografía ── */
+  /* Semánticos (derivados, para estados) */
+  --color-success: #0d7a54;
+  --color-success-bg: rgba(13, 122, 84, 0.06);
+  --color-error: var(--color-primary-red);
+  --color-error-bg: rgba(189, 15, 20, 0.04);
+  --color-warning: #92400e;
+  --color-warning-bg: rgba(255, 163, 0, 0.06);
+
+  /* ══ TIPOGRAFÍA ═══════════════════════════════════════════ */
+
   --font-body: 'Ciencuadras', 'Inter', system-ui, sans-serif;
   --font-heading: 'Ciencuadras', 'Inter', system-ui, sans-serif;
-  --font-mono: 'Roboto Mono', monospace;
+  --font-mono: 'Roboto Mono', 'SF Mono', monospace;
 
-  /* ── Escala tipográfica ── */
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-base: 1rem;
-  --text-lg: 1.125rem;
-  --text-xl: 1.25rem;
-  --text-2xl: 1.5rem;
-  --text-3xl: 2rem;
+  /* Escala tipográfica */
+  --text-display: 2.5rem;
+  --text-h1: 1.75rem;
+  --text-h2: 1.375rem;
+  --text-h3: 1.125rem;
+  --text-body: 0.9375rem;
+  --text-sm: 0.8125rem;
+  --text-xs: 0.6875rem;
 
-  /* ── Pesos tipográficos ── */
+  /* Pesos */
   --font-light: 300;
   --font-regular: 400;
   --font-medium: 500;
@@ -50,37 +61,73 @@
   --font-bold: 700;
   --font-extrabold: 800;
 
-  /* ── Espaciado ── */
-  --spacing-xs: 4px;
-  --spacing-sm: 8px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-  --spacing-2xl: 48px;
+  /* Tracking */
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+  --tracking-caps: 0.1em;
 
-  /* ── Radios de borde ── */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* Line height */
+  --leading-tight: 1.15;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  /* ══ ESPACIADO (escala de 4px) ════════════════════════════ */
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ══ RADIOS ═══════════════════════════════════════════════ */
+
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
   --radius-full: 9999px;
 
-  /* ── Sombras ── */
-  --shadow-sm: 0 1px 3px rgba(35, 31, 32, 0.08);
-  --shadow-md: 0 4px 6px -1px rgba(35, 31, 32, 0.06), 0 2px 4px -2px rgba(35, 31, 32, 0.04);
-  --shadow-lg: 0 10px 20px -4px rgba(35, 31, 32, 0.1);
+  /* ══ SOMBRAS (5 niveles de elevación) ═════════════════════ */
 
-  /* ── Layout ── */
-  --max-width-content: 960px;
-  --max-width-wide: 1200px;
-  --sidebar-width: 240px;
+  --shadow-0: none;
+  --shadow-1: 0 1px 2px rgba(35, 31, 32, 0.04);
+  --shadow-2: 0 4px 12px rgba(35, 31, 32, 0.06);
+  --shadow-3: 0 8px 24px rgba(35, 31, 32, 0.10);
+  --shadow-4: 0 16px 48px rgba(35, 31, 32, 0.14);
+
+  /* ══ TRANSICIONES ═════════════════════════════════════════ */
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 350ms;
+
+  /* ══ LAYOUT ═══════════════════════════════════════════════ */
+
+  --sidebar-width: 232px;
   --header-height: 56px;
-
-  /* ── Transiciones ── */
-  --transition-fast: 150ms ease;
-  --transition-normal: 250ms ease;
-  --transition-slow: 400ms ease;
+  --lifeline-height: 3px;
+  --max-width-content: 1080px;
+  --max-width-narrow: 720px;
 }
 
-/* ── Google Font (Inter como fallback principal) ── */
+/* ══ FUENTES ══════════════════════════════════════════════ */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap');
+
+/* ══ REDUCED MOTION ═══════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}
 </style>

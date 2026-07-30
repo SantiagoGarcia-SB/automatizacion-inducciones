@@ -31,7 +31,17 @@ function api_obtenerResumenDashboard() {
   try {
     var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
     var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    return obtenerResumenComercial(verTodos ? null : usuario.email);
+    var cacheKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+
+    // Intentar cache primero (TTL 60s)
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
+    // Cache miss → leer de Sheets
+    var resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
+    cache.put(cacheKey, JSON.stringify(resumen), 60);
+    return resumen;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerResumenDashboard', e.message);
     return _resumenVacio();
@@ -81,8 +91,21 @@ function api_obtenerTodosLosLotes() {
   try {
     var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
     var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
+    var cacheKey = 'LOTES_' + (verTodos ? 'GLOBAL' : usuario.email);
+
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     var resultado = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 9999, '', '');
-    return resultado.datos || [];
+    var datos = resultado.datos || [];
+
+    // Cache solo si el payload no excede 100KB
+    var json = JSON.stringify(datos);
+    if (json.length < 90000) {
+      cache.put(cacheKey, json, 60);
+    }
+    return datos;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerTodosLosLotes', e.message);
     return [];
@@ -177,7 +200,7 @@ function api_guardarUsuario(datos, esNuevo) {
 function api_obtenerSolicitudes(desde, cantidad) {
   try {
     verificarRol(['LIDER', 'ADMIN']);
-    return obtenerSolicitudesResumen(desde || 0, cantidad || 500);
+    return obtenerSolicitudesResumen(desde || 0, cantidad || 300);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerSolicitudes', e.message);
     return { datos: [], total: 0, cargadas: 0 };
@@ -374,7 +397,8 @@ function api_guardarEvaluacion(filaNum, datos, finalizar) {
 function api_obtenerMisErroresPendientes() {
   try {
     var usuario = verificarRol(['COMERCIAL', 'LIDER', 'ADMIN']);
-    return obtenerErroresPendientesComercial(usuario.email);
+    var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
+    return obtenerErroresPendientesComercial(verTodos ? null : usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisErroresPendientes', e.message);
     return [];
@@ -448,4 +472,124 @@ function api_enviarReporteGestion() {
     _registrarEvento_('ERROR', 'Api.js', 'api_enviarReporteGestion', e.message);
     return { ok: false, mensaje: 'Error: ' + e.message };
   }
+}
+
+// ============================================================
+//  API — CONFIGURACIÓN (Catálogo de motivos)
+// ============================================================
+
+/**
+ * Retorna el catálogo de motivos de error en terceros.
+ * @returns {Array}
+ */
+function api_obtenerCatalogoMotivos() {
+  try {
+    verificarRol(['LIDER', 'ADMIN']);
+    return _leerCatalogoMotivos();
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Guarda (crea o actualiza) un motivo en el catálogo.
+ * @param {Object} motivo - {id, label, instruccion, activo}
+ * @param {boolean} esNuevo
+ * @returns {{ok:boolean, mensaje:string}}
+ */
+function api_guardarMotivo(motivo, esNuevo) {
+  try {
+    verificarRol(['LIDER', 'ADMIN']);
+    return _guardarMotivo(motivo, esNuevo);
+  } catch (e) {
+    return { ok: false, mensaje: 'Error: ' + e.message };
+  }
+}
+
+/**
+ * Elimina un motivo del catálogo.
+ * @param {string} id
+ * @returns {{ok:boolean, mensaje:string}}
+ */
+function api_eliminarMotivo(id) {
+  try {
+    verificarRol(['LIDER', 'ADMIN']);
+    return _eliminarMotivo(id);
+  } catch (e) {
+    return { ok: false, mensaje: 'Error: ' + e.message };
+  }
+}
+
+// ── Funciones internas del catálogo ──
+
+function _leerCatalogoMotivos() {
+  var ss = SpreadsheetApp.openById(getHojaControlId());
+  var hoja = ss.getSheetByName('CATALOGO_MOTIVOS');
+  if (!hoja) {
+    // Crear la pestaña si no existe con datos por defecto
+    hoja = ss.insertSheet('CATALOGO_MOTIVOS');
+    hoja.appendRow(['ID', 'LABEL', 'INSTRUCCION', 'ACTIVO']);
+    hoja.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#253150').setFontColor('#ffffff');
+    hoja.setFrozenRows(1);
+    var defaults = [
+      ['celular_correo', 'Confirmar celular o correo', 'El comercial debe confirmar el número de celular o correo electrónico correcto del participante indicado.', true],
+      ['doc_identidad', 'Adjuntar documento de identidad', 'El comercial debe adjuntar copia legible del documento de identidad (cédula o pasaporte) del participante indicado.', true],
+      ['cert_existencia', 'Adjuntar cert. existencia y representación legal', 'El comercial debe adjuntar el certificado de existencia y representación legal vigente (no mayor a 30 días) de la empresa.', true],
+      ['confirmar_destino', 'Confirmar destino específico del inmueble', 'El comercial debe indicar con precisión el uso o actividad económica que se desarrollará en el inmueble.', true],
+      ['confirmar_direccion', 'Confirmar la dirección', 'El comercial debe confirmar la dirección completa y correcta del inmueble tal como está registrada en SAI.', true]
+    ];
+    hoja.getRange(2, 1, defaults.length, 4).setValues(defaults);
+  }
+
+  var datos = hoja.getDataRange().getValues();
+  var resultado = [];
+  for (var i = 1; i < datos.length; i++) {
+    resultado.push({
+      id: String(datos[i][0] || ''),
+      label: String(datos[i][1] || ''),
+      instruccion: String(datos[i][2] || ''),
+      activo: datos[i][3] !== false
+    });
+  }
+  return resultado;
+}
+
+function _guardarMotivo(motivo, esNuevo) {
+  var ss = SpreadsheetApp.openById(getHojaControlId());
+  var hoja = ss.getSheetByName('CATALOGO_MOTIVOS');
+  if (!hoja) return { ok: false, mensaje: 'Pestaña no encontrada.' };
+
+  if (!motivo.id || !motivo.label) return { ok: false, mensaje: 'ID y nombre son obligatorios.' };
+
+  var datos = hoja.getDataRange().getValues();
+  var filaExistente = -1;
+  for (var i = 1; i < datos.length; i++) {
+    if (String(datos[i][0]).trim() === motivo.id.trim()) { filaExistente = i + 1; break; }
+  }
+
+  var fila = [motivo.id.trim(), motivo.label.trim(), (motivo.instruccion || '').trim(), motivo.activo !== false];
+
+  if (esNuevo && filaExistente !== -1) return { ok: false, mensaje: 'Ya existe un motivo con ese ID.' };
+
+  if (filaExistente !== -1) {
+    hoja.getRange(filaExistente, 1, 1, 4).setValues([fila]);
+  } else {
+    hoja.appendRow(fila);
+  }
+  return { ok: true, mensaje: esNuevo ? 'Motivo creado.' : 'Motivo actualizado.' };
+}
+
+function _eliminarMotivo(id) {
+  var ss = SpreadsheetApp.openById(getHojaControlId());
+  var hoja = ss.getSheetByName('CATALOGO_MOTIVOS');
+  if (!hoja) return { ok: false, mensaje: 'Pestaña no encontrada.' };
+
+  var datos = hoja.getDataRange().getValues();
+  for (var i = 1; i < datos.length; i++) {
+    if (String(datos[i][0]).trim() === id.trim()) {
+      hoja.deleteRow(i + 1);
+      return { ok: true, mensaje: 'Motivo eliminado.' };
+    }
+  }
+  return { ok: false, mensaje: 'Motivo no encontrado.' };
 }

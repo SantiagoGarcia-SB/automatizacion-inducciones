@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 /**
  * ============================================================
  * App.js — Inicialización y orquestación de la SPA
@@ -36,7 +36,8 @@ var MENUS_POR_ROL = {
     { id: 'sep1', icon: '', label: '---' },
     { id: 'usuarios', icon: '👥', label: 'Usuarios' },
     { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
-    { id: 'reportes', icon: '📈', label: 'Reportes' }
+    { id: 'reportes', icon: '📈', label: 'Reportes' },
+    { id: 'config', icon: '⚙️', label: 'Configuración' }
   ],
   ADMIN: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
@@ -81,6 +82,10 @@ function inicializarApp() {
   // Renderizar dashboard inmediatamente con datos pre-cargados (0 latencia)
   if (_cacheLocal.resumen) {
     _renderizarDashboardConDatos(_cacheLocal.resumen);
+    // Activar Línea de Vida con los datos del resumen
+    if (typeof actualizarLineasDeVida === 'function') {
+      actualizarLineasDeVida(usuario.rol, _cacheLocal.resumen);
+    }
   } else {
     _mostrarSkeletonDashboard();
     cargarDashboard();
@@ -90,6 +95,14 @@ function inicializarApp() {
 /** Cache en memoria del frontend para evitar re-llamadas innecesarias */
 var _cacheLocal = { resumen: null, lotes: null, ttl: 0 };
 var CACHE_TTL_MS = 30000; // 30 segundos
+
+/** Control de navegación — evita que respuestas tardías sobreescriban la vista actual */
+var _navId = 0;
+var _seccionActiva = 'dashboard';
+
+function _sigueVigente(navIdCapturado) {
+  return navIdCapturado === _navId;
+}
 
 function _cacheValido() {
   return _cacheLocal.ttl > Date.now();
@@ -105,11 +118,7 @@ function renderizarHeader(usuario) {
   var elUser = document.getElementById('headerUser');
   var elRol = document.getElementById('headerRol');
   if (elUser) elUser.textContent = usuario.nombre || usuario.email;
-  if (elRol) {
-    elRol.textContent = usuario.rol;
-    elRol.className = 'badge';
-    elRol.style.cssText = 'background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.9);font-size:11px;padding:3px 10px;';
-  }
+  if (elRol) elRol.textContent = usuario.rol;
 }
 
 function _mostrarSkeletonDashboard() {
@@ -118,18 +127,16 @@ function _mostrarSkeletonDashboard() {
   var hora = new Date().getHours();
   var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
 
-  container.innerHTML = '<div class="stack" style="gap:var(--spacing-lg);">'
-    // Hero real (ya tenemos el nombre)
-    + '<div class="card card--hero" style="padding:var(--spacing-xl) var(--spacing-lg);">'
-    + '<h2 style="font-size:var(--text-2xl); margin-bottom:6px;">' + saludo + ', ' + nombre + '</h2>'
-    + '<p style="margin:0; font-size:var(--text-sm);">Cargando tu resumen...</p>'
+  container.innerHTML = '<div class="stack stack--loose">'
+    + '<div class="card card--hero">'
+    + '<h1 style="margin-bottom:var(--space-1);">' + saludo + ', ' + nombre + '</h1>'
+    + '<p style="margin:0;font-size:var(--text-sm);">Cargando tu resumen...</p>'
     + '</div>'
-    // Skeleton KPIs
     + '<div class="grid grid--4">'
-    + '<div class="card card--flat skeleton-card"></div>'
-    + '<div class="card card--flat skeleton-card"></div>'
-    + '<div class="card card--flat skeleton-card"></div>'
-    + '<div class="card card--flat skeleton-card"></div>'
+    + '<div class="skeleton skeleton-card"></div>'
+    + '<div class="skeleton skeleton-card"></div>'
+    + '<div class="skeleton skeleton-card"></div>'
+    + '<div class="skeleton skeleton-card"></div>'
     + '</div>'
     + '</div>';
   mostrarVista('viewDashboard');
@@ -183,6 +190,10 @@ function mostrarVista(vistaId) {
 }
 
 function navegarA(seccion) {
+  // Cancelar cualquier carga pendiente de la sección anterior
+  _navId++;
+  var miNavId = _navId;
+
   mostrarVista('viewLoading');
 
   // Marcar como activo
@@ -192,6 +203,9 @@ function navegarA(seccion) {
   // Cerrar sidebar en mobile
   var sidebar = document.getElementById('sidebar');
   if (sidebar) sidebar.classList.remove('app-layout__sidebar--open');
+
+  // Guardar sección activa
+  _seccionActiva = seccion;
 
   switch (seccion) {
     case 'dashboard':
@@ -224,6 +238,9 @@ function navegarA(seccion) {
     case 'radicar':
       mostrarVistaRadicar();
       break;
+    case 'config':
+      cargarVistaConfiguracion();
+      break;
     default:
       mostrarVistaEnConstruccion(seccion);
       break;
@@ -231,27 +248,27 @@ function navegarA(seccion) {
 }
 
 function cargarDashboard() {
-  // Si tenemos datos en cache local (pre-cargados o recientes), usar directamente
+  var navIdLocal = _navId;
+
   if (_cacheLocal.resumen && _cacheValido()) {
     _renderizarDashboardConDatos(_cacheLocal.resumen);
     return;
   }
-
-  // Si tenemos pre-carga de doGet (primera vez), usar y marcar TTL
   if (_cacheLocal.resumen) {
     _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
     _renderizarDashboardConDatos(_cacheLocal.resumen);
     return;
   }
 
-  // Si no hay cache, pedir al servidor
   callServer('api_obtenerResumenDashboard')
     .then(function(r) {
+      if (!_sigueVigente(navIdLocal)) return;
       _cacheLocal.resumen = r;
       _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
       _renderizarDashboardConDatos(r);
+      if (typeof actualizarLineasDeVida === 'function') actualizarLineasDeVida(APP_USUARIO.rol, r);
     })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar el resumen.'); });
+    .catch(function(err) { if (!_sigueVigente(navIdLocal)) return; console.error(err); _mostrarError('No pudimos cargar el resumen.'); });
 }
 
 function _renderizarDashboardConDatos(r) {
@@ -260,73 +277,148 @@ function _renderizarDashboardConDatos(r) {
       var nombre = APP_USUARIO ? APP_USUARIO.nombre : '';
       var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN');
 
-      var html = '<div class="stack" style="gap:var(--spacing-lg);">'
-        + '<div class="card card--hero" style="padding:var(--spacing-xl) var(--spacing-lg);">'
-        + '<h2 style="font-size:var(--text-2xl); margin-bottom:6px;">' + saludo + ', ' + nombre + '</h2>'
-        + '<p style="margin:0; font-size:var(--text-sm);">Panel de gestión de inducciones</p>'
+      var html = '<div class="stack">'
+        // Hero compacto
+        + '<div class="card card--hero" style="padding:var(--space-6);">'
+        + '<h2 style="margin-bottom:var(--space-1);">' + saludo + ', ' + nombre + '</h2>'
+        + '<p style="margin:0;font-size:var(--text-sm);">Panel de gestión de inducciones</p>'
         + '</div>';
 
       if (esAdmin) {
-        // Fila 1
-        html += '<div class="grid grid--4">'
-          + _kpiAdmin('Pólizas Totales', r.totalPolizas, 'navy', '')
-          + _kpiAdmin('Pendiente radicación', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
-          + _kpiAdmin('Radicado', r.radicado, 'navy', 'RADICADO')
-          + _kpiAdmin('Pendiente asignar', r.pendienteAsignar, 'navy', 'PENDIENTE ASIGNAR')
+        // KPIs compactos en 2 filas de 4 (más pequeños)
+        html += '<div class="grid grid--4" style="gap:var(--space-3);">'
+          + _kpiCompacto('Pólizas', r.totalPolizas, 'navy', '')
+          + _kpiCompacto('Pend. radicar', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
+          + _kpiCompacto('Radicado', r.radicado, 'navy', 'RADICADO')
+          + _kpiCompacto('Pend. asignar', r.pendienteAsignar, 'navy', 'PENDIENTE ASIGNAR')
+          + '</div>'
+          + '<div class="grid grid--4" style="gap:var(--space-3);">'
+          + _kpiCompacto('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
+          + _kpiCompacto('Error terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
+          + _kpiCompacto('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
+          + _kpiCompacto('Terminado', r.terminados, 'green', 'TERMINADO')
           + '</div>';
-        // Fila 2
-        html += '<div class="grid grid--4">'
-          + _kpiAdmin('Inducciones Totales', r.inducciones, 'navy', '')
-          + _kpiAdmin('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
-          + _kpiAdmin('Envío formato LMI', r.envioFormatoLMI, 'gray', 'ENVÍO FORMATO LMI')
-          + _kpiAdmin('Envío carta LMI', r.envioCartaLMI, 'gray', 'ENVÍO CARTA LMI')
+
+        // Gráfico de distribución (barra horizontal proporcional)
+        var total = r.inducciones || 1;
+        html += '<div class="card" style="padding:var(--space-5);">'
+          + '<div class="flex flex--between" style="margin-bottom:var(--space-3);"><h4 style="margin:0;">Distribución del pipeline</h4>'
+          + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);">' + _fmtNum(r.inducciones) + ' inducciones · ' + _fmtNum(r.totalLotes) + ' lotes</span></div>'
+          + _barraDistribucion(r, total)
           + '</div>';
-        // Fila 3
-        html += '<div class="grid grid--4">'
-          + _kpiAdmin('Lotes Totales', r.totalLotes, 'navy', '')
-          + _kpiAdmin('Errores en terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
-          + _kpiAdmin('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
-          + _kpiAdmin('Terminado', r.terminados, 'green', 'TERMINADO')
-          + '</div>';
+
       } else {
-        html += '<div class="grid grid--4">'
-          + _kpiCard('📤', 'Radicados', r.radicadosSemana || 0, 'esta semana', '#253150')
-          + _kpiCard('🔍', 'En análisis', r.enAnalisis, 'solicitudes', '#1a5276')
-          + _kpiCard('⏳', 'Pend. P&S', r.pendientePS, 'solicitudes', '#e65100')
-          + _kpiCard('✅', 'Terminados', r.terminados, 'solicitudes', '#1b7a3d')
+        // Comercial: KPIs compactos
+        html += '<div class="grid grid--3" style="gap:var(--space-3);">'
+          + _kpiCompacto('Pend. radicar', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
+          + _kpiCompacto('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
+          + _kpiCompacto('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
+          + '</div>'
+          + '<div class="grid grid--3" style="gap:var(--space-3);">'
+          + _kpiCompacto('Terminados', r.terminados, 'green', 'TERMINADO')
+          + _kpiCompacto('Error terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
+          + _kpiCompacto('Radicados', r.radicado || r.radicadosSemana || 0, 'navy', 'RADICADO')
           + '</div>';
-        if (r.errorTerceros > 0) {
-          html += '<div class="card card--flat" style="border-left:4px solid var(--color-primary-red); background:rgba(189,15,20,0.03);">'
-            + '<strong style="color:var(--color-primary-red);">⚠️ ' + r.errorTerceros + ' solicitud(es) con error en terceros</strong></div>';
+
+        // Barra de progreso simple para comercial
+        var totalC = (r.pendienteRadicar||0) + (r.enAnalisis||0) + (r.pendientePS||0) + (r.terminados||0) + (r.errorTerceros||0) + (r.radicado||0);
+        if (totalC > 0) {
+          html += '<div class="card" style="padding:var(--space-5);">'
+            + '<h4 style="margin:0 0 var(--space-3);">Tu progreso general</h4>'
+            + _barraDistribucion(r, totalC || 1)
+            + '</div>';
         }
+
+        // Alerta de errores pendientes (clickeable → lleva a Pendientes)
+        if (r.errorTerceros > 0) {
+          html += '<div class="alert alert--error" onclick="navegarA(\'errores\')" style="cursor:pointer;">'
+            + '<span style="font-size:1.1rem;">⚠️</span>'
+            + '<div><strong style="color:var(--color-primary-red);">' + r.errorTerceros + ' solicitud(es) requieren tu atención</strong>'
+            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic aquí para ver qué información necesitamos.</p></div>'
+            + '</div>';
+        }
+
+        // Accesos rápidos como cards compactas
+        html += '<div class="grid grid--2" style="gap:var(--space-3);">'
+          + '<div class="card" onclick="navegarA(\'radicar\')" style="cursor:pointer;padding:var(--space-5);display:flex;align-items:center;gap:var(--space-3);">'
+          + '<div style="font-size:1.5rem;">📤</div>'
+          + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">Radicar nuevo lote</strong>'
+          + '<p style="margin:0;font-size:var(--text-xs);color:var(--color-mono-500);">Carga tu planilla y envía a radicación</p></div></div>'
+          + '<div class="card" onclick="navegarA(\'lotes\')" style="cursor:pointer;padding:var(--space-5);display:flex;align-items:center;gap:var(--space-3);">'
+          + '<div style="font-size:1.5rem;">📋</div>'
+          + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">Consultar mis lotes</strong>'
+          + '<p style="margin:0;font-size:var(--text-xs);color:var(--color-mono-500);">Busca y filtra por estado</p></div></div>'
+          + '</div>';
       }
 
-      html += '<div class="grid grid--2">'
-        + '<a onclick="navegarA(\'lotes\')" class="card card--flat" style="cursor:pointer; text-align:center; padding:var(--spacing-xl);">'
-        + '<div style="font-size:2rem; margin-bottom:8px;">📋</div><strong style="color:var(--color-primary-navy);">Ver lotes</strong></a>'
-        + '<a onclick="navegarA(\'solicitudes\')" class="card card--flat" style="cursor:pointer; text-align:center; padding:var(--spacing-xl);">'
-        + '<div style="font-size:2rem; margin-bottom:8px;">📄</div><strong style="color:var(--color-primary-navy);">Ver solicitudes</strong></a>'
-        + '</div></div>';
-
+      html += '</div>';
       document.getElementById('viewDashboard').innerHTML = html;
       mostrarVista('viewDashboard');
 }
 
-function _kpiAdmin(titulo, valor, tema, filtroEstado) {
-  var bgs = { navy: 'rgba(37,49,80,0.9)', red: 'rgba(189,15,20,0.85)', orange: 'rgba(230,81,0,0.85)', green: 'rgba(13,122,84,0.85)', gray: 'rgba(128,126,126,0.7)' };
+function _kpiCompacto(titulo, valor, tema, filtroEstado) {
+  var bgMap = { navy: 'var(--color-primary-navy)', red: 'var(--color-primary-red)', orange: 'var(--color-accent-orange)', green: 'var(--color-success)', teal: 'var(--color-accent-teal)' };
+  var bg = bgMap[tema] || bgMap.navy;
   var esClickable = filtroEstado && filtroEstado.length > 0;
-  var cursorStyle = esClickable ? 'cursor:pointer;' : '';
-  var onclickAttr = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
-  return '<div' + onclickAttr + ' style="background:' + bgs[tema] + '; border-radius:var(--radius-md); padding:16px 12px; text-align:center; ' + cursorStyle + ' transition:transform 0.15s, opacity 0.15s;" onmouseover="this.style.transform=\'scale(1.03)\'" onmouseout="this.style.transform=\'scale(1)\'">'
-    + '<p style="margin:0 0 6px; font-size:11px; color:rgba(255,255,255,0.8); text-transform:uppercase; letter-spacing:0.5px; font-weight:600;">' + titulo + '</p>'
-    + '<p style="margin:0; font-size:1.8rem; font-weight:800; color:#fff; line-height:1;">' + _fmtNum(valor) + '</p>'
+  var onclick = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
+  var cursor = esClickable ? 'cursor:pointer;' : '';
+
+  return '<div class="kpi-card"' + onclick + ' style="background:' + bg + ';color:var(--color-mono-0);' + cursor + 'padding:var(--space-4) var(--space-3);">'
+    + '<div style="font-size:var(--text-xs);font-weight:var(--font-semibold);text-transform:uppercase;letter-spacing:var(--tracking-caps);opacity:0.8;margin-bottom:var(--space-1);">' + titulo + '</div>'
+    + '<div style="font-size:var(--text-h1);font-weight:var(--font-extrabold);line-height:1;letter-spacing:var(--tracking-tight);">' + _fmtNum(valor) + '</div>'
+    + '</div>';
+}
+
+function _barraDistribucion(r, total) {
+  var segmentos = [
+    { label: 'Terminado', valor: r.terminados || 0, color: 'var(--color-success)' },
+    { label: 'En análisis', valor: r.enAnalisis || 0, color: 'var(--color-primary-navy)' },
+    { label: 'Pend. asignar', valor: r.pendienteAsignar || 0, color: '#5a6d8f' },
+    { label: 'Pend. radicar', valor: r.pendienteRadicar || 0, color: '#8b9dc3' },
+    { label: 'Error terceros', valor: r.errorTerceros || 0, color: 'var(--color-primary-red)' },
+    { label: 'Pendiente paz y salvo', valor: r.pendientePS || 0, color: 'var(--color-accent-orange)' }
+  ];
+
+  var html = '<div style="display:flex;height:12px;border-radius:var(--radius-full);overflow:hidden;background:var(--color-mono-100);margin-bottom:var(--space-3);">';
+  for (var s = 0; s < segmentos.length; s++) {
+    var pct = Math.round((segmentos[s].valor / total) * 100);
+    if (pct < 1 && segmentos[s].valor > 0) pct = 1;
+    if (pct > 0) {
+      html += '<div style="width:' + pct + '%;background:' + segmentos[s].color + ';transition:width var(--duration-slow);" title="' + segmentos[s].label + ': ' + segmentos[s].valor + '"></div>';
+    }
+  }
+  html += '</div>';
+
+  // Leyenda
+  html += '<div style="display:flex;flex-wrap:wrap;gap:var(--space-3) var(--space-5);font-size:var(--text-xs);color:var(--color-mono-500);">';
+  for (var l = 0; l < segmentos.length; l++) {
+    if (segmentos[l].valor > 0) {
+      html += '<div style="display:flex;align-items:center;gap:var(--space-1);">'
+        + '<div style="width:8px;height:8px;border-radius:50%;background:' + segmentos[l].color + ';"></div>'
+        + segmentos[l].label + ' (' + _fmtNum(segmentos[l].valor) + ')</div>';
+    }
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function _kpiAdmin(titulo, valor, tema, filtroEstado) {
+  var bgMap = { navy: 'var(--color-primary-navy)', red: 'var(--color-primary-red)', orange: 'var(--color-accent-orange)', green: 'var(--color-success)', teal: 'var(--color-accent-teal)' };
+  var bg = bgMap[tema] || bgMap.navy;
+  var esClickable = filtroEstado && filtroEstado.length > 0;
+  var onclick = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
+  var cursor = esClickable ? 'cursor:pointer;' : '';
+
+  return '<div class="kpi-card"' + onclick + ' style="background:' + bg + ';color:var(--color-mono-0);' + cursor + '">'
+    + '<div class="kpi-card__label">' + titulo + '</div>'
+    + '<div class="kpi-card__value">' + _fmtNum(valor) + '</div>'
     + '</div>';
 }
 
 function _fmtNum(n) { return (n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
 function _filtrarLotesPorEstado(estado) {
-  // Navegar a lotes con filtro pre-aplicado
   _filtroEstadoActivo = estado;
   navegarA('lotes');
 }
@@ -371,10 +463,11 @@ function cargarMisLotes(pagina) {
   // Primera carga: pedir TODOS los lotes al servidor (sin filtro, sin paginación servidor)
   callServer('api_obtenerTodosLosLotes')
     .then(function(datos) {
+      if (_seccionActiva !== 'lotes') return;
       _todosLosLotes = datos || [];
       _renderizarLotesFiltrados();
     })
-    .catch(function(err) { console.error('Error lotes:', err); _mostrarError('No pudimos cargar los lotes.'); });
+    .catch(function(err) { if (_seccionActiva !== 'lotes') return; console.error('Error lotes:', err); _mostrarError('No pudimos cargar los lotes.'); });
 }
 
 function _renderizarLotesFiltrados() {
@@ -536,10 +629,11 @@ function cargarColaAuxiliar() {
 
   callServer('api_obtenerColaAuxiliar')
     .then(function(datos) {
+      if (_seccionActiva !== 'cola-auxiliar') return;
       _colaAuxiliarCache = datos || [];
       _renderizarColaAuxiliar();
     })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar la cola.'); });
+    .catch(function(err) { if (_seccionActiva !== 'cola-auxiliar') return; console.error(err); _mostrarError('No pudimos cargar la cola.'); });
 }
 
 function _renderizarColaAuxiliar() {
@@ -593,10 +687,10 @@ function _abrirSolicitudAuxiliar(idx) {
   // Cargar datos completos de la solicitud
   callServer('api_obtenerSolicitudAuxiliar', s.fila)
     .then(function(datos) {
-      if (!datos) { _cerrarModalAuxiliar(); alert('No se pudo cargar la solicitud.'); return; }
+      if (!datos) { _cerrarModalAuxiliar(); _toast('No se pudo cargar la solicitud.', 'error'); return; }
       _renderizarModalAuxiliar(datos);
     })
-    .catch(function(err) { _cerrarModalAuxiliar(); alert('Error: ' + (err.message || err)); });
+    .catch(function(err) { _cerrarModalAuxiliar(); _toast('Error: ' + (err.message || err), 'error'); });
 }
 
 function _renderizarModalAuxiliar(s) {
@@ -721,7 +815,7 @@ function _marcarRadicadoAuxiliar(uuid) {
 
   // Validar que al menos el inquilino tenga número
   if (!numeros.solicitudInquilino) {
-    alert('Ingresa el número de solicitud SAI del inquilino antes de marcar como radicado.');
+    _toast('Ingresa el número de solicitud SAI del inquilino.', 'warning');
     return;
   }
 
@@ -732,10 +826,10 @@ function _marcarRadicadoAuxiliar(uuid) {
         _colaAuxiliarCache = null;
         cargarColaAuxiliar();
       } else {
-        alert(res ? res.mensaje : 'Error al marcar como radicado.');
+        _toast(res ? res.mensaje : 'Error al marcar.', 'error');
       }
     })
-    .catch(function(err) { alert('Error: ' + err.message); });
+    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
 }
 
 function _toggleSiniestro(id) {
@@ -829,30 +923,38 @@ function _enviarErrorTerceros(uuid) {
       reqs.push(reqChecks[r].value);
     }
     if (reqs.length === 0) {
-      alert('Selecciona al menos un requerimiento para ' + id);
+      _toast('Selecciona al menos un requerimiento para ' + id, 'warning');
       return;
     }
     participantes.push({ participante: id, requerimientos: reqs.join('|') });
   }
 
   if (participantes.length === 0) {
-    alert('Selecciona al menos un participante con error.');
+    _toast('Selecciona al menos un participante con error.', 'warning');
     return;
   }
 
   var nota = document.getElementById('et_nota').value.trim();
 
+  // Feedback inmediato — deshabilitar botón
+  var btnErr = document.querySelector('#modalErrorTerceros .btn--danger');
+  if (btnErr) { btnErr.disabled = true; btnErr.textContent = '⏳ Guardando...'; }
+
   callServer('api_marcarErrorTerceros', uuid, participantes, nota)
     .then(function(res) {
       _cerrarModalError();
       if (res && res.ok) {
+        _toast('Error registrado. Se notificó al comercial.', 'success');
         _colaAuxiliarCache = null;
         cargarColaAuxiliar();
       } else {
-        alert(res ? res.mensaje : 'Error al guardar.');
+        _toast(res ? res.mensaje : 'Error al guardar.', 'error');
       }
     })
-    .catch(function(err) { alert('Error: ' + err.message); });
+    .catch(function(err) {
+      if (btnErr) { btnErr.disabled = false; btnErr.textContent = 'Guardar error y notificar'; }
+      _toast('Error: ' + (err.message || err), 'error');
+    });
 }
 
 function _cerrarModalError() {
@@ -996,12 +1098,12 @@ function _pedirSolicitudAnalista() {
       if (res && res.ok) {
         _cargarVistaAnalista();
       } else {
-        alert(res ? res.mensaje : 'No se pudo asignar solicitud.');
+        _toast(res ? res.mensaje : 'No se pudo asignar.', 'error');
         _cargarVistaAnalista(); // Recargar para restaurar botón
       }
     })
     .catch(function(err) {
-      alert('Error: ' + (err.message || err));
+      _toast('Error: ' + (err.message || err), 'error');
       _cargarVistaAnalista();
     });
 }
@@ -1138,10 +1240,10 @@ function _guardarEvalBorrador(filaNum) {
   var campos = _recogerCamposEval();
   callServer('api_guardarEvaluacion', filaNum, campos, false)
     .then(function(res) {
-      if (res && res.ok) alert('Borrador guardado ✓');
-      else alert(res ? res.mensaje : 'Error al guardar.');
+      if (res && res.ok) _toast('Borrador guardado', 'success');
+      else _toast(res ? res.mensaje : 'Error al guardar.', 'error');
     })
-    .catch(function(err) { alert('Error: ' + err.message); });
+    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
 }
 
 function _finalizarEvaluacion(filaNum) {
@@ -1152,10 +1254,10 @@ function _finalizarEvaluacion(filaNum) {
       if (res && res.ok) {
         _cargarVistaAnalista();
       } else {
-        alert(res ? res.mensaje : 'Error al finalizar.');
+        _toast(res ? res.mensaje : 'Error al finalizar.', 'error');
       }
     })
-    .catch(function(err) { alert('Error: ' + err.message); });
+    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
 }
 
 // ============================================================
@@ -1190,10 +1292,10 @@ function _enviarReporteGestion() {
   if (!confirm('¿Enviar el reporte de gestión a los líderes ahora?')) return;
   callServer('api_enviarReporteGestion')
     .then(function(res) {
-      if (res && res.ok) alert('Reporte enviado ✓');
-      else alert(res ? res.mensaje : 'Error al enviar.');
+      if (res && res.ok) _toast('Reporte enviado', 'success');
+      else _toast(res ? res.mensaje : 'Error al enviar.', 'error');
     })
-    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
 }
 
 // ============================================================
@@ -1261,9 +1363,9 @@ function _liberarSolicitud(filaNum) {
   callServer('api_reasignarSolicitud', filaNum, '')
     .then(function(res) {
       if (res && res.ok) cargarVistaAsignaciones();
-      else alert(res ? res.mensaje : 'Error al liberar.');
+      else _toast(res ? res.mensaje : 'Error al liberar.', 'error');
     })
-    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
 }
 
 // ============================================================
@@ -1289,36 +1391,105 @@ function _renderizarErroresComercial(errores) {
   if (errores.length === 0) {
     container.innerHTML = '<div class="stack">'
       + '<h2>Pendientes de corrección</h2>'
-      + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-2xl);">'
-      + '<div style="font-size:2.5rem;margin-bottom:var(--spacing-md);">✅</div>'
-      + '<h3>No tienes correcciones pendientes</h3>'
-      + '<p>Todas tus solicitudes están en orden.</p>'
+      + '<div class="card" style="text-align:center;padding:var(--space-12);">'
+      + '<div class="empty-state__icon">✅</div>'
+      + '<div class="empty-state__title">Todo en orden</div>'
+      + '<div class="empty-state__text">No tienes correcciones pendientes en este momento.</div>'
       + '</div></div>';
     mostrarVista('viewDashboard');
     return;
   }
 
-  var html = '<div class="stack">'
-    + '<h2>Pendientes de corrección</h2>'
-    + '<p style="color:var(--color-mono-500);margin:0;">Solicitudes que necesitan información adicional para continuar.</p>';
+  // Separar por estado
+  var pendientes = errores.filter(function(e) { return e.participantes.some(function(p) { return p.estadoError === 'PENDIENTE'; }); });
+  var enEspera = errores.filter(function(e) { return e.participantes.every(function(p) { return p.estadoError === 'CORRECCION_RECIBIDA'; }); });
 
-  for (var i = 0; i < errores.length; i++) {
-    var e = errores[i];
-    var reqs = _traducirRequerimientos(e.participantes);
-    html += '<div class="card card--flat" style="border-left:4px solid var(--color-primary-red);">'
-      + '<div class="flex flex--between" style="align-items:flex-start;">'
-      + '<div>'
-      + '<strong>' + e.arrendatario + '</strong>'
-      + '<br><small style="color:var(--color-mono-500);">Lote: ' + e.idLote + ' · Reportado: ' + e.fechaError + '</small>'
-      + '<div style="margin-top:8px;font-size:var(--text-sm);">' + reqs + '</div>'
-      + '</div>'
-      + '<button class="btn btn--primary" style="padding:6px 14px;font-size:var(--text-sm);" onclick=\'_abrirCorreccion(' + JSON.stringify(e).replace(/'/g, "\\'") + ')\'>Responder →</button>'
-      + '</div></div>';
+  var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN');
+
+  var html = '<div class="stack stack--loose">'
+    + '<div><h2>Pendientes de corrección</h2>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:var(--space-1) 0 0;">' + errores.length + ' caso(s) activos</p></div>';
+
+  // Sección 1: Pendientes de respuesta
+  if (pendientes.length > 0) {
+    html += '<div><h3 style="font-size:var(--text-body);color:var(--color-primary-red);margin-bottom:var(--space-3);">⚠️ Requieren tu respuesta (' + pendientes.length + ')</h3>';
+    for (var i = 0; i < pendientes.length; i++) {
+      html += _renderCardError(pendientes[i], true, esAdmin);
+    }
+    html += '</div>';
+  }
+
+  // Sección 2: En espera de revisión
+  if (enEspera.length > 0) {
+    html += '<div><h3 style="font-size:var(--text-body);color:var(--color-accent-teal);margin-bottom:var(--space-3);">⏳ En espera de revisión (' + enEspera.length + ')</h3>';
+    for (var j = 0; j < enEspera.length; j++) {
+      html += _renderCardError(enEspera[j], false, esAdmin);
+    }
+    html += '</div>';
   }
 
   html += '</div>';
   container.innerHTML = html;
   mostrarVista('viewDashboard');
+}
+
+function _renderCardError(e, puedeResponder, esAdmin) {
+  var tieneCorreccion = e.participantes.some(function(p) { return p.estadoError === 'CORRECCION_RECIBIDA'; });
+  var borderColor = puedeResponder ? 'var(--color-primary-red)' : 'var(--color-accent-teal)';
+
+  var html = '<div class="card" style="border-left:4px solid ' + borderColor + ';margin-bottom:var(--space-3);">'
+    + '<div class="flex flex--between" style="margin-bottom:var(--space-4);flex-wrap:wrap;gap:var(--space-2);">'
+    + '<div>'
+    + '<h3 style="margin-bottom:var(--space-1);">' + e.arrendatario + '</h3>'
+    + '<div style="font-size:var(--text-sm);color:var(--color-mono-500);">Lote: <strong>' + e.idLote + '</strong> · Radicado: ' + (e.fechaRadicacion || e.fechaError) + '</div>';
+
+  if (tieneCorreccion && !puedeResponder) {
+    html += '<span class="badge badge--teal" style="margin-top:var(--space-2);">✓ Corrección enviada — en espera de revisión</span>';
+  }
+
+  html += '</div>';
+
+  if (puedeResponder) {
+    html += '<button class="btn btn--primary" style="flex-shrink:0;" onclick=\'_abrirCorreccion(' + JSON.stringify(e).replace(/'/g, "\\'") + ')\'>Responder →</button>';
+  }
+
+  html += '</div>';
+
+  // Detalle por participante
+  for (var p = 0; p < e.participantes.length; p++) {
+    var part = e.participantes[p];
+    var tipoLabel = part.participante === 'INQ' ? 'Inquilino' : part.participante.replace('COA', 'Codeudor ');
+
+    html += '<div style="padding:var(--space-3);background:' + (puedeResponder ? 'var(--color-error-bg)' : 'rgba(15,189,183,0.04)') + ';border-radius:var(--radius-sm);margin-bottom:var(--space-2);">'
+      + '<div style="font-size:var(--text-sm);font-weight:var(--font-bold);color:var(--color-primary-navy);margin-bottom:var(--space-2);">'
+      + '👤 ' + tipoLabel + ': ' + (part.nombreReal || part.participante) + '</div>';
+
+    // Lo que se pidió
+    if (part.requerimientosDetalle && part.requerimientosDetalle.length > 0) {
+      html += '<ul style="margin:0 0 var(--space-2);padding-left:var(--space-5);font-size:var(--text-sm);">';
+      for (var rd = 0; rd < part.requerimientosDetalle.length; rd++) {
+        var req = part.requerimientosDetalle[rd];
+        html += '<li style="margin-bottom:var(--space-1);">' + (req.instruccion || req.label) + '</li>';
+      }
+      html += '</ul>';
+    }
+
+    // Respuesta del comercial (si ya respondió) — visible para todos
+    if (part.respuestaComercial) {
+      html += '<div style="padding:var(--space-2) var(--space-3);background:var(--color-mono-0);border:1px solid var(--color-mono-100);border-radius:var(--radius-xs);font-size:var(--text-sm);margin-top:var(--space-2);">'
+        + '<strong style="color:var(--color-mono-500);font-size:var(--text-xs);text-transform:uppercase;">Respuesta del comercial:</strong><br>'
+        + part.respuestaComercial;
+      if (part.archivosPath) {
+        html += '<br><a href="' + part.archivosPath + '" target="_blank" style="color:var(--color-accent-teal);font-size:var(--text-sm);text-decoration:underline;">📎 Ver archivo adjunto →</a>';
+      }
+      html += '</div>';
+    }
+
+    html += '</div>';
+  }
+
+  html += '</div>';
+  return html;
 }
 
 function _traducirRequerimientos(participantes) {
@@ -1357,14 +1528,31 @@ function _abrirCorreccion(error) {
   // Por cada participante con error
   for (var p = 0; p < error.participantes.length; p++) {
     var part = error.participantes[p];
-    var label = part.participante === 'INQ' ? 'Inquilino' : part.participante;
-    var reqs = _traducirRequerimientos([part]);
+    var tipoLabel = part.participante === 'INQ' ? 'Inquilino' : part.participante.replace('COA', 'Codeudor ');
 
-    html += '<div style="margin-bottom:16px;padding:12px;border:1px solid rgba(0,0,0,0.06);border-radius:var(--radius-md);">'
-      + '<strong style="font-size:var(--text-sm);">' + label + '</strong>'
-      + '<div style="font-size:var(--text-sm);color:var(--color-mono-500);margin:6px 0;">' + reqs + '</div>'
-      + '<label style="font-size:var(--text-xs);">Tu respuesta:</label>'
-      + '<textarea class="input correccion-resp" data-participante="' + part.participante + '" rows="2" placeholder="Escribe la corrección aquí..." style="resize:vertical;"></textarea>'
+    html += '<div style="margin-bottom:var(--space-5);padding:var(--space-4);border:1px solid var(--color-mono-100);border-radius:var(--radius-sm);">'
+      + '<strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">' + tipoLabel + ': ' + (part.nombreReal || part.participante) + '</strong>';
+
+    // Instrucciones claras
+    if (part.requerimientosDetalle && part.requerimientosDetalle.length > 0) {
+      html += '<div style="margin:var(--space-3) 0;font-size:var(--text-sm);color:var(--color-mono-800);">';
+      for (var rd = 0; rd < part.requerimientosDetalle.length; rd++) {
+        var req = part.requerimientosDetalle[rd];
+        html += '<div style="margin-bottom:var(--space-2);padding:var(--space-2) var(--space-3);background:var(--color-warning-bg);border-radius:var(--radius-xs);">'
+          + (req.instruccion || req.label)
+          + '</div>';
+      }
+      html += '</div>';
+    }
+
+    html += '<label style="font-size:var(--text-xs);margin-top:var(--space-3);">Tu respuesta:</label>'
+      + '<textarea class="input correccion-resp" data-participante="' + part.participante + '" rows="2" placeholder="Escribe aquí la información solicitada..." style="resize:vertical;"></textarea>'
+      + '<label style="font-size:var(--text-xs);margin-top:var(--space-3);">Adjuntar archivo (PDF o imagen, opcional):</label>'
+      + '<div class="correccion-dropzone" data-participante="' + part.participante + '" onclick="this.querySelector(\'input\').click()" style="cursor:pointer;border:2px dashed var(--color-mono-300);border-radius:var(--radius-sm);padding:var(--space-3) var(--space-4);display:flex;align-items:center;gap:var(--space-3);transition:border-color var(--duration-fast),background var(--duration-fast);">'
+      + '<span style="font-size:1.2rem;">📎</span>'
+      + '<span class="correccion-dropzone-label" style="font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic para seleccionar archivo</span>'
+      + '<input type="file" class="correccion-file" data-participante="' + part.participante + '" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="_archivoCorreccionCargado(this)">'
+      + '</div>'
       + '</div>';
   }
 
@@ -1380,31 +1568,61 @@ function _abrirCorreccion(error) {
 
 function _enviarCorreccion(uuid) {
   var textareas = document.querySelectorAll('.correccion-resp');
+  var files = document.querySelectorAll('.correccion-file');
   var respuestas = [];
+  var archivosPromises = [];
+
   for (var i = 0; i < textareas.length; i++) {
     var resp = textareas[i].value.trim();
-    if (!resp) { alert('Completa la respuesta para todos los participantes.'); return; }
+    var file = files[i] ? files[i].files[0] : null;
+    if (!resp && !file) { _toast('Completa la respuesta o adjunta un archivo para cada participante.', 'warning'); return; }
     respuestas.push({
       participante: textareas[i].getAttribute('data-participante'),
-      respuesta: resp
+      respuesta: resp || '(Adjuntó archivo)'
     });
+    archivosPromises.push(file ? _archivoABase64(file) : Promise.resolve(null));
   }
 
-  callServer('api_enviarCorreccion', uuid, respuestas)
-    .then(function(res) {
-      _cerrarModalCorreccion();
-      if (res && res.ok) {
-        cargarVistaErroresComercial();
-      } else {
-        alert(res ? res.mensaje : 'Error al enviar.');
-      }
-    })
-    .catch(function(err) { alert('Error: ' + (err.message || err)); });
+  // Feedback
+  var btnEnv = document.querySelector('#modalCorreccion .btn--primary');
+  if (btnEnv) { btnEnv.disabled = true; btnEnv.textContent = '⏳ Enviando...'; }
+
+  // Convertir archivos a base64 y enviar todo junto
+  Promise.all(archivosPromises).then(function(archivos) {
+    // Adjuntar info de archivos a respuestas
+    for (var a = 0; a < archivos.length; a++) {
+      respuestas[a].archivo = archivos[a]; // null o {bytes, nombre, tipo}
+    }
+    return callServer('api_enviarCorreccion', uuid, respuestas);
+  }).then(function(res) {
+    _cerrarModalCorreccion();
+    if (res && res.ok) {
+      _toast('Corrección enviada. El equipo la revisará.', 'success');
+      cargarVistaErroresComercial();
+    } else {
+      _toast(res ? res.mensaje : 'Error al enviar.', 'error');
+    }
+  }).catch(function(err) {
+    if (btnEnv) { btnEnv.disabled = false; btnEnv.textContent = 'Enviar corrección'; }
+    _toast('Error: ' + (err.message || err), 'error');
+  });
 }
 
 function _cerrarModalCorreccion() {
   var modal = document.getElementById('modalCorreccion');
   if (modal) modal.remove();
+}
+
+function _archivoCorreccionCargado(input) {
+  var dropzone = input.closest('.correccion-dropzone');
+  var label = dropzone.querySelector('.correccion-dropzone-label');
+  if (input.files[0] && dropzone && label) {
+    dropzone.style.borderColor = 'var(--color-success)';
+    dropzone.style.borderStyle = 'solid';
+    dropzone.style.background = 'var(--color-success-bg)';
+    label.textContent = input.files[0].name + ' ✓';
+    label.style.color = 'var(--color-success)';
+  }
 }
 
 // ============================================================
@@ -1439,11 +1657,12 @@ function cargarVistaSolicitudes() {
 
   callServer('api_obtenerSolicitudes', 0, 500)
     .then(function(res) {
+      if (_seccionActiva !== 'solicitudes') return;
       _solicitudesCache = res.datos || [];
       _solicitudesTotal = res.total || 0;
       _renderizarSolicitudesFiltradas();
     })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar las solicitudes.'); });
+    .catch(function(err) { if (_seccionActiva !== 'solicitudes') return; console.error(err); _mostrarError('No pudimos cargar las solicitudes.'); });
 }
 
 function _skeletonFilas(n) {
@@ -1456,7 +1675,7 @@ function _skeletonFilas(n) {
 
 function _cargarMasSolicitudes() {
   var cargadas = _solicitudesCache ? _solicitudesCache.length : 0;
-  callServer('api_obtenerSolicitudes', cargadas, 500)
+  callServer('api_obtenerSolicitudes', cargadas, 300)
     .then(function(res) {
       if (res.datos && res.datos.length > 0) {
         _solicitudesCache = _solicitudesCache.concat(res.datos);
@@ -1547,7 +1766,7 @@ function _renderizarSolicitudesFiltradas() {
 
   // Botón cargar más si no se han cargado todas
   if (_solicitudesCache && _solicitudesCache.length < _solicitudesTotal) {
-    html += '<div style="text-align:center;"><button class="btn btn--secondary" onclick="_cargarMasSolicitudes()">Cargar 500 más (' + (_solicitudesTotal - _solicitudesCache.length) + ' restantes)</button></div>';
+    html += '<div style="text-align:center;"><button class="btn btn--secondary" onclick="_cargarMasSolicitudes()">Cargar 300 más (' + (_solicitudesTotal - _solicitudesCache.length) + ' restantes)</button></div>';
   }
 
   html += '</div>';
@@ -1570,7 +1789,7 @@ function _verDetalleSolicitud(filaNum) {
 
   callServer('api_obtenerDetalleSolicitud', filaNum)
     .then(function(data) {
-      if (!data) { _cerrarModalSolicitud(); alert('No se pudo cargar el detalle.'); return; }
+      if (!data) { _cerrarModalSolicitud(); _toast('No se pudo cargar el detalle.', 'error'); return; }
       _renderizarModalSolicitud(data);
     })
     .catch(function(err) { _cerrarModalSolicitud(); console.error(err); });
@@ -1825,7 +2044,7 @@ function _guardarUsuario(esNuevo) {
   };
 
   if (!datos.email || !datos.nombre) {
-    alert('Email y nombre son obligatorios.');
+    _toast('Email y nombre son obligatorios.', 'warning');
     return;
   }
 
@@ -1836,10 +2055,10 @@ function _guardarUsuario(esNuevo) {
         _usuariosCache = null;
         cargarVistaUsuarios();
       } else {
-        alert(res ? res.mensaje : 'Error desconocido.');
+        _toast(res ? res.mensaje : 'Error desconocido.', 'error');
       }
     })
-    .catch(function(err) { alert('Error: ' + err.message); });
+    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
 }
 
 // ============================================================
@@ -1902,6 +2121,119 @@ function _renderizarDetalleLote(data) {
 //  VISTAS PLACEHOLDER
 // ============================================================
 
+function cargarVistaConfiguracion() {
+  var container = document.getElementById('viewDashboard');
+  container.innerHTML = '<div class="stack"><h2>Configuración</h2><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>';
+  mostrarVista('viewDashboard');
+
+  callServer('api_obtenerCatalogoMotivos')
+    .then(function(motivos) { _renderizarConfigMotivos(motivos || []); })
+    .catch(function(err) { _toast('Error al cargar configuración.', 'error'); });
+}
+
+function _renderizarConfigMotivos(motivos) {
+  var container = document.getElementById('viewDashboard');
+  var html = '<div class="stack stack--loose">'
+    + '<div class="section-header"><h2>Configuración</h2></div>'
+    + '<div class="card">'
+    + '<div class="flex flex--between" style="margin-bottom:var(--space-5);">'
+    + '<div><h3 style="margin-bottom:var(--space-1);">Catálogo de motivos — Error en terceros</h3>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:0;">Define las instrucciones de solución para cada motivo. Se muestran al comercial cuando debe corregir un caso.</p></div>'
+    + '<button class="btn btn--primary" onclick="_modalMotivo(null)">+ Nuevo motivo</button>'
+    + '</div>'
+    + '<div class="stack stack--tight">';
+
+  for (var i = 0; i < motivos.length; i++) {
+    var m = motivos[i];
+    html += '<div style="padding:var(--space-4);border:1px solid var(--color-mono-100);border-radius:var(--radius-sm);transition:background var(--duration-fast);" onmouseover="this.style.background=\'rgba(37,49,80,0.02)\'" onmouseout="this.style.background=\'\'">'
+      + '<div class="flex flex--between" style="margin-bottom:var(--space-2);align-items:flex-start;">'
+      + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">' + m.label + '</strong>'
+      + '<br><span class="badge badge--gray" style="margin-top:var(--space-1);">' + m.id + '</span></div>'
+      + '<div class="flex flex--gap-sm">'
+      + '<button class="btn btn--ghost" style="font-size:var(--text-xs);padding:var(--space-1) var(--space-2);" onclick=\'_modalMotivo(' + JSON.stringify(m).replace(/'/g, "\\'") + ')\'>Editar</button>'
+      + '<button class="btn btn--ghost" style="font-size:var(--text-xs);padding:var(--space-1) var(--space-2);color:var(--color-primary-red);" onclick="_eliminarMotivo(\'' + m.id + '\')">Eliminar</button>'
+      + '</div></div>'
+      + '<p style="font-size:var(--text-sm);color:var(--color-mono-800);margin:0;line-height:var(--leading-relaxed);">' + m.instruccion + '</p>'
+      + '</div>';
+  }
+
+  if (motivos.length === 0) {
+    html += '<div style="text-align:center;padding:var(--space-8);color:var(--color-mono-500);">No hay motivos configurados. Agrega el primero.</div>';
+  }
+
+  html += '</div></div></div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
+}
+
+function _modalMotivo(motivo) {
+  var esNuevo = !motivo;
+  var m = motivo || { id: '', label: '', instruccion: '', activo: true };
+
+  var modal = document.createElement('div');
+  modal.id = 'modalMotivo';
+  modal.className = 'modal-overlay';
+  modal.addEventListener('click', function(e) { if (e.target === modal) modal.remove(); });
+
+  modal.innerHTML = '<div class="modal-content" style="max-width:520px;">'
+    + '<div class="modal-header modal-header--navy"><div class="flex flex--between" style="align-items:center;">'
+    + '<h3 style="margin:0;color:var(--color-mono-0);">' + (esNuevo ? 'Nuevo motivo' : 'Editar motivo') + '</h3>'
+    + '<button class="modal-close" onclick="document.getElementById(\'modalMotivo\').remove()">✕</button>'
+    + '</div></div>'
+    + '<div class="modal-body"><div class="stack stack--tight">'
+    + '<div><label>ID (clave única, sin espacios) *</label><input class="input" id="mot_id" value="' + m.id + '" ' + (esNuevo ? '' : 'readonly style="opacity:0.6;"') + ' placeholder="ej: doc_identidad"></div>'
+    + '<div><label>Nombre del motivo *</label><input class="input" id="mot_label" value="' + m.label + '" placeholder="ej: Adjuntar documento de identidad"></div>'
+    + '<div><label>Instrucción para el comercial *</label><textarea class="input" id="mot_instruccion" rows="4" style="resize:vertical;" placeholder="Explica qué debe hacer el comercial para resolver este motivo...">' + m.instruccion + '</textarea></div>'
+    + '</div></div>'
+    + '<div class="modal-footer">'
+    + '<button class="btn btn--ghost" onclick="document.getElementById(\'modalMotivo\').remove()">Cancelar</button>'
+    + '<button class="btn btn--primary" onclick="_guardarMotivo(' + esNuevo + ')">Guardar</button>'
+    + '</div></div>';
+
+  document.body.appendChild(modal);
+}
+
+function _guardarMotivo(esNuevo) {
+  var motivo = {
+    id: document.getElementById('mot_id').value.trim(),
+    label: document.getElementById('mot_label').value.trim(),
+    instruccion: document.getElementById('mot_instruccion').value.trim(),
+    activo: true
+  };
+
+  if (!motivo.id || !motivo.label || !motivo.instruccion) {
+    _toast('Todos los campos son obligatorios.', 'warning');
+    return;
+  }
+
+  callServer('api_guardarMotivo', motivo, esNuevo)
+    .then(function(res) {
+      if (res && res.ok) {
+        var modal = document.getElementById('modalMotivo');
+        if (modal) modal.remove();
+        _toast(res.mensaje, 'success');
+        cargarVistaConfiguracion();
+      } else {
+        _toast(res ? res.mensaje : 'Error al guardar.', 'error');
+      }
+    })
+    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
+}
+
+function _eliminarMotivo(id) {
+  if (!confirm('¿Eliminar este motivo? No se podrá deshacer.')) return;
+  callServer('api_eliminarMotivo', id)
+    .then(function(res) {
+      if (res && res.ok) {
+        _toast('Motivo eliminado.', 'success');
+        cargarVistaConfiguracion();
+      } else {
+        _toast(res ? res.mensaje : 'Error al eliminar.', 'error');
+      }
+    })
+    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
+}
+
 function mostrarVistaRadicar() {
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack">'
@@ -1946,7 +2278,14 @@ function mostrarVistaRadicar() {
     + '<div><strong style="display:block;font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:4px;text-transform:none;letter-spacing:0;">📄 Adjuntar paz y salvo (no mayor a 30 días)</strong>'
     + '<span style="font-size:12px;color:var(--color-mono-500);line-height:1.4;text-transform:none;letter-spacing:0;">Adjunta el documento emitido por la inmobiliaria en PDF. <strong style="color:#16A34A;">Agiliza la gestión al incluir el soporte desde el inicio.</strong></span></div></label>'
     + '</div>'
-    + '<div id="rad_pdfZone" style="display:none;margin-top:14px;"><input type="file" id="rad_filePdf" accept=".pdf" class="input" style="padding:10px;"></div>'
+    + '<div id="rad_pdfZone" style="display:none;margin-top:14px;">'
+    + '<div id="rad_dropZonePdf" onclick="document.getElementById(\'rad_filePdf\').click()" style="cursor:pointer;border:2px dashed var(--color-mono-300);border-radius:var(--radius-md);padding:var(--space-5);display:flex;align-items:center;gap:var(--space-4);transition:border-color var(--duration-fast),background var(--duration-fast);">'
+    + '<div style="width:44px;height:44px;border-radius:var(--radius-sm);background:rgba(189,15,20,0.06);color:var(--color-primary-red);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">📄</div>'
+    + '<div><strong style="display:block;color:var(--color-primary-navy);text-transform:none;letter-spacing:0;">Paz y Salvo (PDF)</strong>'
+    + '<span id="rad_pdfLabel" style="font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic o arrastra el archivo aquí</span></div>'
+    + '</div>'
+    + '<input type="file" id="rad_filePdf" accept=".pdf" style="display:none;">'
+    + '</div>'
     + '</div>'
     // Planilla de inducción
     + '<div class="card card--flat">'
@@ -1970,6 +2309,27 @@ function mostrarVistaRadicar() {
   setTimeout(function() {
     var f = document.getElementById('rad_fileExcel');
     if (f) f.addEventListener('change', function() { _leerExcelRad(this.files[0]); });
+    // PDF drop zone
+    var fp = document.getElementById('rad_filePdf');
+    if (fp) fp.addEventListener('change', function() {
+      var dropPdf = document.getElementById('rad_dropZonePdf');
+      var labelPdf = document.getElementById('rad_pdfLabel');
+      if (this.files[0] && dropPdf && labelPdf) {
+        dropPdf.style.borderColor = 'var(--color-success)';
+        dropPdf.style.borderStyle = 'solid';
+        dropPdf.style.background = 'var(--color-success-bg)';
+        labelPdf.textContent = this.files[0].name + ' ✓';
+      }
+    });
+    // Drag & drop PDF
+    var dropPdfZone = document.getElementById('rad_dropZonePdf');
+    if (dropPdfZone) {
+      dropPdfZone.ondragover = function(e) { e.preventDefault(); dropPdfZone.style.borderColor='var(--color-primary-red)'; dropPdfZone.style.background='rgba(189,15,20,0.02)'; };
+      dropPdfZone.ondragleave = function() { dropPdfZone.style.borderColor='var(--color-mono-300)'; dropPdfZone.style.background=''; };
+      dropPdfZone.ondrop = function(e) { e.preventDefault(); dropPdfZone.style.borderColor=''; dropPdfZone.style.background='';
+        if (e.dataTransfer.files[0]) { document.getElementById('rad_filePdf').files = e.dataTransfer.files; document.getElementById('rad_filePdf').dispatchEvent(new Event('change')); }
+      };
+    }
     // Restaurar borrador si existe
     _restaurarBorradorRad();
     // Drag & drop en zona de Excel
@@ -1987,6 +2347,15 @@ function mostrarVistaRadicar() {
       if (el) el.addEventListener('input', _guardarBorradorRad);
     });
   }, 100);
+}
+
+function _archivoABase64(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = function() { resolve({ bytes: reader.result, nombre: file.name, tipo: file.type }); };
+    reader.onerror = function(e) { reject(e); };
+  });
 }
 
 function _limpiarFormRadicacion() {
@@ -2063,10 +2432,10 @@ function _procesarRadicacion() {
   var tipoPS = ''; for (var r = 0; r < radios.length; r++) { if (radios[r].checked) tipoPS = radios[r].value; }
   var filePdf = document.getElementById('rad_filePdf') ? document.getElementById('rad_filePdf').files[0] : null;
 
-  if (!poliza || !tasa) { alert('Completa póliza y tasa.'); return; }
-  if (!fileExcel || !_radExcelParseado) { alert('Carga la planilla Excel.'); return; }
-  if (!tipoPS) { alert('Selecciona una opción de paz y salvo.'); return; }
-  if (tipoPS === 'adjunto' && !filePdf) { alert('Adjunta el PDF de paz y salvo.'); return; }
+  if (!poliza || !tasa) { _toast('Completa póliza y tasa.', 'warning'); return; }
+  if (!fileExcel || !_radExcelParseado) { _toast('Carga la planilla Excel.', 'warning'); return; }
+  if (!tipoPS) { _toast('Selecciona una opción de paz y salvo.', 'warning'); return; }
+  if (tipoPS === 'adjunto' && !filePdf) { _toast('Adjunta el PDF de paz y salvo.', 'warning'); return; }
 
   // Pre-validación frontend (mismas reglas que el servidor, feedback instantáneo)
   var erroresFront = _preValidarExcel(_radExcelParseado);
@@ -2122,7 +2491,7 @@ function _procesarRadicacion() {
   }).catch(function(err) {
     _cerrarModalProgreso();
     btn.disabled = false; btn.textContent = '⚡ Revisar y enviar a radicación';
-    alert('Error: ' + (err.message || err));
+    _toast('Error: ' + (err.message || err), 'error');
   });
 
   // Guardar borrador

@@ -52,16 +52,20 @@ function obtenerSolicitudesAnalista(emailAnalista, cupoMax) {
     var regSAI = colRegSAI > 0 ? String(hoja.getRange(fila, colRegSAI).getValue() || '').trim() : '';
     if (regSAI) continue; // Ya finalizada
 
+    // Leer fila completa de una vez (1 llamada en vez de 8)
+    var maxCol = Math.max(colArrendatario, colId, colCanon, colCiudad, colDestino, colLote, colPoliza, colSolicitud);
+    var filaData = hoja.getRange(fila, 1, 1, maxCol).getValues()[0];
+
     solicitudes.push({
       fila: fila,
-      arrendatario: colArrendatario > 0 ? String(hoja.getRange(fila, colArrendatario).getValue() || '') : '',
-      identificacion: colId > 0 ? String(hoja.getRange(fila, colId).getValue() || '') : '',
-      canon: colCanon > 0 ? String(hoja.getRange(fila, colCanon).getValue() || '') : '',
-      ciudad: colCiudad > 0 ? String(hoja.getRange(fila, colCiudad).getValue() || '') : '',
-      destino: colDestino > 0 ? String(hoja.getRange(fila, colDestino).getValue() || '') : '',
-      codigoLote: colLote > 0 ? String(hoja.getRange(fila, colLote).getValue() || '') : '',
-      poliza: colPoliza > 0 ? String(hoja.getRange(fila, colPoliza).getValue() || '') : '',
-      solicitudInquilino: colSolicitud > 0 ? String(hoja.getRange(fila, colSolicitud).getValue() || '') : ''
+      arrendatario: colArrendatario > 0 ? String(filaData[colArrendatario - 1] || '') : '',
+      identificacion: colId > 0 ? String(filaData[colId - 1] || '') : '',
+      canon: colCanon > 0 ? String(filaData[colCanon - 1] || '') : '',
+      ciudad: colCiudad > 0 ? String(filaData[colCiudad - 1] || '') : '',
+      destino: colDestino > 0 ? String(filaData[colDestino - 1] || '') : '',
+      codigoLote: colLote > 0 ? String(filaData[colLote - 1] || '') : '',
+      poliza: colPoliza > 0 ? String(filaData[colPoliza - 1] || '') : '',
+      solicitudInquilino: colSolicitud > 0 ? String(filaData[colSolicitud - 1] || '') : ''
     });
   }
 
@@ -70,7 +74,7 @@ function obtenerSolicitudesAnalista(emailAnalista, cupoMax) {
 
 /**
  * Asigna UNA solicitud al analista.
- * OPTIMIZADO: Una sola lectura de 3 columnas para contar activas + encontrar disponible.
+ * OPTIMIZADO: Lee de COLA_ANALISIS (pestaña pequeña) en vez de registro analisis.
  * @param {string} emailAnalista
  * @param {number} cupoMax
  * @returns {{ok:boolean, mensaje:string, solicitud:Object}}
@@ -82,67 +86,76 @@ function pedirSolicitudAnalista(emailAnalista, cupoMax) {
   }
 
   try {
-    var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
-    var ultimaFila = hoja.getLastRow();
-    var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
-
-    // Encontrar columnas
-    var colAsignada = -1, colArrendatario = -1, colRegistroSAI = -1;
-    for (var h = 0; h < headers.length; h++) {
-      var hdr = String(headers[h]).trim();
-      if (hdr === 'ASIGNADA A\u2026' || hdr === 'ASIGNADA A...' || hdr === 'ASIGNADA A') colAsignada = h + 1;
-      if (hdr === 'Arrendatario') colArrendatario = h + 1;
-      if (hdr === 'REGISTRO ANALISTA SAI') colRegistroSAI = h + 1;
+    var ss = SpreadsheetApp.openById(getHojaControlId());
+    var hojaCola = ss.getSheetByName('COLA_ANALISIS');
+    if (!hojaCola || hojaCola.getLastRow() < 2) {
+      return { ok: false, mensaje: 'No hay solicitudes disponibles.' };
     }
 
-    if (colAsignada === -1) return { ok: false, mensaje: 'Columna ASIGNADA A no encontrada.' };
+    var datos = hojaCola.getDataRange().getValues();
+    // Headers: UUID, ID_LOTE, ARRENDATARIO, POLIZA, CIUDAD, DESTINO, FECHA_LOTE, FILA_REG, ESTADO, ASIGNADA_A, FECHA_ASIG
 
-    // UNA SOLA lectura: 3 columnas individuales
-    var dataAsignada = hoja.getRange(2, colAsignada, ultimaFila - 1, 1).getValues();
-    var dataArrendatario = hoja.getRange(2, colArrendatario, ultimaFila - 1, 1).getValues();
-    var dataRegSAI = hoja.getRange(2, colRegistroSAI, ultimaFila - 1, 1).getValues();
-
-    // Contar activas + buscar primera disponible en un solo loop
+    // Contar activas del analista + buscar primera disponible
     var activas = 0;
     var filaDisponible = -1;
-    var nombreArrendatario = '';
+    var solDisponible = null;
 
-    for (var i = 0; i < dataAsignada.length; i++) {
-      var asig = String(dataAsignada[i][0] || '').trim();
-      var arr = String(dataArrendatario[i][0] || '').trim();
-      var regSAI = String(dataRegSAI[i][0] || '').trim();
+    for (var i = 1; i < datos.length; i++) {
+      var estado = String(datos[i][8] || '').trim();
+      var asignada = String(datos[i][9] || '').trim().toLowerCase();
 
-      // Contar mis activas
-      if (asig.toLowerCase() === emailAnalista.toLowerCase() && !regSAI) {
+      if (asignada === emailAnalista.toLowerCase() && estado === 'EN_EVALUACION') {
         activas++;
       }
-
-      // Buscar primera disponible (tiene arrendatario, sin asignar, sin registro SAI)
-      if (filaDisponible === -1 && arr && !asig && !regSAI) {
-        filaDisponible = i + 2;
-        nombreArrendatario = arr;
+      if (filaDisponible === -1 && estado === 'DISPONIBLE') {
+        filaDisponible = i + 1; // fila en Sheets
+        solDisponible = {
+          uuid: String(datos[i][0] || ''),
+          arrendatario: String(datos[i][2] || ''),
+          poliza: String(datos[i][3] || ''),
+          ciudad: String(datos[i][4] || '')
+        };
       }
     }
 
-    // Verificar cupo
     if (activas >= cupoMax) {
       return { ok: false, mensaje: 'Cupo lleno (' + activas + '/' + cupoMax + '). Finaliza una solicitud para pedir más.' };
     }
-
     if (filaDisponible === -1) {
       return { ok: false, mensaje: 'No hay solicitudes disponibles en este momento.' };
     }
 
-    // Asignar — limpiar validación y escribir
-    var celdaAsignada = hoja.getRange(filaDisponible, colAsignada);
-    try { celdaAsignada.clearDataValidations(); } catch(ev) {}
-    celdaAsignada.setValue(emailAnalista);
+    // Asignar en COLA_ANALISIS
+    hojaCola.getRange(filaDisponible, 9).setValue('EN_EVALUACION');
+    hojaCola.getRange(filaDisponible, 10).setValue(emailAnalista);
+    hojaCola.getRange(filaDisponible, 11).setValue(new Date());
 
-    return {
-      ok: true,
-      mensaje: 'Solicitud asignada: ' + nombreArrendatario,
-      solicitud: { fila: filaDisponible, arrendatario: nombreArrendatario }
-    };
+    // También asignar en registro analisis (columna ASIGNADA A)
+    try {
+      var hojaAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
+      if (hojaAnalisis) {
+        var headers = hojaAnalisis.getRange(1, 1, 1, hojaAnalisis.getLastColumn()).getValues()[0];
+        var colAsignada = -1;
+        for (var h = 0; h < headers.length; h++) {
+          var hdr = String(headers[h]).trim();
+          if (hdr === 'ASIGNADA A\u2026' || hdr === 'ASIGNADA A...' || hdr === 'ASIGNADA A') { colAsignada = h + 1; break; }
+        }
+        if (colAsignada > 0) {
+          // Buscar fila por UUID en registro analisis
+          var finder = hojaAnalisis.createTextFinder(solDisponible.uuid).matchEntireCell(true);
+          var celda = finder.findNext();
+          if (celda) {
+            var celdaAsig = hojaAnalisis.getRange(celda.getRow(), colAsignada);
+            try { celdaAsig.clearDataValidations(); } catch(ev) {}
+            celdaAsig.setValue(emailAnalista);
+          }
+        }
+      }
+    } catch (errSync) {
+      console.warn('No se pudo asignar en registro analisis: ' + errSync.message);
+    }
+
+    return { ok: true, mensaje: 'Solicitud asignada: ' + solDisponible.arrendatario, solicitud: solDisponible };
   } finally {
     lock.releaseLock();
   }

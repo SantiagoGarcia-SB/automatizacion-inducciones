@@ -5,7 +5,7 @@ const _C_ROJO = "#BD0F14";   // Color primario
 const _C_NAVY = "#253150";   // Color secundario
 const _C_GRIS = "#706F6F";   // Color terciario
 
-const BCC_AUDITORIA = "santiago.garcia@segurosbolivar.com";
+const BCC_AUDITORIA = PropertiesService.getScriptProperties().getProperty('BCC_AUDITORIA') || "santiago.garcia@segurosbolivar.com";
 
 
 // ============================================================

@@ -29,9 +29,14 @@
       </div>
       <div class="app-header__right">
         <span class="app-header__user" id="headerUser">Cargando...</span>
-        <span class="badge badge--navy" id="headerRol"></span>
+        <span class="app-header__role" id="headerRol"></span>
       </div>
     </header>
+
+    <!-- Lifeline (elemento signature) -->
+    <div class="app-layout__lifeline">
+      <?!= include('components_lifeline'); ?>
+    </div>
 
     <!-- Sidebar -->
     <nav class="app-layout__sidebar app-sidebar" id="sidebar">
