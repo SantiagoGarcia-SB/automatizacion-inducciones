@@ -48,7 +48,8 @@ function doGet(e) {
     var usuario = obtenerUsuarioActual_v2();
     var datosIniciales = { usuario: usuario };
 
-    // Pre-cargar solo el resumen (ligero, cacheado en CacheService)
+    // Pre-cargar solo el resumen SI ya está en CacheService (barato, no bloquea).
+    // En cache-miss, el cliente lo pide vía google.script.run con skeleton normal.
     if (usuario && usuario.autorizado) {
       try {
         var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
@@ -59,8 +60,7 @@ function doGet(e) {
         if (resumenCached) {
           datosIniciales.resumen = JSON.parse(resumenCached);
         } else {
-          datosIniciales.resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
-          cache.put(cacheKey, JSON.stringify(datosIniciales.resumen), 60);
+          datosIniciales.resumen = null;
         }
       } catch (err) {
         datosIniciales.resumen = null;
