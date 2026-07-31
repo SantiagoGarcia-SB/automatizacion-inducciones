@@ -616,6 +616,8 @@ function _badgeEstado(estado) {
 var _colaAuxiliarCache = null;
 
 function cargarColaAuxiliar() {
+  if (_colaAuxiliarCache) { _renderizarColaAuxiliar(); return; }
+
   // Mostrar skeleton
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack">'
@@ -1030,7 +1032,11 @@ function cargarMisSolicitudesAuxiliar() {
 //  VISTA: ANALISTA (Pedir solicitud + evaluar)
 // ============================================================
 
+var _vistaAnalistaCache = null;
+
 function _cargarVistaAnalista() {
+  if (_vistaAnalistaCache) { _renderizarVistaAnalista(_vistaAnalistaCache); return; }
+
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack"><h2>Mis solicitudes</h2>'
     + '<div class="card card--flat skeleton-card" style="height:60px;"></div>'
@@ -1038,7 +1044,7 @@ function _cargarVistaAnalista() {
   mostrarVista('viewDashboard');
 
   callServer('api_obtenerMisSolicitudesAnalista')
-    .then(function(data) { _renderizarVistaAnalista(data); })
+    .then(function(data) { _vistaAnalistaCache = data; _renderizarVistaAnalista(data); })
     .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar tus solicitudes.'); });
 }
 
@@ -1096,14 +1102,17 @@ function _pedirSolicitudAnalista() {
   callServer('api_pedirSolicitudAnalista')
     .then(function(res) {
       if (res && res.ok) {
+        _vistaAnalistaCache = null;
         _cargarVistaAnalista();
       } else {
         _toast(res ? res.mensaje : 'No se pudo asignar.', 'error');
+        _vistaAnalistaCache = null;
         _cargarVistaAnalista(); // Recargar para restaurar botón
       }
     })
     .catch(function(err) {
       _toast('Error: ' + (err.message || err), 'error');
+      _vistaAnalistaCache = null;
       _cargarVistaAnalista();
     });
 }
@@ -1252,6 +1261,7 @@ function _finalizarEvaluacion(filaNum) {
   callServer('api_guardarEvaluacion', filaNum, campos, true)
     .then(function(res) {
       if (res && res.ok) {
+        _vistaAnalistaCache = null;
         _cargarVistaAnalista();
       } else {
         _toast(res ? res.mensaje : 'Error al finalizar.', 'error');
@@ -1302,13 +1312,17 @@ function _enviarReporteGestion() {
 //  VISTA: ASIGNACIONES (Líder reasigna/libera)
 // ============================================================
 
+var _asignacionesCache = null;
+
 function cargarVistaAsignaciones() {
+  if (_asignacionesCache) { _renderizarAsignaciones(_asignacionesCache); return; }
+
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack"><h2>Asignaciones</h2>' + _skeletonFilas(5) + '</div>';
   mostrarVista('viewDashboard');
 
   callServer('api_obtenerAsignaciones')
-    .then(function(datos) { _renderizarAsignaciones(datos || []); })
+    .then(function(datos) { _asignacionesCache = datos || []; _renderizarAsignaciones(_asignacionesCache); })
     .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar las asignaciones.'); });
 }
 
@@ -1362,7 +1376,7 @@ function _liberarSolicitud(filaNum) {
   if (!confirm('¿Liberar esta solicitud? Volverá a la cola de disponibles.')) return;
   callServer('api_reasignarSolicitud', filaNum, '')
     .then(function(res) {
-      if (res && res.ok) cargarVistaAsignaciones();
+      if (res && res.ok) { _asignacionesCache = null; cargarVistaAsignaciones(); }
       else _toast(res ? res.mensaje : 'Error al liberar.', 'error');
     })
     .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
@@ -1372,7 +1386,11 @@ function _liberarSolicitud(filaNum) {
 //  VISTA: ERRORES PENDIENTES (Comercial responde)
 // ============================================================
 
+var _erroresComercialCache = null;
+
 function cargarVistaErroresComercial() {
+  if (_erroresComercialCache) { _renderizarErroresComercial(_erroresComercialCache); return; }
+
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack"><h2>Pendientes de corrección</h2>'
     + _skeletonFilas(4) + '</div>';
@@ -1380,7 +1398,8 @@ function cargarVistaErroresComercial() {
 
   callServer('api_obtenerMisErroresPendientes')
     .then(function(errores) {
-      _renderizarErroresComercial(errores || []);
+      _erroresComercialCache = errores || [];
+      _renderizarErroresComercial(_erroresComercialCache);
     })
     .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar los pendientes.'); });
 }
@@ -1598,6 +1617,7 @@ function _enviarCorreccion(uuid) {
     _cerrarModalCorreccion();
     if (res && res.ok) {
       _toast('Corrección enviada. El equipo la revisará.', 'success');
+      _erroresComercialCache = null;
       cargarVistaErroresComercial();
     } else {
       _toast(res ? res.mensaje : 'Error al enviar.', 'error');
