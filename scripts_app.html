@@ -825,8 +825,8 @@ function _marcarRadicadoAuxiliar(uuid) {
     .then(function(res) {
       _cerrarModalAuxiliar();
       if (res && res.ok) {
-        _colaAuxiliarCache = null;
-        cargarColaAuxiliar();
+        _colaAuxiliarCache = _colaAuxiliarCache.filter(function(s) { return s.uuid !== uuid; });
+        _renderizarColaAuxiliar();
       } else {
         _toast(res ? res.mensaje : 'Error al marcar.', 'error');
       }
@@ -947,8 +947,8 @@ function _enviarErrorTerceros(uuid) {
       _cerrarModalError();
       if (res && res.ok) {
         _toast('Error registrado. Se notificó al comercial.', 'success');
-        _colaAuxiliarCache = null;
-        cargarColaAuxiliar();
+        _colaAuxiliarCache = _colaAuxiliarCache.filter(function(s) { return s.uuid !== uuid; });
+        _renderizarColaAuxiliar();
       } else {
         _toast(res ? res.mensaje : 'Error al guardar.', 'error');
       }
