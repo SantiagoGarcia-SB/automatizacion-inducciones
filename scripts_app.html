@@ -1376,7 +1376,10 @@ function _liberarSolicitud(filaNum) {
   if (!confirm('¿Liberar esta solicitud? Volverá a la cola de disponibles.')) return;
   callServer('api_reasignarSolicitud', filaNum, '')
     .then(function(res) {
-      if (res && res.ok) { _asignacionesCache = null; cargarVistaAsignaciones(); }
+      if (res && res.ok) {
+        _asignacionesCache = _asignacionesCache.filter(function(s) { return s.fila !== filaNum; });
+        _renderizarAsignaciones(_asignacionesCache);
+      }
       else _toast(res ? res.mensaje : 'Error al liberar.', 'error');
     })
     .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
