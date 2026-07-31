@@ -100,9 +100,9 @@ function api_obtenerTodosLosLotes() {
     var resultado = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 9999, '', '');
     var datos = resultado.datos || [];
 
-    // Cache solo si el payload no excede 100KB
+    // Cache solo si el payload no excede 100KB (CacheService limit)
     var json = JSON.stringify(datos);
-    if (json.length < 90000) {
+    if (json.length < 99000) {
       cache.put(cacheKey, json, 60);
     }
     return datos;
