@@ -2075,8 +2075,18 @@ function _guardarUsuario(esNuevo) {
     .then(function(res) {
       if (res && res.ok) {
         _cerrarModal();
-        _usuariosCache = null;
-        cargarVistaUsuarios();
+        if (_usuariosCache) {
+          if (esNuevo) {
+            _usuariosCache.push(datos);
+          } else {
+            for (var u = 0; u < _usuariosCache.length; u++) {
+              if (_usuariosCache[u].email === datos.email) { _usuariosCache[u] = datos; break; }
+            }
+          }
+          _renderizarUsuarios(_usuariosCache);
+        } else {
+          cargarVistaUsuarios();
+        }
       } else {
         _toast(res ? res.mensaje : 'Error desconocido.', 'error');
       }
