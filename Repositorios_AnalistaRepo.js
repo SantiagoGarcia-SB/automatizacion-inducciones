@@ -262,25 +262,22 @@ function obtenerAsignacionesActivas() {
 
   if (colAsignada === -1) return [];
 
-  // Leer solo columnas necesarias
-  var dataAsig = hoja.getRange(2, colAsignada, ultimaFila - 1, 1).getValues();
-  var dataRegSAI = hoja.getRange(2, colRegSAI, ultimaFila - 1, 1).getValues();
-  var dataArr = hoja.getRange(2, colArrendatario, ultimaFila - 1, 1).getValues();
-  var dataLote = hoja.getRange(2, colLote, ultimaFila - 1, 1).getValues();
-  var dataSol = hoja.getRange(2, colSolicitud, ultimaFila - 1, 1).getValues();
+  // Leer 1 bloque que cubra todas las columnas necesarias
+  var maxCol = Math.max(colAsignada, colRegSAI, colArrendatario, colLote, colSolicitud);
+  var bloque = hoja.getRange(2, 1, ultimaFila - 1, maxCol).getValues();
 
   var resultado = [];
-  for (var i = 0; i < dataAsig.length; i++) {
-    var asig = String(dataAsig[i][0] || '').trim();
+  for (var i = 0; i < bloque.length; i++) {
+    var asig = String(bloque[i][colAsignada - 1] || '').trim();
     if (!asig) continue;
-    var regSAI = String(dataRegSAI[i][0] || '').trim();
+    var regSAI = String(bloque[i][colRegSAI - 1] || '').trim();
     if (regSAI) continue; // Ya finalizada
 
     resultado.push({
       fila: i + 2,
-      arrendatario: String(dataArr[i][0] || ''),
-      codigoLote: String(dataLote[i][0] || ''),
-      solicitud: String(dataSol[i][0] || ''),
+      arrendatario: String(bloque[i][colArrendatario - 1] || ''),
+      codigoLote: String(bloque[i][colLote - 1] || ''),
+      solicitud: String(bloque[i][colSolicitud - 1] || ''),
       asignadaA: asig
     });
   }
