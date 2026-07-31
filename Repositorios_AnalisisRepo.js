@@ -47,21 +47,22 @@ function obtenerSolicitudesResumen(desde, cantidad) {
     if (hdr === 'ASIGNADA A\u2026' || hdr === 'ASIGNADA A...' || hdr === 'ASIGNADA A') colMap['_ASIGNADA'] = h + 1;
   }
 
-  // 3. Leer CADA columna individualmente (rápido: N lecturas de 1 col × 500 filas)
-  var columnas = {};
+  // 3. Leer 1 bloque que cubra todas las columnas necesarias
+  var maxCol = 0;
   for (var key in colMap) {
-    columnas[key] = hoja.getRange(filaInicio, colMap[key], filasALeer, 1).getValues();
+    if (colMap[key] > maxCol) maxCol = colMap[key];
   }
+  var bloque = hoja.getRange(filaInicio, 1, filasALeer, maxCol).getValues();
 
   // 4. Armar resultado (más recientes primero = invertir)
   var resultado = [];
   for (var i = filasALeer - 1; i >= 0; i--) {
-    var arrendatario = columnas['Arrendatario'] ? String(columnas['Arrendatario'][i][0] || '').trim() : '';
+    var arrendatario = colMap['Arrendatario'] ? String(bloque[i][colMap['Arrendatario'] - 1] || '').trim() : '';
     if (!arrendatario) continue;
 
-    var asignadaA = columnas['_ASIGNADA'] ? String(columnas['_ASIGNADA'][i][0] || '').trim() : '';
-    var registroSAI = columnas['REGISTRO ANALISTA SAI'] ? String(columnas['REGISTRO ANALISTA SAI'][i][0] || '').trim() : '';
-    var resultadoSol = columnas['RESULTADO SOLICITUD'] ? String(columnas['RESULTADO SOLICITUD'][i][0] || '').trim() : '';
+    var asignadaA = colMap['_ASIGNADA'] ? String(bloque[i][colMap['_ASIGNADA'] - 1] || '').trim() : '';
+    var registroSAI = colMap['REGISTRO ANALISTA SAI'] ? String(bloque[i][colMap['REGISTRO ANALISTA SAI'] - 1] || '').trim() : '';
+    var resultadoSol = colMap['RESULTADO SOLICITUD'] ? String(bloque[i][colMap['RESULTADO SOLICITUD'] - 1] || '').trim() : '';
 
     var estado = 'PENDIENTE';
     if (registroSAI) estado = 'EVALUADA';
@@ -69,14 +70,14 @@ function obtenerSolicitudesResumen(desde, cantidad) {
 
     resultado.push({
       fila: filaInicio + i,
-      codigoLote: columnas['codigo lote'] ? String(columnas['codigo lote'][i][0] || '') : '',
-      poliza: columnas['Poliza'] ? String(columnas['Poliza'][i][0] || '') : '',
-      destino: columnas['Destino'] ? String(columnas['Destino'][i][0] || '') : '',
-      ciudad: columnas['ciudad del inmueble'] ? String(columnas['ciudad del inmueble'][i][0] || '') : '',
+      codigoLote: colMap['codigo lote'] ? String(bloque[i][colMap['codigo lote'] - 1] || '') : '',
+      poliza: colMap['Poliza'] ? String(bloque[i][colMap['Poliza'] - 1] || '') : '',
+      destino: colMap['Destino'] ? String(bloque[i][colMap['Destino'] - 1] || '') : '',
+      ciudad: colMap['ciudad del inmueble'] ? String(bloque[i][colMap['ciudad del inmueble'] - 1] || '') : '',
       arrendatario: arrendatario,
-      identificacion: columnas['Id_arrendatario'] ? String(columnas['Id_arrendatario'][i][0] || '') : '',
-      canon: columnas['Canon'] ? String(columnas['Canon'][i][0] || '') : '',
-      solicitudInquilino: columnas['Solicitud Inquilino'] ? String(columnas['Solicitud Inquilino'][i][0] || '') : '',
+      identificacion: colMap['Id_arrendatario'] ? String(bloque[i][colMap['Id_arrendatario'] - 1] || '') : '',
+      canon: colMap['Canon'] ? String(bloque[i][colMap['Canon'] - 1] || '') : '',
+      solicitudInquilino: colMap['Solicitud Inquilino'] ? String(bloque[i][colMap['Solicitud Inquilino'] - 1] || '') : '',
       asignadaA: asignadaA,
       resultadoSolicitud: resultadoSol,
       estado: estado
