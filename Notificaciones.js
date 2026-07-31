@@ -532,17 +532,14 @@ if (10 < colStart || 10 > colEnd) return;
   ].join(""));
 
   try {
-    GmailApp.sendEmail(
-      emailFinal,
-      `⚠️ Paz y salvo pendiente · Lote ${idLoteActual}`,
-      "",
-      {
-        htmlBody: htmlBody,
-        cc:       correosCC,
-        bcc:      BCC_AUDITORIA,
-        name:     "Inducciones · El Libertador SA",
-      }
-    );
+    MailApp.sendEmail({
+      to:       emailFinal,
+      subject:  `⚠️ Paz y salvo pendiente · Lote ${idLoteActual}`,
+      htmlBody: htmlBody,
+      cc:       correosCC,
+      bcc:      BCC_AUDITORIA,
+      name:     "Inducciones · El Libertador SA",
+    });
 
     // Registrar fecha de aviso en columna BI (61)
     const fechaHoy = new Date();
@@ -696,7 +693,9 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
 
       try {
-        GmailApp.sendEmail(emailReal, `${asuntoEmoji} Paz y salvo ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'aún pendiente'} · Lote ${idLote}`, "", {
+        MailApp.sendEmail({
+          to: emailReal,
+          subject: `${asuntoEmoji} Paz y salvo ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'aún pendiente'} · Lote ${idLote}`,
           htmlBody: htmlBody,
           cc: ccs,
           bcc: BCC_AUDITORIA,
@@ -849,7 +848,9 @@ function enviarRecordatoriosErrorTercerosDiario() {
       ].join(""));
 
       try {
-        GmailApp.sendEmail(emailReal, `${asuntoEmoji} Error en terceros ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'pendiente de corrección'} · Lote ${idLote}`, "", {
+        MailApp.sendEmail({
+          to: emailReal,
+          subject: `${asuntoEmoji} Error en terceros ${nivelEscalamiento === 'critico' ? 'URGENTE' : 'pendiente de corrección'} · Lote ${idLote}`,
           htmlBody: htmlBody,
           cc: ccs,
           bcc: BCC_AUDITORIA,

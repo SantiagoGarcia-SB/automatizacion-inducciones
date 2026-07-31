@@ -484,9 +484,11 @@ function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
     try {
       var asuntoCorreo = info.nuevoEstado === "TERMINADO"
         ? "✅ Tu lote " + idLote + " fue analizado exitosamente"
-        : "📌 Tu lote " + idLote + " está en análisis";
+        : "▶️ Tu lote " + idLote + " está en análisis";
 
-      GmailApp.sendEmail(emailComercial, asuntoCorreo, "", {
+      MailApp.sendEmail({
+        to: emailComercial,
+        subject: asuntoCorreo,
         htmlBody: htmlBody,
         bcc: BCC_AUDITORIA,
         name: "Inducciones · El Libertador SA"
@@ -531,4 +533,239 @@ function configurarTriggersSincronizacion() {
     .create();
 
   Logger.log('Triggers creados: sincronizarLoteAutomatico y sincronizarEstadoDesdeAnalisis (cada 10 min).');
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PRUEBA MAESTRA: Envía TODOS los tipos de correo del sistema a tu cuenta.
+// Ejecutar manualmente desde el editor. No toca ningún dato en las hojas.
+// ══════════════════════════════════════════════════════════════════════════════
+
+function PRUEBA_todosLosCorreos() {
+  var emailDestino = Session.getActiveUser().getEmail();
+  var idLote = "PRUEBA-00000-0000";
+  var arrendatario = "Juan Pérez (PRUEBA)";
+  var nombreComercial = "Santiago (PRUEBA)";
+  var enviados = 0;
+
+  Logger.log("═══════════════════════════════════════════════");
+  Logger.log("  PRUEBA DE TODOS LOS CORREOS DEL SISTEMA");
+  Logger.log("  Destino: " + emailDestino);
+  Logger.log("═══════════════════════════════════════════════\n");
+
+  // ─── 1. Cambio de estado → EN ANÁLISIS ────────────────────────────────────
+  try {
+    var html1 = _envolver_([
+      _bloque_cabecera_("Actualizaci&oacute;n de estado"),
+      _bloque_barra_estado_(_C_NAVY, "&#128203;", "En análisis por el equipo"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "Tu lote fue asignado a un analista y est&aacute; siendo revisado. Te notificaremos cuando haya una actualizaci&oacute;n."
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "Nuevo estado", valor: "EN ANÁLISIS", colorVal: _C_NAVY }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 1/8] ▶️ Tu lote " + idLote + " está en análisis",
+      htmlBody: html1,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 1/8 — Cambio de estado: EN ANÁLISIS");
+  } catch (e) { Logger.log("  ✗ 1/8 — Error: " + e.message); }
+
+  // ─── 2. Cambio de estado → TERMINADO ──────────────────────────────────────
+  try {
+    var html2 = _envolver_([
+      _bloque_cabecera_("Actualizaci&oacute;n de estado"),
+      _bloque_barra_estado_("#3B6D11", "&#10003;", "Análisis finalizado"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "El an&aacute;lisis de tu lote ha sido completado por el equipo de inducciones. Pronto recibir&aacute;s la comunicaci&oacute;n con los resultados."
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "Nuevo estado", valor: "TERMINADO", colorVal: "#3B6D11" }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 2/8] ✅ Tu lote " + idLote + " fue analizado exitosamente",
+      htmlBody: html2,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 2/8 — Cambio de estado: TERMINADO");
+  } catch (e) { Logger.log("  ✗ 2/8 — Error: " + e.message); }
+
+  // ─── 3. Error en terceros (notificación al comercial) ─────────────────────
+  try {
+    var urlApp = ScriptApp.getService().getUrl() + '?v=2';
+    var html3 = _envolver_([
+      _bloque_cabecera_('Acción requerida'),
+      _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Necesitamos tu ayuda'),
+      _bloque_cuerpo_inicio_(
+        'Hola, ' + nombreComercial,
+        'Encontramos un detalle que necesita corrección para la solicitud de <strong>' + arrendatario + '</strong> del lote <strong>' + idLote + '</strong>. Ingresa al aplicativo para ver qué necesitamos y enviar la información.'
+      ),
+      _bloque_boton_('Ver detalle y responder', urlApp),
+      _bloque_nota_('Si el botón no funciona, copia este enlace en tu navegador: ' + urlApp),
+      _bloque_pie_()
+    ].join(''));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: '[PRUEBA 3/8] ⚠️ Necesitamos tu ayuda · ' + arrendatario,
+      htmlBody: html3,
+      name: 'Inducciones · El Libertador SA'
+    });
+    enviados++;
+    Logger.log("  ✓ 3/8 — Error en terceros: notificación al comercial");
+  } catch (e) { Logger.log("  ✗ 3/8 — Error: " + e.message); }
+
+  // ─── 4. Corrección recibida (notificación al auxiliar) ────────────────────
+  try {
+    var urlApp4 = ScriptApp.getService().getUrl() + '?v=2';
+    var html4 = _envolver_([
+      _bloque_cabecera_('Corrección recibida'),
+      _bloque_barra_estado_('#0fbdb7', '&#10003;', 'Respuesta del comercial'),
+      _bloque_cuerpo_inicio_(
+        'Corrección recibida',
+        '<strong>' + nombreComercial + '</strong> envió la corrección para la solicitud de <strong>' + arrendatario + '</strong>. Revísala en el aplicativo y procede con la radicación en SAI.'
+      ),
+      _bloque_boton_('Revisar corrección', urlApp4),
+      _bloque_nota_('Si el botón no funciona, copia este enlace: ' + urlApp4),
+      _bloque_pie_()
+    ].join(''));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: '[PRUEBA 4/8] ⚡ Corrección recibida · ' + arrendatario,
+      htmlBody: html4,
+      name: 'Inducciones · El Libertador SA'
+    });
+    enviados++;
+    Logger.log("  ✓ 4/8 — Corrección recibida: notificación al auxiliar");
+  } catch (e) { Logger.log("  ✗ 4/8 — Error: " + e.message); }
+
+  // ─── 5. Paz y salvo pendiente (onEdit) ────────────────────────────────────
+  try {
+    var html5 = _envolver_([
+      _bloque_cabecera_("Acci&oacute;n requerida"),
+      _bloque_barra_estado_(_C_GRIS, "&#9888;", "Paz y salvo pendiente"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "Tu lote <strong>" + idLote + "</strong> fue aprobado, pero a&uacute;n no hemos recibido el documento de paz y salvo. Requerimos este documento para completar el proceso."
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "Estado", valor: "PENDIENTE PAZ Y SALVO", colorVal: _C_GRIS }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 5/8] ⚠️ Paz y salvo pendiente · Lote " + idLote,
+      htmlBody: html5,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 5/8 — Paz y salvo pendiente");
+  } catch (e) { Logger.log("  ✗ 5/8 — Error: " + e.message); }
+
+  // ─── 6. Recordatorio paz y salvo (escalamiento) ───────────────────────────
+  try {
+    var html6 = _envolver_([
+      _bloque_cabecera_("Recordatorio"),
+      _bloque_barra_estado_(_C_GRIS, "&#128276;", "Paz y salvo pendiente hace 10 d&iacute;as"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "El lote <strong>" + idLote + "</strong> a&uacute;n no tiene paz y salvo. El equipo de inducciones est&aacute; monitoreando."
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "D&iacute;as pendiente", valor: "10", colorVal: _C_NAVY }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 6/8] 📌 Paz y salvo aún pendiente · Lote " + idLote,
+      htmlBody: html6,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 6/8 — Recordatorio paz y salvo (escalamiento)");
+  } catch (e) { Logger.log("  ✗ 6/8 — Error: " + e.message); }
+
+  // ─── 7. Recordatorio error en terceros (escalamiento) ─────────────────────
+  try {
+    var html7 = _envolver_([
+      _bloque_cabecera_("Recordatorio"),
+      _bloque_barra_estado_(_C_ROJO, "&#9888;", "Error en terceros hace 15 d&iacute;as"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "El lote <strong>" + idLote + "</strong> presenta errores en los datos de terceros que impiden continuar con el proceso de inducci&oacute;n. La operaci&oacute;n ya solicit&oacute; la correcci&oacute;n correspondiente."
+      ),
+      _bloque_chips_([
+        { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "D&iacute;as pendiente", valor: "15", colorVal: _C_ROJO }
+      ]),
+      _bloque_nota_(
+        '<strong style="color:#253150;">Acci&oacute;n requerida:</strong> Verifica y corrige los datos de terceros solicitados por el equipo de inducciones.'
+      ),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 7/8] ⚠️ Error en terceros pendiente de corrección · Lote " + idLote,
+      htmlBody: html7,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 7/8 — Recordatorio error en terceros (escalamiento)");
+  } catch (e) { Logger.log("  ✗ 7/8 — Error: " + e.message); }
+
+  // ─── 8. Radicación exitosa ────────────────────────────────────────────────
+  try {
+    var html8 = _envolver_([
+      _bloque_cabecera_("Radicaci&oacute;n exitosa"),
+      _bloque_barra_estado_("#3B6D11", "&#10003;", "Lote radicado correctamente"),
+      _bloque_cuerpo_inicio_(
+        "Hola, " + nombreComercial,
+        "Tu lote ha sido radicado exitosamente en el sistema de inducciones. El equipo lo revisar&aacute; pronto."
+      ),
+      _bloque_chips_([
+        { label: "ID de Lote", valor: idLote, colorVal: _C_ROJO },
+        { label: "P&oacute;liza", valor: "POL-123456" },
+        { label: "Contratos radicados", valor: "3" },
+        { label: "Tasa de Inducci&oacute;n", valor: "12%" }
+      ]),
+      _bloque_pie_()
+    ].join(""));
+
+    MailApp.sendEmail({
+      to: emailDestino,
+      subject: "[PRUEBA 8/8] ✅ Radicación exitosa · Lote " + idLote,
+      htmlBody: html8,
+      name: "Inducciones · El Libertador SA"
+    });
+    enviados++;
+    Logger.log("  ✓ 8/8 — Radicación exitosa");
+  } catch (e) { Logger.log("  ✗ 8/8 — Error: " + e.message); }
+
+  // ─── Resumen ──────────────────────────────────────────────────────────────
+  Logger.log("\n═══════════════════════════════════════════════");
+  Logger.log("  RESULTADO: " + enviados + "/8 correos enviados a " + emailDestino);
+  Logger.log("═══════════════════════════════════════════════");
 }
