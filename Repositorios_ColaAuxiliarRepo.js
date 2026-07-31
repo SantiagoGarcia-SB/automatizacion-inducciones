@@ -20,33 +20,24 @@ function obtenerColaAuxiliar() {
   var ultimaFila = hoja.getLastRow();
   var filasData = ultimaFila - 1;
 
-  // Leer SOLO las columnas necesarias para el listado (6 columnas individuales)
-  // A(1)=ID Lote, J(10)=Estado, X(24)=Arrendatario, Y(25)=TD, Z(26)=ID, BJ(62)=UUID
-  var colEstado = hoja.getRange(2, 10, filasData, 1).getValues();
-  var colIdLote = hoja.getRange(2, 1, filasData, 1).getValues();
-  var colArrendatario = hoja.getRange(2, 24, filasData, 1).getValues();
-  var colTipoDoc = hoja.getRange(2, 25, filasData, 1).getValues();
-  var colIdentificacion = hoja.getRange(2, 26, filasData, 1).getValues();
-  var colUUID = hoja.getRange(2, 62, filasData, 1).getValues();
-  var colDestino = hoja.getRange(2, 18, filasData, 1).getValues();
-  var colCiudad = hoja.getRange(2, 19, filasData, 1).getValues();
-  var colCanon = hoja.getRange(2, 21, filasData, 1).getValues();
+  // Leer 1 solo bloque con todas las columnas necesarias (1-62)
+  var bloque = hoja.getRange(2, 1, filasData, 62).getValues();
 
   var resultado = [];
   for (var i = filasData - 1; i >= 0; i--) {
-    var estado = String(colEstado[i][0] || '').trim().toUpperCase();
+    var estado = String(bloque[i][9] || '').trim().toUpperCase(); // col J = index 9
     if (estado !== 'PENDIENTE RADICAR') continue;
 
     resultado.push({
       fila: i + 2,
-      uuid: String(colUUID[i][0] || ''),
-      idLote: String(colIdLote[i][0] || ''),
-      arrendatario: String(colArrendatario[i][0] || ''),
-      tipoDoc: String(colTipoDoc[i][0] || ''),
-      identificacion: String(colIdentificacion[i][0] || ''),
-      destino: String(colDestino[i][0] || ''),
-      ciudad: String(colCiudad[i][0] || ''),
-      canon: String(colCanon[i][0] || '')
+      uuid: String(bloque[i][61] || ''),       // col BJ = index 61
+      idLote: String(bloque[i][0] || ''),       // col A  = index 0
+      arrendatario: String(bloque[i][23] || ''), // col X  = index 23
+      tipoDoc: String(bloque[i][24] || ''),     // col Y  = index 24
+      identificacion: String(bloque[i][25] || ''), // col Z  = index 25
+      destino: String(bloque[i][17] || ''),     // col R  = index 17
+      ciudad: String(bloque[i][18] || ''),      // col S  = index 18
+      canon: String(bloque[i][20] || '')        // col U  = index 20
     });
 
     if (resultado.length >= 100) break;
