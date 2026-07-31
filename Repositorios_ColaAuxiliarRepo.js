@@ -414,35 +414,43 @@ function obtenerErroresPendientesComercial(emailComercial) {
     });
   }
 
-  // Cruzar con Control_General — SOLO para los UUIDs que tienen errores (pocos)
+  // Cruzar con Control_General — leer 1 vez y armar índice por UUID
   var hojaControl = ss.getSheetByName('Control_General');
   var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
   var resultado = [];
 
+  // Leer toda la data de Control_General en 1 llamada y armar mapa UUID→fila
+  var ultimaFilaCtrl = hojaControl.getLastRow();
+  var indicePorUuid = {};
+  if (ultimaFilaCtrl > 1) {
+    var datosControl = hojaControl.getRange(2, 1, ultimaFilaCtrl - 1, 62).getValues();
+    for (var dc = 0; dc < datosControl.length; dc++) {
+      var uuidCtrl = String(datosControl[dc][61] || '').trim();
+      if (uuidCtrl) indicePorUuid[uuidCtrl] = datosControl[dc];
+    }
+  }
+
   var uuids = Object.keys(erroresPendientes);
   for (var u = 0; u < uuids.length; u++) {
     var uuid = uuids[u];
-    var finder = hojaControl.createTextFinder(uuid).matchEntireCell(true);
-    var celda = finder.findNext();
-    if (!celda) continue;
+    var filaControl = indicePorUuid[uuid];
+    if (!filaControl) continue;
 
-    var fila = celda.getRow();
-    // Leer solo las celdas que necesitamos de esa fila (no toda la hoja)
-    var comercial = String(hojaControl.getRange(fila, 11).getValue() || '').toUpperCase().trim();
+    var comercial = String(filaControl[10] || '').toUpperCase().trim();
     if (nombre && comercial !== nombre) continue;
 
-    var arrendatario = String(hojaControl.getRange(fila, 24).getValue() || '');
-    var idLote = String(hojaControl.getRange(fila, 1).getValue() || '');
-    var fechaRaw = hojaControl.getRange(fila, 3).getValue();
+    var arrendatario = String(filaControl[23] || '');
+    var idLote = String(filaControl[0] || '');
+    var fechaRaw = filaControl[2];
     var fechaRadicacion = fechaRaw instanceof Date ? Utilities.formatDate(fechaRaw, 'GMT-5', 'd/MM/yyyy') : '';
 
     var nombresParticipantes = {
       'INQ': arrendatario,
-      'COA1': String(hojaControl.getRange(fila, 30).getValue() || ''),
-      'COA2': String(hojaControl.getRange(fila, 36).getValue() || ''),
-      'COA3': String(hojaControl.getRange(fila, 42).getValue() || ''),
-      'COA4': String(hojaControl.getRange(fila, 48).getValue() || ''),
-      'COA5': String(hojaControl.getRange(fila, 54).getValue() || '')
+      'COA1': String(filaControl[29] || ''),
+      'COA2': String(filaControl[35] || ''),
+      'COA3': String(filaControl[41] || ''),
+      'COA4': String(filaControl[47] || ''),
+      'COA5': String(filaControl[53] || '')
     };
 
     var err = erroresPendientes[uuid];
