@@ -139,10 +139,8 @@ function pedirSolicitudAnalista(emailAnalista, cupoMax) {
       return { ok: false, mensaje: 'No hay solicitudes disponibles en este momento.' };
     }
 
-    // Asignar en COLA_ANALISIS
-    hojaCola.getRange(filaDisponible, 9).setValue('EN_EVALUACION');
-    hojaCola.getRange(filaDisponible, 10).setValue(emailAnalista);
-    hojaCola.getRange(filaDisponible, 11).setValue(new Date());
+    // Asignar en COLA_ANALISIS (ESTADO, ASIGNADA_A, FECHA_ASIGNACION = cols 9-11)
+    hojaCola.getRange(filaDisponible, 9, 1, 3).setValues([['EN_EVALUACION', emailAnalista, new Date()]]);
 
     // También asignar en registro analisis (columna ASIGNADA A)
     try {
