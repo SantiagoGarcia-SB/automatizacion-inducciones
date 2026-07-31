@@ -8,6 +8,20 @@
  */
 
 /**
+ * Helper: headers cacheados de "registro analisis" (comparte clave con AnalisisRepo).
+ * @param {Sheet} hoja
+ * @returns {string[]}
+ */
+function _headersRegistroAnalisis(hoja) {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('HDR_REG_ANALISIS');
+  if (cached) return JSON.parse(cached);
+  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0].map(function(h) { return String(h || '').trim(); });
+  cache.put('HDR_REG_ANALISIS', JSON.stringify(headers), 300);
+  return headers;
+}
+
+/**
  * Obtiene las solicitudes asignadas a un analista + info de cupo.
  * OPTIMIZADO: Usa TextFinder para buscar solo filas del analista (no lee toda la hoja).
  * @param {string} emailAnalista
@@ -18,7 +32,7 @@ function obtenerSolicitudesAnalista(emailAnalista, cupoMax) {
   var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja || hoja.getLastRow() < 2) return { solicitudes: [], cupo: cupoMax || 0, activas: 0 };
 
-  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var headers = _headersRegistroAnalisis(hoja);
 
   // Encontrar columnas necesarias
   var colAsignada = -1, colRegSAI = -1, colArrendatario = -1;
@@ -134,7 +148,7 @@ function pedirSolicitudAnalista(emailAnalista, cupoMax) {
     try {
       var hojaAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
       if (hojaAnalisis) {
-        var headers = hojaAnalisis.getRange(1, 1, 1, hojaAnalisis.getLastColumn()).getValues()[0];
+        var headers = _headersRegistroAnalisis(hojaAnalisis);
         var colAsignada = -1;
         for (var h = 0; h < headers.length; h++) {
           var hdr = String(headers[h]).trim();
@@ -175,7 +189,7 @@ function guardarEvaluacionAnalista(filaNum, campos, finalizar, emailAnalista) {
   var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja) return { ok: false, mensaje: 'Hoja no encontrada.' };
 
-  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var headers = _headersRegistroAnalisis(hoja);
 
   // Campos editables permitidos (nunca pisar fórmulas)
   var permitidos = [
@@ -233,7 +247,7 @@ function obtenerAsignacionesActivas() {
   var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja || hoja.getLastRow() < 2) return [];
 
-  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var headers = _headersRegistroAnalisis(hoja);
   var ultimaFila = hoja.getLastRow();
 
   var colAsignada = -1, colRegSAI = -1, colArrendatario = -1, colLote = -1, colSolicitud = -1;
@@ -282,7 +296,7 @@ function obtenerAsignacionesActivas() {
  */
 function reasignarSolicitud(filaNum, nuevoEmail) {
   var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
-  var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+  var headers = _headersRegistroAnalisis(hoja);
 
   var colAsignada = -1;
   for (var h = 0; h < headers.length; h++) {
