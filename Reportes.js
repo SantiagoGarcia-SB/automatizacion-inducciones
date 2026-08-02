@@ -341,7 +341,7 @@ function enviarReporteGestionInducciones() {
       subject:  correo.asunto,
       htmlBody: correo.htmlBody,
       replyTo:  "noreply@ellibertador.co",
-      name:     "Inducciones · El Libertador SA"
+      name:     "Inducciones · El Libertador"
     });
 
     Logger.log("✅ Reporte de gestión enviado a líderes.");
@@ -368,7 +368,7 @@ function probarReporteGestion() {
     subject:  `[PRUEBA] ${correo.asunto}`,
     htmlBody: correo.htmlBody,
     replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador SA (prueba)"
+    name:     "Inducciones · El Libertador (prueba)"
   });
 
   Logger.log("Vista previa enviada solo a: " + destinatario);
@@ -394,7 +394,7 @@ function probarReporteGestionConFecha() {
     subject:  `[PRUEBA · fecha simulada] ${correo.asunto}`,
     htmlBody: correo.htmlBody,
     replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador SA (prueba)"
+    name:     "Inducciones · El Libertador (prueba)"
   });
 
   Logger.log("Vista previa con fecha simulada (" + FECHA_PRUEBA + ") enviada solo a: " + destinatario);

@@ -42,7 +42,7 @@ function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
     bcc: BCC_AUDITORIA,
     subject: '⚠️ Necesitamos tu ayuda · ' + arrendatario,
     htmlBody: htmlBody,
-    name: 'Inducciones · El Libertador SA'
+    name: 'Inducciones · El Libertador'
   });
 }
 
@@ -80,6 +80,6 @@ function notificarCorreccionAlAuxiliar(arrendatario, emailAuxiliar, emailComerci
     bcc: BCC_AUDITORIA,
     subject: '⚡ Corrección recibida · ' + arrendatario,
     htmlBody: htmlBody,
-    name: 'Inducciones · El Libertador SA'
+    name: 'Inducciones · El Libertador'
   });
 }

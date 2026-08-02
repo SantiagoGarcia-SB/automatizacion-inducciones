@@ -554,7 +554,7 @@ function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
         subject: asuntoCorreo,
         htmlBody: htmlBody,
         bcc: BCC_AUDITORIA,
-        name: "Inducciones · El Libertador SA"
+        name: "Inducciones · El Libertador"
       });
       Logger.log("  [A4] Notificación enviada a " + emailComercial + " — Lote " + idLote + " → " + info.nuevoEstado);
     } catch (e) {
@@ -636,7 +636,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 1/8] ▶️ Tu lote " + idLote + " está en análisis",
       htmlBody: html1,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 1/8 — Cambio de estado: EN ANÁLISIS");
@@ -662,7 +662,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 2/8] ✅ Tu lote " + idLote + " fue analizado exitosamente",
       htmlBody: html2,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 2/8 — Cambio de estado: TERMINADO");
@@ -687,7 +687,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: '[PRUEBA 3/8] ⚠️ Necesitamos tu ayuda · ' + arrendatario,
       htmlBody: html3,
-      name: 'Inducciones · El Libertador SA'
+      name: 'Inducciones · El Libertador'
     });
     enviados++;
     Logger.log("  ✓ 3/8 — Error en terceros: notificación al comercial");
@@ -712,7 +712,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: '[PRUEBA 4/8] ⚡ Corrección recibida · ' + arrendatario,
       htmlBody: html4,
-      name: 'Inducciones · El Libertador SA'
+      name: 'Inducciones · El Libertador'
     });
     enviados++;
     Logger.log("  ✓ 4/8 — Corrección recibida: notificación al auxiliar");
@@ -738,7 +738,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 5/8] ⚠️ Paz y salvo pendiente · Lote " + idLote,
       htmlBody: html5,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 5/8 — Paz y salvo pendiente");
@@ -764,7 +764,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 6/8] 📌 Paz y salvo aún pendiente · Lote " + idLote,
       htmlBody: html6,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 6/8 — Recordatorio paz y salvo (escalamiento)");
@@ -793,7 +793,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 7/8] ⚠️ Error en terceros pendiente de corrección · Lote " + idLote,
       htmlBody: html7,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 7/8 — Recordatorio error en terceros (escalamiento)");
@@ -821,7 +821,7 @@ function PRUEBA_todosLosCorreos() {
       to: emailDestino,
       subject: "[PRUEBA 8/8] ✅ Radicación exitosa · Lote " + idLote,
       htmlBody: html8,
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
     enviados++;
     Logger.log("  ✓ 8/8 — Radicación exitosa");

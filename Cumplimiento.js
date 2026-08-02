@@ -182,7 +182,7 @@ function procesarDatosMejorado() {
       htmlBody: cuerpoHtml,
       attachments: adjuntos.length > 0 ? adjuntos : undefined,
       replyTo: "noreply@ellibertador.co",
-      name: "Inducciones · El Libertador SA"
+      name: "Inducciones · El Libertador"
     });
 
     // Marcar las filas procesadas en UNA sola escritura por lote (no una por fila)

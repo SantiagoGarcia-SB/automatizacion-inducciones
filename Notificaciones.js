@@ -538,7 +538,7 @@ if (10 < colStart || 10 > colEnd) return;
       htmlBody: htmlBody,
       cc:       correosCC,
       bcc:      BCC_AUDITORIA,
-      name:     "Inducciones · El Libertador SA",
+      name:     "Inducciones · El Libertador",
     });
 
     // Registrar fecha de aviso en columna BI (61)
@@ -699,7 +699,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
           htmlBody: htmlBody,
           cc: ccs,
           bcc: BCC_AUDITORIA,
-          name: "Inducciones · El Libertador SA"
+          name: "Inducciones · El Libertador"
         });
         
         // Marcamos la fecha de aviso en BI para que el conteo reinicie
@@ -854,7 +854,7 @@ function enviarRecordatoriosErrorTercerosDiario() {
           htmlBody: htmlBody,
           cc: ccs,
           bcc: BCC_AUDITORIA,
-          name: "Inducciones · El Libertador SA"
+          name: "Inducciones · El Libertador"
         });
 
         // Marcamos fecha de aviso en BI para que el conteo reinicie
@@ -983,7 +983,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
     _bloque_cuerpo_inicio_(
       `Hola, ${nombreComercial}`,
-      `Tu lote de inducciones fue recibido y procesado correctamente por El Libertador SA.
+      `Tu lote de inducciones fue recibido y procesado correctamente por El Libertador.
        A partir de este momento ser&aacute; asignado a un analista para su revisi&oacute;n.
        Te notificaremos por correo cuando haya una actualizaci&oacute;n de estado.`
     ),
@@ -1021,7 +1021,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
     subject:  `✅ Radicación exitosa · Lote ${idLote}`,
     htmlBody: htmlBody,
     replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador SA"
+    name:     "Inducciones · El Libertador"
   };
 
   // ── Adjuntar PDF de paz y salvo si aplica ──
