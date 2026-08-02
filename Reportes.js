@@ -481,7 +481,164 @@ function configurarTriggerReporteGestion() {
 // necesita resolver. No incluye ningún link/botón hacia la app — el canal
 // de corrección hoy sigue siendo responder al correo de aviso original
 // (ver decisión de negocio: el CRM aún está en fase de validación).
+//
+// El asunto incluye nombre + mes + año para evitar que Gmail agrupe los
+// reportes mensuales en un solo hilo.
 // ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Cuenta lotes radicados agrupados por resultado (EXITOSO / FALLIDO) para un
+ * comercial en un rango de fechas. Lee Hoja_Control columna D ("Resultado").
+ * @param {string} email - Email del comercial
+ * @param {Date} fechaInicio
+ * @param {Date} fechaFin
+ * @returns {{exitosos:number, fallidos:number, total:number}}
+ */
+function contarRadicacionesPorResultadoEnRango(email, fechaInicio, fechaFin) {
+  var ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
+  var hoja = ss.getSheetByName("Hoja_Control");
+  if (!hoja) return { exitosos: 0, fallidos: 0, total: 0 };
+
+  var data = hoja.getDataRange().getValues();
+  var emailLower = String(email || "").trim().toLowerCase();
+  var lotesExitosos = new Set();
+  var lotesFallidos = new Set();
+
+  for (var i = 1; i < data.length; i++) {
+    var fechaRaw = data[i][0];
+    if (!(fechaRaw instanceof Date)) continue;
+    if (fechaRaw < fechaInicio || fechaRaw > fechaFin) continue;
+
+    var emailLog  = String(data[i][1] || "").trim().toLowerCase();
+    if (emailLog !== emailLower) continue;
+
+    var resultado = String(data[i][3] || "").trim().toUpperCase();
+    var idLote    = String(data[i][5] || "").trim();
+    if (!idLote) continue;
+
+    if (resultado === "EXITOSO") {
+      lotesExitosos.add(idLote);
+    } else if (resultado === "FALLIDO") {
+      lotesFallidos.add(idLote);
+    }
+  }
+
+  return {
+    exitosos: lotesExitosos.size,
+    fallidos: lotesFallidos.size,
+    total: lotesExitosos.size + lotesFallidos.size
+  };
+}
+
+/**
+ * Bloque HTML: gráfico de barras horizontales de lotes radicados (últimos 3 meses).
+ * Cada barra es proporcional al valor máximo del período.
+ * @param {Array} meses - [{nombre:string, valor:number}] (máx 3, del más antiguo al más reciente)
+ */
+function _bloque_barras_radicacion_cierreMes_(meses) {
+  if (!meses || meses.length === 0) return '';
+
+  var maxVal = Math.max.apply(null, meses.map(function(m) { return m.valor; }));
+  if (maxVal === 0) maxVal = 1; // evitar división por 0
+
+  var barrasHtml = meses.map(function(m) {
+    var porcentaje = Math.round((m.valor / maxVal) * 100);
+    var ancho = Math.max(porcentaje, 8); // mínimo visible
+    return '<tr>'
+      + '<td style="padding:5px 0;font-family:Arial,sans-serif;font-size:11px;color:#64748b;width:80px;white-space:nowrap;">' + m.nombre + '</td>'
+      + '<td style="padding:5px 8px;">'
+      + '<div style="background:#e2e8f0;border-radius:4px;height:22px;width:100%;position:relative;">'
+      + '<div style="background:#253150;border-radius:4px;height:22px;width:' + ancho + '%;min-width:24px;"></div>'
+      + '</div>'
+      + '</td>'
+      + '<td style="padding:5px 0;font-family:Arial,sans-serif;font-size:13px;font-weight:700;color:#253150;width:36px;text-align:right;">' + m.valor + '</td>'
+      + '</tr>';
+  }).join('');
+
+  return '<tr><td style="padding:22px 28px 0;">'
+    + '<div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>'
+    + '<div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;font-family:Arial,sans-serif;">Lotes radicados por mes</div>'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0">' + barrasHtml + '</table>'
+    + '</td></tr>';
+}
+
+/**
+ * Bloque HTML: gráfico de barras apiladas exitoso/fallido (últimos 3 meses).
+ * Muestra la proporción de radicaciones exitosas vs fallidas por mes.
+ * @param {Array} meses - [{nombre:string, exitosos:number, fallidos:number}]
+ * @param {boolean} mejoro - true si el % de fallidos bajó respecto al mes anterior
+ */
+function _bloque_barras_calidad_radicacion_(meses, mejoro) {
+  if (!meses || meses.length === 0) return '';
+
+  var maxVal = Math.max.apply(null, meses.map(function(m) { return m.exitosos + m.fallidos; }));
+  if (maxVal === 0) maxVal = 1;
+
+  var barrasHtml = meses.map(function(m) {
+    var total = m.exitosos + m.fallidos;
+    var pctExitoso = total > 0 ? Math.round((m.exitosos / maxVal) * 100) : 0;
+    var pctFallido = total > 0 ? Math.round((m.fallidos / maxVal) * 100) : 0;
+    var anchoExitoso = Math.max(pctExitoso, (m.exitosos > 0 ? 6 : 0));
+    var anchoFallido = Math.max(pctFallido, (m.fallidos > 0 ? 6 : 0));
+
+    return '<tr>'
+      + '<td style="padding:5px 0;font-family:Arial,sans-serif;font-size:11px;color:#64748b;width:80px;white-space:nowrap;">' + m.nombre + '</td>'
+      + '<td style="padding:5px 8px;">'
+      + '<div style="display:inline-block;height:22px;width:100%;background:#e2e8f0;border-radius:4px;overflow:hidden;font-size:0;line-height:22px;">'
+      + (anchoExitoso > 0 ? '<div style="display:inline-block;background:#3B6D11;height:22px;width:' + anchoExitoso + '%;"></div>' : '')
+      + (anchoFallido > 0 ? '<div style="display:inline-block;background:#BD0F14;height:22px;width:' + anchoFallido + '%;"></div>' : '')
+      + '</div>'
+      + '</td>'
+      + '<td style="padding:5px 0;font-family:Arial,sans-serif;font-size:11px;width:60px;text-align:right;white-space:nowrap;">'
+      + '<span style="color:#3B6D11;font-weight:700;">' + m.exitosos + '</span>'
+      + (m.fallidos > 0 ? ' / <span style="color:#BD0F14;font-weight:700;">' + m.fallidos + '</span>' : '')
+      + '</td>'
+      + '</tr>';
+  }).join('');
+
+  // Leyenda
+  var leyenda = '<div style="margin-top:8px;font-size:10px;color:#94a3b8;font-family:Arial,sans-serif;">'
+    + '<span style="display:inline-block;width:10px;height:10px;background:#3B6D11;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Exitosas'
+    + '&nbsp;&nbsp;&nbsp;'
+    + '<span style="display:inline-block;width:10px;height:10px;background:#BD0F14;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Fallidas'
+    + '</div>';
+
+  // Mensaje motivacional basado en si mejoró o no
+  var mensajeHtml = '';
+  if (meses.length >= 2) {
+    var mesActual = meses[meses.length - 1];
+    var mesAnterior = meses[meses.length - 2];
+    var pctFallidoActual = (mesActual.exitosos + mesActual.fallidos) > 0
+      ? Math.round((mesActual.fallidos / (mesActual.exitosos + mesActual.fallidos)) * 100) : 0;
+    var pctFallidoAnterior = (mesAnterior.exitosos + mesAnterior.fallidos) > 0
+      ? Math.round((mesAnterior.fallidos / (mesAnterior.exitosos + mesAnterior.fallidos)) * 100) : 0;
+
+    if (mesActual.fallidos === 0 && mesActual.exitosos > 0) {
+      mensajeHtml = '<div style="margin-top:12px;padding:10px 14px;background:#EAF3DE;border-radius:6px;font-size:12px;color:#3B6D11;font-family:Arial,sans-serif;">'
+        + '&#127942; <strong>¡Excelente!</strong> Este mes todas tus radicaciones fueron exitosas. Sigue así.'
+        + '</div>';
+    } else if (pctFallidoActual < pctFallidoAnterior) {
+      mensajeHtml = '<div style="margin-top:12px;padding:10px 14px;background:#EAF3DE;border-radius:6px;font-size:12px;color:#3B6D11;font-family:Arial,sans-serif;">'
+        + '&#9989; <strong>Vas mejorando.</strong> El porcentaje de radicaciones con inconsistencias bajó de ' + pctFallidoAnterior + '% a ' + pctFallidoActual + '%. ¡Buen trabajo!'
+        + '</div>';
+    } else if (mesActual.fallidos > 0) {
+      mensajeHtml = '<div style="margin-top:12px;padding:10px 14px;background:#FFF8F0;border:1px solid #FFE0B2;border-radius:6px;font-size:12px;color:#7C4D00;font-family:Arial,sans-serif;">'
+        + '&#128161; <strong>Tip:</strong> Este mes tuviste <strong>' + mesActual.fallidos + '</strong> radicación(es) con inconsistencias'
+        + (pctFallidoActual > pctFallidoAnterior ? ' (más que el mes pasado)' : '') + '. '
+        + 'Antes de cargar el Excel, verifica que todos los campos obligatorios estén completos y que los datos de identificación y contacto sean correctos. '
+        + 'Esto evita reprocesos y agiliza el trámite para ti y tus clientes.'
+        + '</div>';
+    }
+  }
+
+  return '<tr><td style="padding:22px 28px 0;">'
+    + '<div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>'
+    + '<div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;font-family:Arial,sans-serif;">Calidad de tus radicaciones</div>'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0">' + barrasHtml + '</table>'
+    + leyenda
+    + mensajeHtml
+    + '</td></tr>';
+}
 
 /**
  * Arma la sección "Estado actual de tus lotes abiertos" (badges por estado).
@@ -560,10 +717,11 @@ function _bloque_accion_requerida_cierreMes_(pendientesPS, erroresTerceros) {
 
 /**
  * Arma el asunto y el HTML del correo de cierre de mes de un comercial.
- * @param {Object} datos  { nombre, nombreMes, radicadosEsteMes, radicadosMesAnterior, resumen, pendientesPS, erroresTerceros }
+ * @param {Object} datos  { nombre, nombreMes, radicadosEsteMes, radicadosMesAnterior, resumen, pendientesPS, erroresTerceros, barrasRadicacion, barrasCalidad }
  */
 function _construirCorreoCierreMes_(datos) {
   var nombreMesCap = datos.nombreMes.charAt(0).toUpperCase() + datos.nombreMes.slice(1);
+  var anioActual = new Date().getFullYear();
 
   var deltaHtml = '';
   var comparacionTexto = '';
@@ -586,11 +744,13 @@ function _construirCorreoCierreMes_(datos) {
 
   var htmlBody = _envolver_([
     _bloque_cabecera_('Reporte mensual'),
-    _bloque_barra_estado_(_C_NAVY, '&#128202;', 'Cierre de ' + nombreMesCap + ' ' + new Date().getFullYear()),
+    _bloque_barra_estado_(_C_NAVY, '&#128202;', 'Cierre de ' + nombreMesCap + ' ' + anioActual),
     _bloque_cuerpo_inicio_('Hola, ' + datos.nombre, introTexto),
     _bloque_chips_([
       { label: 'Lotes radicados en ' + datos.nombreMes, valor: String(datos.radicadosEsteMes) + (deltaHtml ? ' ' + deltaHtml : ''), full: true }
     ]),
+    datos.barrasRadicacion || '',
+    datos.barrasCalidad || '',
     _bloque_estado_actual_cierreMes_(datos.resumen),
     _bloque_accion_requerida_cierreMes_(datos.pendientesPS, datos.erroresTerceros),
     comparacionTexto ? _bloque_nota_('<strong style="color:#253150;">Cómo vas frente a ' + datos.nombreMesAnterior + ':</strong> ' + comparacionTexto) : '',
@@ -598,7 +758,7 @@ function _construirCorreoCierreMes_(datos) {
   ].join(''));
 
   return {
-    asunto: '📊 Tu cierre de ' + datos.nombreMes + ' · Reporte mensual',
+    asunto: '📊 ' + datos.nombre + ', tu cierre de ' + datos.nombreMes + ' ' + anioActual + ' · Inducciones',
     htmlBody: htmlBody
   };
 }
@@ -625,6 +785,13 @@ function enviarReportesCierreMes() {
   }
 
   var rangos = _rangosMesCierreYComparacion_();
+
+  // Calcular rango del mes -2 (hace 2 meses) para las barras de 3 meses
+  var ref = new Date();
+  var inicioMesMenos2 = new Date(ref.getFullYear(), ref.getMonth() - 3, 1, 0, 0, 0, 0);
+  var finMesMenos2    = new Date(ref.getFullYear(), ref.getMonth() - 2, 0, 23, 59, 59, 999);
+  var nombreMesMenos2 = MESES_ES[inicioMesMenos2.getMonth()];
+
   var enviados = 0;
   var fallidos = 0;
 
@@ -634,8 +801,33 @@ function enviarReportesCierreMes() {
       var resumen           = obtenerResumenComercial(u.email);
       var radicadosEsteMes  = contarLotesRadicadosEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
       var radicadosMesAnt   = contarLotesRadicadosEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
+      var radicadosMesMenos2 = contarLotesRadicadosEnRango(u.email, inicioMesMenos2, finMesMenos2);
       var pendientesPS      = obtenerLotesPendientesPazYSalvo(nombreComercialMayus);
       var erroresTerceros   = obtenerErroresPendientesComercial(u.email);
+
+      // Datos de calidad por mes (exitosos vs fallidos)
+      var calidadMesMenos2 = contarRadicacionesPorResultadoEnRango(u.email, inicioMesMenos2, finMesMenos2);
+      var calidadMesAnt    = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
+      var calidadEsteMes   = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+
+      // Capitalizar nombres de meses para las barras
+      var capMesMenos2 = nombreMesMenos2.charAt(0).toUpperCase() + nombreMesMenos2.slice(1);
+      var capMesAnt    = rangos.mesComparacion.nombre.charAt(0).toUpperCase() + rangos.mesComparacion.nombre.slice(1);
+      var capMesActual = rangos.mesReporte.nombre.charAt(0).toUpperCase() + rangos.mesReporte.nombre.slice(1);
+
+      // Barras de lotes radicados (últimos 3 meses)
+      var barrasRadicacion = _bloque_barras_radicacion_cierreMes_([
+        { nombre: capMesMenos2, valor: radicadosMesMenos2 },
+        { nombre: capMesAnt,    valor: radicadosMesAnt },
+        { nombre: capMesActual, valor: radicadosEsteMes }
+      ]);
+
+      // Barras de calidad de radicación (exitosas vs fallidas, últimos 3 meses)
+      var barrasCalidad = _bloque_barras_calidad_radicacion_([
+        { nombre: capMesMenos2, exitosos: calidadMesMenos2.exitosos, fallidos: calidadMesMenos2.fallidos },
+        { nombre: capMesAnt,    exitosos: calidadMesAnt.exitosos,    fallidos: calidadMesAnt.fallidos },
+        { nombre: capMesActual, exitosos: calidadEsteMes.exitosos,   fallidos: calidadEsteMes.fallidos }
+      ]);
 
       var correo = _construirCorreoCierreMes_({
         nombre: obtenerNombreDeComercial(u.email),
@@ -645,7 +837,9 @@ function enviarReportesCierreMes() {
         radicadosMesAnterior: radicadosMesAnt,
         resumen: resumen,
         pendientesPS: pendientesPS,
-        erroresTerceros: erroresTerceros
+        erroresTerceros: erroresTerceros,
+        barrasRadicacion: barrasRadicacion,
+        barrasCalidad: barrasCalidad
       });
 
       MailApp.sendEmail({
@@ -707,15 +901,48 @@ function probarReporteCierreMes() {
   const rangos = _rangosMesCierreYComparacion_();
   const nombreComercialMayus = obtenerNombreCompletoDeComercial(EMAIL_A_PROBAR).toUpperCase();
 
+  // Rango del mes -2 para las barras de 3 meses
+  const ref = new Date();
+  const inicioMesMenos2 = new Date(ref.getFullYear(), ref.getMonth() - 3, 1, 0, 0, 0, 0);
+  const finMesMenos2    = new Date(ref.getFullYear(), ref.getMonth() - 2, 0, 23, 59, 59, 999);
+  const nombreMesMenos2 = MESES_ES[inicioMesMenos2.getMonth()];
+
+  const radicadosEsteMes  = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+  const radicadosMesAnt   = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
+  const radicadosMesMenos2 = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, inicioMesMenos2, finMesMenos2);
+
+  // Calidad por mes
+  const calidadMesMenos2 = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, inicioMesMenos2, finMesMenos2);
+  const calidadMesAnt    = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
+  const calidadEsteMes   = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+
+  const capMesMenos2 = nombreMesMenos2.charAt(0).toUpperCase() + nombreMesMenos2.slice(1);
+  const capMesAnt    = rangos.mesComparacion.nombre.charAt(0).toUpperCase() + rangos.mesComparacion.nombre.slice(1);
+  const capMesActual = rangos.mesReporte.nombre.charAt(0).toUpperCase() + rangos.mesReporte.nombre.slice(1);
+
+  const barrasRadicacion = _bloque_barras_radicacion_cierreMes_([
+    { nombre: capMesMenos2, valor: radicadosMesMenos2 },
+    { nombre: capMesAnt,    valor: radicadosMesAnt },
+    { nombre: capMesActual, valor: radicadosEsteMes }
+  ]);
+
+  const barrasCalidad = _bloque_barras_calidad_radicacion_([
+    { nombre: capMesMenos2, exitosos: calidadMesMenos2.exitosos, fallidos: calidadMesMenos2.fallidos },
+    { nombre: capMesAnt,    exitosos: calidadMesAnt.exitosos,    fallidos: calidadMesAnt.fallidos },
+    { nombre: capMesActual, exitosos: calidadEsteMes.exitosos,   fallidos: calidadEsteMes.fallidos }
+  ]);
+
   const correo = _construirCorreoCierreMes_({
     nombre: obtenerNombreDeComercial(EMAIL_A_PROBAR),
     nombreMes: rangos.mesReporte.nombre,
     nombreMesAnterior: rangos.mesComparacion.nombre,
-    radicadosEsteMes: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin),
-    radicadosMesAnterior: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin),
+    radicadosEsteMes: radicadosEsteMes,
+    radicadosMesAnterior: radicadosMesAnt,
     resumen: obtenerResumenComercial(EMAIL_A_PROBAR),
     pendientesPS: obtenerLotesPendientesPazYSalvo(nombreComercialMayus),
-    erroresTerceros: obtenerErroresPendientesComercial(EMAIL_A_PROBAR)
+    erroresTerceros: obtenerErroresPendientesComercial(EMAIL_A_PROBAR),
+    barrasRadicacion: barrasRadicacion,
+    barrasCalidad: barrasCalidad
   });
 
   const destinatario = Session.getActiveUser().getEmail();
