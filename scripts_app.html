@@ -362,11 +362,24 @@ var MENUS_POR_ROL = {
  * Usa datos pre-cargados en __INIT__ (inyectados server-side en doGet).
  * NO hace llamada al servidor para obtener el usuario — ya lo tiene.
  */
+/**
+ * Oculta la pantalla de carga inicial a pantalla completa (#bootOverlay).
+ * Usa una transición de opacidad y luego la saca del flujo (display:none)
+ * para que no interfiera con clics ni con lectores de pantalla.
+ */
+function _ocultarBootOverlay() {
+  var overlay = document.getElementById('bootOverlay');
+  if (!overlay) return;
+  overlay.classList.add('boot-overlay--oculto');
+  setTimeout(function() { overlay.style.display = 'none'; }, 350);
+}
+
 function inicializarApp() {
   var initData = window.__INIT__ || {};
   var usuario = initData.usuario || {};
 
   if (!usuario || !usuario.autorizado) {
+    _ocultarBootOverlay();
     mostrarVista('viewNoAcceso');
     return;
   }
@@ -374,6 +387,7 @@ function inicializarApp() {
   APP_USUARIO = usuario;
   renderizarHeader(usuario);
   renderizarMenu(usuario.rol);
+  _ocultarBootOverlay();
 
   // Cache local de datos pre-cargados
   if (initData.resumen) CacheManager.set('dashboard', initData.resumen);

@@ -366,6 +366,43 @@ ul, ol { list-style: none; }
 
 /**
  * ============================================================
+ * PANTALLA DE CARGA INICIAL (a pantalla completa)
+ * ============================================================
+ */
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gradient-brand);
+  transition: opacity var(--duration-slow) var(--ease-in-out);
+}
+.boot-overlay--oculto {
+  opacity: 0;
+  pointer-events: none;
+}
+.boot-overlay__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  min-width: 260px;
+  padding: var(--space-10) var(--space-12);
+  background: var(--color-mono-0);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-4);
+}
+.boot-overlay__logo { height: 32px; }
+.boot-overlay__status {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-mono-500);
+}
+
+/**
+ * ============================================================
  * CAPA 7 — HEADER + SIDEBAR
  * ============================================================
  */
