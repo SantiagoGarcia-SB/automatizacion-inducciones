@@ -125,9 +125,9 @@ function sincronizarLoteAutomatico() {
   }
 
   // ── 7. PROCESAR CADA LOTE EN ORDEN ────────────────────────────────────────
-  var filasNuevasBuffer   = []; // { filaFisica, datosParaEscribir[] }
-  var actualizacionesBuf  = []; // { filaFisica, col, valor }
-  var cambiosEstadoOrigen = []; // { fila, valor }
+  var filasNuevasBuffer      = []; // { filaFisica, datosParaEscribir[] }
+  var actualizacionesPorFila = {}; // { filaFisica: { col1Based: valor, ... } }
+  var cambiosEstadoOrigen    = []; // { fila, valor }
 
   for (var l = 0; l < ordenDeLotes.length; l++) {
     var idLote           = ordenDeLotes[l];
@@ -154,7 +154,9 @@ function sincronizarLoteAutomatico() {
             var valorNuevo  = filaOrigen[indicesRad[colRad]];
             var valorActual = datosAnalisis[indiceArr][indicesAnl[colAnl]];
             if (valorActual !== valorNuevo) {
-              actualizacionesBuf.push({ fila: indiceArr + 1, col: indicesAnl[colAnl] + 1, valor: valorNuevo });
+              var filaFisicaUpd = indiceArr + 1;
+              if (!actualizacionesPorFila[filaFisicaUpd]) actualizacionesPorFila[filaFisicaUpd] = {};
+              actualizacionesPorFila[filaFisicaUpd][indicesAnl[colAnl] + 1] = valorNuevo;
             }
           }
         }
@@ -199,13 +201,28 @@ function sincronizarLoteAutomatico() {
     hojaAnalisis.getRange(primeraFilaNueva, 1, matrizNuevas.length, numCols).setValues(matrizNuevas);
   }
 
-  // Actualizaciones individuales (solo celdas que cambiaron)
-  // Agrupamos por fila para minimizar llamadas
-  if (actualizacionesBuf.length > 0) {
-    actualizacionesBuf.forEach(function(upd) {
-      hojaAnalisis.getRange(upd.fila, upd.col).setValue(upd.valor);
-    });
-  }
+  // Actualizaciones (solo celdas que cambiaron): agrupa columnas contiguas
+  // en 1 setValues() por bloque dentro de cada fila. NUNCA se lee/reescribe
+  // la fila completa — "registro analisis" tiene columnas de evaluación del
+  // analista (algunas con fórmula) que este motor no debe tocar, y
+  // guardarEvaluacionAnalista() no usa lock, así que puede correr en
+  // paralelo a esta sincronización.
+  Object.keys(actualizacionesPorFila).forEach(function(filaKey) {
+    var cambiosFila = actualizacionesPorFila[filaKey];
+    var cols = Object.keys(cambiosFila).map(Number).sort(function(a, b) { return a - b; });
+    var i = 0;
+    while (i < cols.length) {
+      var inicioCol = cols[i];
+      var valoresBloque = [cambiosFila[inicioCol]];
+      var j = i + 1;
+      while (j < cols.length && cols[j] === cols[j - 1] + 1) {
+        valoresBloque.push(cambiosFila[cols[j]]);
+        j++;
+      }
+      hojaAnalisis.getRange(Number(filaKey), inicioCol, 1, valoresBloque.length).setValues([valoresBloque]);
+      i = j;
+    }
+  });
 
   // ── 8b. ESCRIBIR FILA_REG_ANALISIS EN COLA_ANALISIS ───────────────────────
   // Para cada fila nueva insertada en "registro analisis", registrar su número
@@ -243,7 +260,7 @@ function sincronizarLoteAutomatico() {
   }
 
   Logger.log("✅ Sincronización completada. Nuevos: " + filasNuevasBuffer.length +
-             " | Actualizados: " + actualizacionesBuf.length +
+             " | Filas actualizadas: " + Object.keys(actualizacionesPorFila).length +
              " | Estados cambiados: " + cambiosEstadoOrigen.length);
 
   } finally {
