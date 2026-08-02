@@ -126,7 +126,15 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
   var filasDisponibles = ultimaFila - 1; // filas de datos (excluye header)
 
   // Si se especifican filtros de fecha, leer TODAS las filas (búsqueda histórica)
-  // De lo contrario, usar la ventana de 2000 filas más recientes
+  // De lo contrario, usar la ventana de 2000 filas más recientes.
+  //
+  // LIMITACIÓN CONOCIDA (sin resolver a propósito, ver auditoría de latencia
+  // 01/08/2026): esta lectura crece sin límite junto con Control_General. No
+  // se le puso un tope arbitrario (ej. "máximo N filas") porque eso cortaría
+  // resultados históricos reales de forma silenciosa — peor que ser lento.
+  // Una solución real requiere decidir arquitectura (ej. índice por fecha, o
+  // archivar filas viejas a otra hoja), no un ajuste de una función. Repetir
+  // este mismo aviso si esta hoja empieza a acercarse a filas de 5 dígitos.
   var filasALeer;
   var filaInicio;
   if (fechaDesde || fechaHasta) {
