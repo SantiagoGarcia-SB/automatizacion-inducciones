@@ -89,6 +89,7 @@ function setupEnvironment(uuid) {
     }
   };
   globalThis.Logger = { log: function() {} };
+  globalThis._registrarEvento_ = function() {};
 
   loadSource();
   return { origenSS, destinoSS };
@@ -101,6 +102,7 @@ describe('sincronizarLoteAutomatico() — CASO A: agrupar columnas contiguas al 
     delete globalThis.ID_ARCHIVO_ANALISIS;
     delete globalThis.LockService;
     delete globalThis.Logger;
+    delete globalThis._registrarEvento_;
     delete globalThis.sincronizarLoteAutomatico;
   });
 

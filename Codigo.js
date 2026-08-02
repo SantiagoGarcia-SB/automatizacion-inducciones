@@ -802,7 +802,12 @@ function obtenerLotesDelUsuario() {
   const hoja = ss.getSheetByName("Hoja_Control");
   if (!hoja) return [];
 
+  // MEDICIÓN TEMPORAL (01/08/2026): sin ventana de lectura — crece con
+  // Hoja_Control. Ver Logs_Sistema para histórico de duración real.
+  const _t0Lotes = Date.now();
   const data = hoja.getDataRange().getValues();
+  _registrarEvento_("INFO", "Codigo.js", "Lectura completa Hoja_Control (obtenerLotesDelUsuario)",
+    "Filas: " + data.length + " | Duración: " + (Date.now() - _t0Lotes) + "ms");
   const lotesMap = {};
 
   // Recorrer de abajo hacia arriba para obtener los más recientes primero
@@ -875,7 +880,12 @@ function obtenerResumenSemanal() {
   // Contar lotes radicados esta semana desde Hoja_Control (liviana)
   const hojaLog = ss.getSheetByName("Hoja_Control");
   if (hojaLog) {
+    // MEDICIÓN TEMPORAL (01/08/2026): sin ventana de lectura — crece con
+    // Hoja_Control. Ver Logs_Sistema para histórico de duración real.
+    const _t0Semanal = Date.now();
     const dataLog = hojaLog.getDataRange().getValues();
+    _registrarEvento_("INFO", "Codigo.js", "Lectura completa Hoja_Control (obtenerResumenSemanal)",
+      "Filas: " + dataLog.length + " | Duración: " + (Date.now() - _t0Semanal) + "ms");
     const hace7dias = new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000);
     const lotesContados = new Set();
 

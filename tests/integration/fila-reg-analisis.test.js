@@ -157,6 +157,9 @@ function setupEnvironment(controlRows, analisisRows, colaRows) {
     log: function() {}
   };
 
+  // Mock _registrarEvento_ (usado por la medición temporal de latencia, ver Config.js)
+  globalThis._registrarEvento_ = function() {};
+
   // Load source
   loadSource();
 
@@ -172,6 +175,7 @@ describe('sincronizarLoteAutomatico() — escritura de FILA_REG_ANALISIS', () =>
     delete globalThis.ID_ARCHIVO_ANALISIS;
     delete globalThis.LockService;
     delete globalThis.Logger;
+    delete globalThis._registrarEvento_;
     delete globalThis.sincronizarLoteAutomatico;
     delete globalThis.obtenerMapaColumnas;
   });

@@ -33,7 +33,12 @@ function sincronizarLoteAutomatico() {
   }
 
   // ── 2. LEER DATOS ORIGEN ───────────────────────────────────────────────────
+  // MEDICIÓN TEMPORAL (01/08/2026): sin ventana de lectura — crece con
+  // Control_General. Ver Logs_Sistema para el histórico de duración real.
+  var _t0Radicacion = Date.now();
   var datosRadicacion = hojaRadicacion.getDataRange().getValues();
+  _registrarEvento_("INFO", "Sincronizacion.js", "Lectura completa Control_General",
+    "Filas: " + datosRadicacion.length + " | Duración: " + (Date.now() - _t0Radicacion) + "ms");
   var indicesRad      = obtenerMapaColumnas(datosRadicacion[0]);
 
   if (indicesRad["UUID_SISTEMA"] === undefined) {
@@ -47,7 +52,12 @@ function sincronizarLoteAutomatico() {
   }
 
   // ── 3. LEER DATOS DESTINO ──────────────────────────────────────────────────
+  // MEDICIÓN TEMPORAL (01/08/2026): sin ventana de lectura — crece con
+  // "registro analisis". Ver Logs_Sistema para el histórico de duración real.
+  var _t0Analisis = Date.now();
   var datosAnalisis = hojaAnalisis.getDataRange().getValues();
+  _registrarEvento_("INFO", "Sincronizacion.js", "Lectura completa registro analisis",
+    "Filas: " + datosAnalisis.length + " | Duración: " + (Date.now() - _t0Analisis) + "ms");
   var indicesAnl    = obtenerMapaColumnas(datosAnalisis[0]);
 
   if (indicesAnl["UUID_SISTEMA"] === undefined) {
@@ -357,7 +367,11 @@ function sincronizarEstadoDesdeAnalisis() {
   }
 
   // ── 2. LEER DATOS DE "registro analisis" ───────────────────────────────────
+  // MEDICIÓN TEMPORAL (01/08/2026): ver Logs_Sistema para histórico de duración.
+  var _t0Analisis2 = Date.now();
   var datosAnalisis   = hojaAnalisis.getDataRange().getValues();
+  _registrarEvento_("INFO", "Sincronizacion.js", "Lectura completa registro analisis (sincronizarEstadoDesdeAnalisis)",
+    "Filas: " + datosAnalisis.length + " | Duración: " + (Date.now() - _t0Analisis2) + "ms");
   var indicesAnalisis = obtenerMapaColumnas(datosAnalisis[0]);
 
   // Validar columnas requeridas en análisis
@@ -406,7 +420,11 @@ function sincronizarEstadoDesdeAnalisis() {
   }
 
   // ── 4. LEER DATOS DE "Control_General" ─────────────────────────────────────
+  // MEDICIÓN TEMPORAL (01/08/2026): ver Logs_Sistema para histórico de duración.
+  var _t0Control2 = Date.now();
   var datosControl   = hojaControl.getDataRange().getValues();
+  _registrarEvento_("INFO", "Sincronizacion.js", "Lectura completa Control_General (sincronizarEstadoDesdeAnalisis)",
+    "Filas: " + datosControl.length + " | Duración: " + (Date.now() - _t0Control2) + "ms");
   var indicesControl = obtenerMapaColumnas(datosControl[0]);
 
   var colSolicitudControl = indicesControl["Solicitud Inquilino"]; // col AC

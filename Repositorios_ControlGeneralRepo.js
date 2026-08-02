@@ -20,7 +20,12 @@ function obtenerResumenComercial(emailComercial) {
 
   var ultimaFila = hoja.getLastRow();
   // Leer columnas: A(1)=ID Lote, C(3)=Fecha, J(10)=Estado, K(11)=Comercial, Q(17)=Póliza
+  // MEDICIÓN TEMPORAL (01/08/2026): ver Logs_Sistema para histórico de duración
+  // real conforme crece Control_General.
+  var _t0Resumen = Date.now();
   var datos = hoja.getRange(2, 1, ultimaFila - 1, 17).getValues();
+  _registrarEvento_("INFO", "Repositorios_ControlGeneralRepo.js", "Lectura obtenerResumenComercial",
+    "Filas: " + (ultimaFila - 1) + " | Duración: " + (Date.now() - _t0Resumen) + "ms");
 
   var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
 
