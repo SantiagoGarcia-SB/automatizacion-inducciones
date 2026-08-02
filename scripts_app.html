@@ -1662,7 +1662,7 @@ function cargarVistaReportes() {
   var container = document.getElementById('viewDashboard');
   container.innerHTML = '<div class="stack">'
     + '<h2>Reportes</h2>'
-    + '<div class="grid grid--2">'
+    + '<div class="grid grid--3">'
     // Reporte de gestión
     + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-xl);">'
     + '<div style="font-size:2rem;margin-bottom:8px;">📊</div>'
@@ -1677,6 +1677,13 @@ function cargarVistaReportes() {
     + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:8px 0;">Solicitudes gestionadas por auxiliar y analista</p>'
     + '<button class="btn btn--secondary" style="margin-top:8px;" disabled>Próximamente</button>'
     + '</div>'
+    // Cierre de mes por comercial
+    + '<div class="card card--flat" style="text-align:center;padding:var(--spacing-xl);">'
+    + '<div style="font-size:2rem;margin-bottom:8px;">📬</div>'
+    + '<strong>Cierre de mes por comercial</strong>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:8px 0;">1 correo individual a cada comercial activo con su avance del mes y sus pendientes. También se envía automático el día 1 de cada mes.</p>'
+    + '<button class="btn btn--primary" style="margin-top:8px;" onclick="_enviarReportesCierreMes()">📧 Enviar ahora a todos</button>'
+    + '</div>'
     + '</div>'
     + '</div>';
   mostrarVista('viewDashboard');
@@ -1687,6 +1694,17 @@ function _enviarReporteGestion() {
   callServer('api_enviarReporteGestion')
     .then(function(res) {
       if (res && res.ok) _toast('Reporte enviado', 'success');
+      else _toast(res ? res.mensaje : 'Error al enviar.', 'error');
+    })
+    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
+}
+
+function _enviarReportesCierreMes() {
+  if (!confirm('¿Enviar el reporte de cierre de mes a TODOS los comerciales activos ahora? Cada uno recibe solo el suyo.')) return;
+  _toast('Enviando reportes, puede tardar un momento...', 'info');
+  callServer('api_enviarReportesCierreMes')
+    .then(function(res) {
+      if (res && res.ok) _toast('Reportes de cierre de mes enviados', 'success');
       else _toast(res ? res.mensaje : 'Error al enviar.', 'error');
     })
     .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });

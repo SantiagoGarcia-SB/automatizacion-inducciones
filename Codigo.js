@@ -786,6 +786,42 @@ function consultarLote(idLote) {
 }
 
 
+/**
+ * Cuenta lotes distintos radicados exitosamente por un comercial dentro de
+ * un rango de fechas (inclusive), usando Hoja_Control (log de radicaciones).
+ * Usada por el reporte de cierre de mes para comparar mes actual vs. anterior.
+ * @param {string} email - Email del comercial (columna B de Hoja_Control)
+ * @param {Date} fechaInicio
+ * @param {Date} fechaFin
+ * @returns {number}
+ */
+function contarLotesRadicadosEnRango(email, fechaInicio, fechaFin) {
+  const ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
+  const hoja = ss.getSheetByName("Hoja_Control");
+  if (!hoja) return 0;
+
+  const data = hoja.getDataRange().getValues();
+  const emailLower = String(email || "").trim().toLowerCase();
+  const lotesContados = new Set();
+
+  for (let i = 1; i < data.length; i++) {
+    const fechaRaw = data[i][0];
+    if (!(fechaRaw instanceof Date)) continue;
+    if (fechaRaw < fechaInicio || fechaRaw > fechaFin) continue;
+
+    const emailLog  = String(data[i][1] || "").trim().toLowerCase();
+    const resultado = String(data[i][3] || "").trim();
+    const idLote    = String(data[i][5] || "").trim();
+
+    if (emailLog === emailLower && resultado === "EXITOSO" && idLote) {
+      lotesContados.add(idLote);
+    }
+  }
+
+  return lotesContados.size;
+}
+
+
 // ============================================================
 //  U1: HISTORIAL DE LOTES DEL USUARIO
 // ============================================================

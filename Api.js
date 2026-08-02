@@ -481,6 +481,23 @@ function api_enviarReporteGestion() {
   }
 }
 
+/**
+ * Envía el reporte de cierre de mes a cada comercial activo (el mismo que
+ * envía el trigger mensual del día 1). Puede tardar varios segundos si hay
+ * muchos comerciales activos — se ejecuta 1 por 1.
+ * @returns {{ok:boolean, mensaje:string}}
+ */
+function api_enviarReportesCierreMes() {
+  try {
+    verificarRol(['LIDER', 'ADMIN']);
+    enviarReportesCierreMes();
+    return { ok: true, mensaje: 'Reportes de cierre de mes enviados.' };
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_enviarReportesCierreMes', e.message);
+    return { ok: false, mensaje: 'Error: ' + e.message };
+  }
+}
+
 // ============================================================
 //  API — CONFIGURACIÓN (Catálogo de motivos)
 // ============================================================

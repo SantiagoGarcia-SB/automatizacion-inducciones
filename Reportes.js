@@ -269,6 +269,27 @@ function _formatearFechaEs_(fecha) {
 }
 
 /**
+ * Función pura (sin llamadas a Sheets/GAS): calcula el rango del mes
+ * calendario que contiene `fecha` y el del mes inmediatamente anterior.
+ * Usada para el reporte de cierre de mes (comparación "consigo mismo").
+ * @param {Date} [fecha]  Por defecto, ahora. Parámetro solo para pruebas.
+ * @returns {{esteMes:{inicio:Date,fin:Date,nombre:string}, mesAnterior:{inicio:Date,fin:Date,nombre:string}}}
+ */
+function _rangosMesActualYAnterior_(fecha) {
+  const ref = fecha ? new Date(fecha) : new Date();
+
+  const inicioEsteMes = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0, 0);
+  const finEsteMes    = new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 23, 59, 59, 999);
+  const inicioAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, 1, 0, 0, 0, 0);
+  const finAnterior    = new Date(ref.getFullYear(), ref.getMonth(), 0, 23, 59, 59, 999);
+
+  return {
+    esteMes:     { inicio: inicioEsteMes, fin: finEsteMes, nombre: MESES_ES[inicioEsteMes.getMonth()] },
+    mesAnterior: { inicio: inicioAnterior, fin: finAnterior, nombre: MESES_ES[inicioAnterior.getMonth()] }
+  };
+}
+
+/**
  * Arma el asunto y el HTML del correo de gestión a partir de las métricas.
  * Separado del envío para poder reutilizarlo tanto en el envío real a
  * líderes como en la vista previa que se manda solo a quien la ejecuta.
@@ -444,4 +465,263 @@ function configurarTriggerReporteGestion() {
     .create();
 
   Logger.log('Triggers creados: enviarReporteGestionInducciones — lunes a viernes 5:00pm, sábado 12:30pm (America/Bogota).');
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REPORTE DE CIERRE DE MES — 1 correo individual por comercial
+//
+// A diferencia del reporte de gestión (para líderes, panorama global), este
+// va solo al comercial dueño de los lotes, con su propio avance y lo que
+// necesita resolver. No incluye ningún link/botón hacia la app — el canal
+// de corrección hoy sigue siendo responder al correo de aviso original
+// (ver decisión de negocio: el CRM aún está en fase de validación).
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Arma la sección "Estado actual de tus lotes abiertos" (badges por estado).
+ * @param {Object} resumen  Resultado de obtenerResumenComercial(email).
+ */
+function _bloque_estado_actual_cierreMes_(resumen) {
+  var filas = [
+    { label: 'Terminados',             valor: resumen.terminados,   color: '#3B6D11' },
+    { label: 'En análisis',            valor: resumen.enAnalisis,   color: '#253150' },
+    { label: 'Pendiente paz y salvo',  valor: resumen.pendientePS,  color: '#E65100' },
+    { label: 'Error en terceros',      valor: resumen.errorTerceros, color: '#BD0F14' }
+  ];
+
+  var filasHtml = filas.map(function(f) {
+    return '<tr>'
+      + '<td style="padding:8px 0;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;color:#253150;">' + f.label + '</td>'
+      + '<td align="right" style="padding:8px 0;border-bottom:1px solid #f1f5f9;">'
+      + '<span style="display:inline-block;padding:2px 10px;border-radius:4px;font-size:11px;font-weight:700;color:' + f.color + ';background:' + f.color + '18;font-family:Arial,sans-serif;">' + f.valor + '</span>'
+      + '</td></tr>';
+  }).join('');
+
+  return '<tr><td style="padding:22px 28px 0;">'
+    + '<div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>'
+    + '<div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:12px;font-family:Arial,sans-serif;">Estado actual de tus lotes abiertos</div>'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0">' + filasHtml + '</table>'
+    + '</td></tr>';
+}
+
+/**
+ * Arma la sección "Esto necesita tu acción": lotes en pendiente paz y salvo
+ * (con días de espera) y lotes con error en terceros (con el motivo exacto
+ * tomado de Errores_Terceros + CATALOGO_MOTIVOS). Sin link a la app a propósito.
+ * @param {Array} pendientesPS      Resultado de obtenerLotesPendientesPazYSalvo().
+ * @param {Array} erroresTerceros   Resultado de obtenerErroresPendientesComercial().
+ */
+function _bloque_accion_requerida_cierreMes_(pendientesPS, erroresTerceros) {
+  var items = [];
+
+  (pendientesPS || []).forEach(function(p) {
+    items.push({
+      idLote: p.idLote,
+      motivo: 'Pendiente el documento de paz y salvo de la inmobiliaria.',
+      diasHtml: '<div style="font-size:11px;color:#E65100;font-weight:700;font-family:Arial,sans-serif;margin-top:4px;">Lleva ' + p.dias + ' día(s) esperando</div>'
+    });
+  });
+
+  (erroresTerceros || []).forEach(function(err) {
+    (err.participantes || []).forEach(function(part) {
+      var motivos = (part.requerimientosDetalle || []).map(function(r) { return r.label; }).join(', ') || 'Corregir datos del participante';
+      items.push({
+        idLote: err.idLote,
+        motivo: motivos + ' de ' + (part.nombreReal || part.participante) + '.',
+        diasHtml: ''
+      });
+    });
+  });
+
+  if (items.length === 0) {
+    return _bloque_nota_('<strong style="color:#3B6D11;">&#10003; No tienes pendientes que requieran tu acción ahora mismo. ¡Vas al día!</strong>');
+  }
+
+  var filasHtml = items.map(function(it) {
+    return '<div style="padding:10px 0;border-top:1px solid #fecaca;">'
+      + '<div style="font-size:12px;font-weight:700;color:#253150;font-family:Arial,sans-serif;">Lote ' + it.idLote + '</div>'
+      + '<div style="font-size:12px;color:#64748b;font-family:Arial,sans-serif;margin-top:2px;">' + it.motivo + '</div>'
+      + it.diasHtml
+      + '</div>';
+  }).join('');
+
+  return '<tr><td style="padding:22px 28px 0;">'
+    + '<div style="background:#fff8f8;border:1px solid #fecaca;border-radius:10px;padding:16px 18px;">'
+    + '<div style="font-size:11px;font-weight:800;letter-spacing:0.6px;text-transform:uppercase;color:#BD0F14;margin-bottom:4px;font-family:Arial,sans-serif;">&#9888; Esto necesita tu acción</div>'
+    + filasHtml
+    + '</div></td></tr>';
+}
+
+/**
+ * Arma el asunto y el HTML del correo de cierre de mes de un comercial.
+ * @param {Object} datos  { nombre, nombreMes, radicadosEsteMes, radicadosMesAnterior, resumen, pendientesPS, erroresTerceros }
+ */
+function _construirCorreoCierreMes_(datos) {
+  var nombreMesCap = datos.nombreMes.charAt(0).toUpperCase() + datos.nombreMes.slice(1);
+
+  var deltaHtml = '';
+  var comparacionTexto = '';
+  if (datos.radicadosMesAnterior > 0) {
+    var diff = datos.radicadosEsteMes - datos.radicadosMesAnterior;
+    var pct = Math.round((Math.abs(diff) / datos.radicadosMesAnterior) * 100);
+    if (diff > 0) {
+      deltaHtml = '<span style="font-size:11px;font-weight:700;color:#3B6D11;">&#9650; ' + pct + '%</span>';
+      comparacionTexto = 'Radicaste ' + diff + ' lote(s) más que el mes pasado (' + datos.radicadosMesAnterior + ').';
+    } else if (diff < 0) {
+      deltaHtml = '<span style="font-size:11px;font-weight:700;color:#BD0F14;">&#9660; ' + pct + '%</span>';
+      comparacionTexto = 'Radicaste ' + Math.abs(diff) + ' lote(s) menos que el mes pasado (' + datos.radicadosMesAnterior + ').';
+    } else {
+      comparacionTexto = 'Radicaste la misma cantidad que el mes pasado.';
+    }
+  }
+
+  var introTexto = 'Este es tu resumen de ' + datos.nombreMes + '. Radicaste <strong style="color:#253150;">'
+    + datos.radicadosEsteMes + ' lote(s)</strong> este mes' + (comparacionTexto ? '.' : '.') + ' Así vas hoy:';
+
+  var htmlBody = _envolver_([
+    _bloque_cabecera_('Reporte mensual'),
+    _bloque_barra_estado_(_C_NAVY, '&#128202;', 'Cierre de ' + nombreMesCap + ' ' + new Date().getFullYear()),
+    _bloque_cuerpo_inicio_('Hola, ' + datos.nombre, introTexto),
+    _bloque_chips_([
+      { label: 'Lotes radicados en ' + datos.nombreMes, valor: String(datos.radicadosEsteMes) + (deltaHtml ? ' ' + deltaHtml : ''), full: true }
+    ]),
+    _bloque_estado_actual_cierreMes_(datos.resumen),
+    _bloque_accion_requerida_cierreMes_(datos.pendientesPS, datos.erroresTerceros),
+    comparacionTexto ? _bloque_nota_('<strong style="color:#253150;">Cómo vas frente a ' + datos.nombreMesAnterior + ':</strong> ' + comparacionTexto) : '',
+    _bloque_pie_()
+  ].join(''));
+
+  return {
+    asunto: '📊 Tu cierre de ' + datos.nombreMes + ' · Reporte mensual',
+    htmlBody: htmlBody
+  };
+}
+
+/**
+ * Envía el reporte de cierre de mes a cada comercial activo, con su propio
+ * avance del mes. Dispara desde el botón manual en Reportes (api_enviarReportesCierreMes)
+ * o desde el trigger mensual (configurarTriggerReporteCierreMes).
+ */
+function enviarReportesCierreMes() {
+  var comerciales = _leerPestanaUsuarios().filter(function(u) {
+    return u.rol === 'COMERCIAL' && u.activo;
+  });
+
+  if (comerciales.length === 0) {
+    Logger.log('No hay comerciales activos para el reporte de cierre de mes.');
+    return;
+  }
+
+  if (!_verificarCuotaEmail_(comerciales.length)) {
+    Logger.log('⚠️ Cuota de email insuficiente para reportes de cierre de mes.');
+    _registrarEvento_('WARN', 'Reportes.js', 'Reportes de cierre de mes no enviados: cuota insuficiente', 'Comerciales: ' + comerciales.length);
+    return;
+  }
+
+  var rangos = _rangosMesActualYAnterior_();
+  var enviados = 0;
+  var fallidos = 0;
+
+  comerciales.forEach(function(u) {
+    try {
+      var nombreComercialMayus = obtenerNombreCompletoDeComercial(u.email).toUpperCase();
+      var resumen           = obtenerResumenComercial(u.email);
+      var radicadosEsteMes  = contarLotesRadicadosEnRango(u.email, rangos.esteMes.inicio, rangos.esteMes.fin);
+      var radicadosMesAnt   = contarLotesRadicadosEnRango(u.email, rangos.mesAnterior.inicio, rangos.mesAnterior.fin);
+      var pendientesPS      = obtenerLotesPendientesPazYSalvo(nombreComercialMayus);
+      var erroresTerceros   = obtenerErroresPendientesComercial(u.email);
+
+      var correo = _construirCorreoCierreMes_({
+        nombre: obtenerNombreDeComercial(u.email),
+        nombreMes: rangos.esteMes.nombre,
+        nombreMesAnterior: rangos.mesAnterior.nombre,
+        radicadosEsteMes: radicadosEsteMes,
+        radicadosMesAnterior: radicadosMesAnt,
+        resumen: resumen,
+        pendientesPS: pendientesPS,
+        erroresTerceros: erroresTerceros
+      });
+
+      MailApp.sendEmail({
+        to:       u.email,
+        bcc:      BCC_AUDITORIA,
+        subject:  correo.asunto,
+        htmlBody: correo.htmlBody,
+        replyTo:  "noreply@ellibertador.co",
+        name:     "Inducciones · El Libertador"
+      });
+
+      enviados++;
+    } catch (errUno) {
+      fallidos++;
+      console.error('Error en reporte de cierre de mes para ' + u.email + ': ' + errUno.message);
+      _registrarEvento_('ERROR', 'Reportes.js', 'Error en reporte de cierre de mes', u.email + ' | ' + errUno.message);
+    }
+  });
+
+  Logger.log('✅ Reportes de cierre de mes: ' + enviados + ' enviados, ' + fallidos + ' fallidos, de ' + comerciales.length + ' comerciales.');
+  _registrarEvento_('INFO', 'Reportes.js', 'Reportes de cierre de mes enviados', enviados + '/' + comerciales.length + ' comerciales (' + fallidos + ' fallidos)');
+}
+
+/**
+ * Ejecutar UNA VEZ, manualmente, desde el editor de Apps Script para crear
+ * el trigger mensual de enviarReportesCierreMes (día 1 de cada mes, 7:00am).
+ * Idempotente por reemplazo: borra cualquier trigger previo de esta función
+ * antes de crear el nuevo.
+ */
+function configurarTriggerReporteCierreMes() {
+  ScriptApp.getProjectTriggers()
+    .filter(function(t) { return t.getHandlerFunction() === 'enviarReportesCierreMes'; })
+    .forEach(function(t) { ScriptApp.deleteTrigger(t); });
+
+  ScriptApp.newTrigger('enviarReportesCierreMes')
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(7)
+    .nearMinute(0)
+    .create();
+
+  Logger.log('Trigger creado: enviarReportesCierreMes — día 1 de cada mes, 7:00am (America/Bogota).');
+}
+
+/**
+ * Prueba manual: arma el correo de cierre de mes con los datos REALES de un
+ * comercial, pero lo manda SOLO a quien ejecuta la función (nunca al
+ * comercial), con [PRUEBA] en el asunto. Cambia EMAIL_A_PROBAR abajo y
+ * ejecuta desde el desplegable del editor antes de confiar en el botón real.
+ */
+function probarReporteCierreMes() {
+  const EMAIL_A_PROBAR = 'CAMBIA_ESTE_EMAIL@segurosbolivar.com';
+
+  if (EMAIL_A_PROBAR.indexOf('CAMBIA_ESTE_EMAIL') !== -1) {
+    Logger.log('❌ Cambia EMAIL_A_PROBAR por el email real de un comercial antes de ejecutar.');
+    return;
+  }
+
+  const rangos = _rangosMesActualYAnterior_();
+  const nombreComercialMayus = obtenerNombreCompletoDeComercial(EMAIL_A_PROBAR).toUpperCase();
+
+  const correo = _construirCorreoCierreMes_({
+    nombre: obtenerNombreDeComercial(EMAIL_A_PROBAR),
+    nombreMes: rangos.esteMes.nombre,
+    nombreMesAnterior: rangos.mesAnterior.nombre,
+    radicadosEsteMes: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.esteMes.inicio, rangos.esteMes.fin),
+    radicadosMesAnterior: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesAnterior.inicio, rangos.mesAnterior.fin),
+    resumen: obtenerResumenComercial(EMAIL_A_PROBAR),
+    pendientesPS: obtenerLotesPendientesPazYSalvo(nombreComercialMayus),
+    erroresTerceros: obtenerErroresPendientesComercial(EMAIL_A_PROBAR)
+  });
+
+  const destinatario = Session.getActiveUser().getEmail();
+
+  MailApp.sendEmail({
+    to:       destinatario,
+    subject:  `[PRUEBA · datos de ${EMAIL_A_PROBAR}] ${correo.asunto}`,
+    htmlBody: correo.htmlBody,
+    replyTo:  "noreply@ellibertador.co",
+    name:     "Inducciones · El Libertador (prueba)"
+  });
+
+  Logger.log('Vista previa con datos de ' + EMAIL_A_PROBAR + ' enviada solo a: ' + destinatario);
 }

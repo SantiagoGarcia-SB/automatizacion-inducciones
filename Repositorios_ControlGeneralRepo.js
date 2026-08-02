@@ -260,6 +260,50 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
 }
 
 /**
+ * Obtiene los lotes de un comercial en estado PENDIENTE PAZ Y SALVO, con los
+ * días de espera calculados igual que enviarRecordatoriosPazYSalvoDiario
+ * (columna BI = fecha de último aviso, o fecha de ingreso si nunca se avisó).
+ * Usada por el reporte de cierre de mes ("esto necesita tu acción").
+ * @param {string} nombreComercial - Nombre tal como aparece en Control_General (mayúsculas)
+ * @returns {Array<{idLote:string, dias:number}>}
+ */
+function obtenerLotesPendientesPazYSalvo(nombreComercial) {
+  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  if (!hoja || hoja.getLastRow() < 2) return [];
+
+  var ultimaFila = hoja.getLastRow();
+  var datos = hoja.getRange(2, 1, ultimaFila - 1, 61).getValues(); // hasta col BI (61) = índice 60
+
+  var hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  var lotesMap = {};
+
+  for (var i = 0; i < datos.length; i++) {
+    var comercial = String(datos[i][10] || '').trim().toUpperCase();
+    if (comercial !== nombreComercial) continue;
+
+    var estado = String(datos[i][9] || '').trim().toUpperCase();
+    if (estado !== 'PENDIENTE PAZ Y SALVO') continue;
+
+    var idLote = String(datos[i][0] || '').trim();
+    if (!idLote || lotesMap[idLote]) continue;
+
+    var fIngreso = datos[i][2];
+    var fAviso = datos[i][60];
+    var fechaRef = (fAviso instanceof Date && !isNaN(fAviso)) ? fAviso : fIngreso;
+    if (!(fechaRef instanceof Date) || isNaN(fechaRef.getTime())) continue;
+
+    var refNormalizada = new Date(fechaRef);
+    refNormalizada.setHours(0, 0, 0, 0);
+    var dias = Math.floor((hoy.getTime() - refNormalizada.getTime()) / (1000 * 60 * 60 * 24));
+
+    lotesMap[idLote] = { idLote: idLote, dias: dias };
+  }
+
+  return Object.values(lotesMap);
+}
+
+/**
  * Determina el estado "principal" de un lote (para mostrar un badge resumen).
  */
 function _obtenerEstadoPrincipal(estados) {
