@@ -499,9 +499,9 @@ function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
     // Buscar la respuesta correspondiente
     for (var r = 0; r < respuestas.length; r++) {
       if (respuestas[r].participante === participante) {
-        hojaErrores.getRange(i + 1, 8).setValue(respuestas[r].respuesta); // RESPUESTA_COMERCIAL
-        hojaErrores.getRange(i + 1, 10).setValue(ahora); // FECHA_RESPUESTA
-        hojaErrores.getRange(i + 1, 11).setValue('CORRECCION_RECIBIDA'); // ESTADO_ERROR
+        // Preservar el valor existente de ARCHIVOS_DRIVE_PATH (col 9, índice 8)
+        // si no llega un archivo nuevo, en vez de dejarlo fuera de la escritura.
+        var urlArchivoFinal = datos[i][8] || '';
 
         // Subir archivo a Drive si existe
         if (respuestas[r].archivo && respuestas[r].archivo.bytes) {
@@ -517,13 +517,20 @@ function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
 
             var archivo = carpetaCorr.createFile(blob);
             archivo.setName(uuid + '_' + participante + '_' + archivoData.nombre);
-            var urlArchivo = archivo.getUrl();
-
-            hojaErrores.getRange(i + 1, 9).setValue(urlArchivo); // ARCHIVOS_DRIVE_PATH
+            urlArchivoFinal = archivo.getUrl();
           } catch (errDrive) {
             console.warn('No se pudo subir archivo: ' + errDrive.message);
           }
         }
+
+        // OPTIMIZADO: 1 sola escritura para las 4 columnas contiguas (8-11)
+        // en vez de hasta 4 setValue() individuales.
+        hojaErrores.getRange(i + 1, 8, 1, 4).setValues([[
+          respuestas[r].respuesta,  // RESPUESTA_COMERCIAL (8)
+          urlArchivoFinal,          // ARCHIVOS_DRIVE_PATH (9)
+          ahora,                    // FECHA_RESPUESTA (10)
+          'CORRECCION_RECIBIDA'     // ESTADO_ERROR (11)
+        ]]);
         break;
       }
     }
@@ -531,14 +538,12 @@ function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
 
   // Notificar al auxiliar que el comercial respondió (delegado al servicio)
   try {
-    var hojaErr = ss.getSheetByName('Errores_Terceros');
+    // OPTIMIZADO: reutiliza `datos` (ya leído arriba) en vez de volver a leer
+    // toda la hoja Errores_Terceros por segunda vez.
     var emailAux = '';
     var arrNotif = '';
-    if (hojaErr) {
-      var datosErr = hojaErr.getDataRange().getValues();
-      for (var e = 1; e < datosErr.length; e++) {
-        if (String(datosErr[e][0] || '').trim() === uuid) { emailAux = String(datosErr[e][5] || '').trim(); break; }
-      }
+    for (var e = 1; e < datos.length; e++) {
+      if (String(datos[e][0] || '').trim() === uuid) { emailAux = String(datos[e][5] || '').trim(); break; }
     }
     var hojaCtrl2 = ss.getSheetByName('Control_General');
     var finderCtrl2 = hojaCtrl2.createTextFinder(uuid).matchEntireCell(true);
