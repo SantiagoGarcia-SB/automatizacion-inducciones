@@ -186,69 +186,80 @@ function marcarSolicitudRadicada(uuid, numeros) {
     if (!celda) return { ok: false, mensaje: 'Solicitud no encontrada.' };
 
     var fila = celda.getRow();
+    var ANCHO_FILA = 63;
 
-    // Verificar que no se haya radicado ya (idempotencia)
-    var estadoActual = String(hoja.getRange(fila, 10).getValue() || '').trim().toUpperCase();
+    // OPTIMIZADO: 1 sola lectura de la fila completa (antes: 1 getValue de estado +
+    // hasta 6 getValue individuales más abajo para armar COLA_ANALISIS = 7 llamadas).
+    var rango = hoja.getRange(fila, 1, 1, ANCHO_FILA);
+    var filaValores = rango.getValues()[0];
+
+    // Verificar que no se haya radicado ya (idempotencia) — columna J = índice 9
+    var estadoActual = String(filaValores[9] || '').trim().toUpperCase();
     if (estadoActual === 'RADICADO') {
       return { ok: false, mensaje: 'Esta solicitud ya fue marcada como RADICADO.' };
     }
 
-    // Cambiar estado a RADICADO (columna J = 10)
-    hoja.getRange(fila, 10).setValue('RADICADO');
+    // Mutar en memoria — cambiar estado a RADICADO (columna J = índice 9)
+    filaValores[9] = 'RADICADO';
 
-  // Guardar número de solicitud del inquilino (columna 29 = Solicitud Inquilino)
-  if (numeros && numeros.solicitudInquilino) {
-    hoja.getRange(fila, 29).setValue(numeros.solicitudInquilino);
-  }
+    // Guardar número de solicitud del inquilino (columna 29 = índice 28)
+    if (numeros && numeros.solicitudInquilino) {
+      filaValores[28] = numeros.solicitudInquilino;
+    }
 
-  // Guardar NRO de codeudores (posiciones: COA1=34, COA2=40, COA3=46, COA4=52, COA5=58)
-  // Cada bloque COA tiene 6 campos: nombre, TD, ID, cel, correo, NRO
-  // NRO está en la posición 6 del bloque (offset +5 desde inicio)
-  var nroColumnas = { nroCoa1: 35, nroCoa2: 41, nroCoa3: 47, nroCoa4: 53, nroCoa5: 59 };
-  if (numeros) {
-    for (var key in nroColumnas) {
-      if (numeros[key]) {
-        hoja.getRange(fila, nroColumnas[key]).setValue(numeros[key]);
+    // Guardar NRO de codeudores (posiciones: COA1=35, COA2=41, COA3=47, COA4=53, COA5=59)
+    // Cada bloque COA tiene 6 campos: nombre, TD, ID, cel, correo, NRO
+    // NRO está en la posición 6 del bloque (offset +5 desde inicio)
+    var nroColumnas = { nroCoa1: 35, nroCoa2: 41, nroCoa3: 47, nroCoa4: 53, nroCoa5: 59 };
+    if (numeros) {
+      for (var key in nroColumnas) {
+        if (numeros[key]) {
+          filaValores[nroColumnas[key] - 1] = numeros[key];
+        }
       }
     }
-  }
 
-  // Guardar siniestros (columna 63)
-  if (numeros && numeros.siniestros) {
-    hoja.getRange(fila, 63).setValue(numeros.siniestros);
-  }
-
-  // Insertar en COLA_ANALISIS para que el analista pueda tomarlo rápidamente
-  try {
-    var hojaColaA = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('COLA_ANALISIS');
-    if (hojaColaA) {
-      var arrendatario = String(hoja.getRange(fila, 24).getValue() || '');
-      var poliza = String(hoja.getRange(fila, 17).getValue() || '');
-      var ciudad = String(hoja.getRange(fila, 19).getValue() || '');
-      var destino = String(hoja.getRange(fila, 18).getValue() || '');
-      var idLote = String(hoja.getRange(fila, 1).getValue() || '');
-      var fechaLote = hoja.getRange(fila, 3).getValue();
-      var fechaStr = fechaLote instanceof Date ? Utilities.formatDate(fechaLote, 'GMT-5', 'yyyy-MM-dd') : '';
-
-      hojaColaA.appendRow([
-        uuid,           // UUID_SISTEMA
-        idLote,         // ID_LOTE
-        arrendatario,   // ARRENDATARIO
-        poliza,         // POLIZA
-        ciudad,         // CIUDAD
-        destino,        // DESTINO
-        fechaStr,       // FECHA_LOTE
-        fila,           // FILA_REG_ANALISIS (no aplica aquí, se llenará en sync)
-        'DISPONIBLE',   // ESTADO
-        '',             // ASIGNADA_A
-        ''              // FECHA_ASIGNACION
-      ]);
+    // Guardar siniestros (columna 63 = índice 62)
+    if (numeros && numeros.siniestros) {
+      filaValores[62] = numeros.siniestros;
     }
-  } catch (errCola) {
-    console.warn('No se pudo insertar en COLA_ANALISIS: ' + errCola.message);
-  }
 
-  return { ok: true, mensaje: 'Solicitud marcada como RADICADO.' };
+    // OPTIMIZADO: 1 sola escritura de la fila completa (antes: hasta 8 setValue
+    // individuales — estado + solicitud + 5 NRO + siniestros).
+    rango.setValues([filaValores]);
+
+    // Insertar en COLA_ANALISIS para que el analista pueda tomarlo rápidamente
+    // (reutiliza filaValores ya leído — antes eran 6 getValue individuales más)
+    try {
+      var hojaColaA = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('COLA_ANALISIS');
+      if (hojaColaA) {
+        var idLote = String(filaValores[0] || '');
+        var fechaLote = filaValores[2];
+        var destino = String(filaValores[17] || '');
+        var poliza = String(filaValores[16] || '');
+        var ciudad = String(filaValores[18] || '');
+        var arrendatario = String(filaValores[23] || '');
+        var fechaStr = fechaLote instanceof Date ? Utilities.formatDate(fechaLote, 'GMT-5', 'yyyy-MM-dd') : '';
+
+        hojaColaA.appendRow([
+          uuid,           // UUID_SISTEMA
+          idLote,         // ID_LOTE
+          arrendatario,   // ARRENDATARIO
+          poliza,         // POLIZA
+          ciudad,         // CIUDAD
+          destino,        // DESTINO
+          fechaStr,       // FECHA_LOTE
+          fila,           // FILA_REG_ANALISIS (no aplica aquí, se llenará en sync)
+          'DISPONIBLE',   // ESTADO
+          '',             // ASIGNADA_A
+          ''              // FECHA_ASIGNACION
+        ]);
+      }
+    } catch (errCola) {
+      console.warn('No se pudo insertar en COLA_ANALISIS: ' + errCola.message);
+    }
+
+    return { ok: true, mensaje: 'Solicitud marcada como RADICADO.' };
   } finally {
     lock.releaseLock();
   }
