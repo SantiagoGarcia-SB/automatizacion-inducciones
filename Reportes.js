@@ -269,23 +269,28 @@ function _formatearFechaEs_(fecha) {
 }
 
 /**
- * Función pura (sin llamadas a Sheets/GAS): calcula el rango del mes
- * calendario que contiene `fecha` y el del mes inmediatamente anterior.
- * Usada para el reporte de cierre de mes (comparación "consigo mismo").
+ * Función pura (sin llamadas a Sheets/GAS): calcula el rango del ÚLTIMO MES
+ * CALENDARIO COMPLETO antes de `fecha` (el "mes que se está cerrando") y el
+ * del mes anterior a ese (para la comparación "consigo mismo").
+ *
+ * OJO: no es "el mes que contiene `fecha`". Un reporte de CIERRE de mes
+ * disparado el día 1 de agosto debe resumir julio (el mes que ya terminó),
+ * no agosto (el que apenas empieza y casi no tiene datos todavía). Por eso
+ * se resta 1 mes antes de calcular, sin importar qué día del mes sea `fecha`.
  * @param {Date} [fecha]  Por defecto, ahora. Parámetro solo para pruebas.
- * @returns {{esteMes:{inicio:Date,fin:Date,nombre:string}, mesAnterior:{inicio:Date,fin:Date,nombre:string}}}
+ * @returns {{mesReporte:{inicio:Date,fin:Date,nombre:string}, mesComparacion:{inicio:Date,fin:Date,nombre:string}}}
  */
-function _rangosMesActualYAnterior_(fecha) {
+function _rangosMesCierreYComparacion_(fecha) {
   const ref = fecha ? new Date(fecha) : new Date();
 
-  const inicioEsteMes = new Date(ref.getFullYear(), ref.getMonth(), 1, 0, 0, 0, 0);
-  const finEsteMes    = new Date(ref.getFullYear(), ref.getMonth() + 1, 0, 23, 59, 59, 999);
-  const inicioAnterior = new Date(ref.getFullYear(), ref.getMonth() - 1, 1, 0, 0, 0, 0);
-  const finAnterior    = new Date(ref.getFullYear(), ref.getMonth(), 0, 23, 59, 59, 999);
+  const inicioMesReporte = new Date(ref.getFullYear(), ref.getMonth() - 1, 1, 0, 0, 0, 0);
+  const finMesReporte    = new Date(ref.getFullYear(), ref.getMonth(), 0, 23, 59, 59, 999);
+  const inicioComparacion = new Date(ref.getFullYear(), ref.getMonth() - 2, 1, 0, 0, 0, 0);
+  const finComparacion    = new Date(ref.getFullYear(), ref.getMonth() - 1, 0, 23, 59, 59, 999);
 
   return {
-    esteMes:     { inicio: inicioEsteMes, fin: finEsteMes, nombre: MESES_ES[inicioEsteMes.getMonth()] },
-    mesAnterior: { inicio: inicioAnterior, fin: finAnterior, nombre: MESES_ES[inicioAnterior.getMonth()] }
+    mesReporte:     { inicio: inicioMesReporte, fin: finMesReporte, nombre: MESES_ES[inicioMesReporte.getMonth()] },
+    mesComparacion: { inicio: inicioComparacion, fin: finComparacion, nombre: MESES_ES[inicioComparacion.getMonth()] }
   };
 }
 
@@ -619,7 +624,7 @@ function enviarReportesCierreMes() {
     return;
   }
 
-  var rangos = _rangosMesActualYAnterior_();
+  var rangos = _rangosMesCierreYComparacion_();
   var enviados = 0;
   var fallidos = 0;
 
@@ -627,15 +632,15 @@ function enviarReportesCierreMes() {
     try {
       var nombreComercialMayus = obtenerNombreCompletoDeComercial(u.email).toUpperCase();
       var resumen           = obtenerResumenComercial(u.email);
-      var radicadosEsteMes  = contarLotesRadicadosEnRango(u.email, rangos.esteMes.inicio, rangos.esteMes.fin);
-      var radicadosMesAnt   = contarLotesRadicadosEnRango(u.email, rangos.mesAnterior.inicio, rangos.mesAnterior.fin);
+      var radicadosEsteMes  = contarLotesRadicadosEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+      var radicadosMesAnt   = contarLotesRadicadosEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
       var pendientesPS      = obtenerLotesPendientesPazYSalvo(nombreComercialMayus);
       var erroresTerceros   = obtenerErroresPendientesComercial(u.email);
 
       var correo = _construirCorreoCierreMes_({
         nombre: obtenerNombreDeComercial(u.email),
-        nombreMes: rangos.esteMes.nombre,
-        nombreMesAnterior: rangos.mesAnterior.nombre,
+        nombreMes: rangos.mesReporte.nombre,
+        nombreMesAnterior: rangos.mesComparacion.nombre,
         radicadosEsteMes: radicadosEsteMes,
         radicadosMesAnterior: radicadosMesAnt,
         resumen: resumen,
@@ -699,15 +704,15 @@ function probarReporteCierreMes() {
     return;
   }
 
-  const rangos = _rangosMesActualYAnterior_();
+  const rangos = _rangosMesCierreYComparacion_();
   const nombreComercialMayus = obtenerNombreCompletoDeComercial(EMAIL_A_PROBAR).toUpperCase();
 
   const correo = _construirCorreoCierreMes_({
     nombre: obtenerNombreDeComercial(EMAIL_A_PROBAR),
-    nombreMes: rangos.esteMes.nombre,
-    nombreMesAnterior: rangos.mesAnterior.nombre,
-    radicadosEsteMes: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.esteMes.inicio, rangos.esteMes.fin),
-    radicadosMesAnterior: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesAnterior.inicio, rangos.mesAnterior.fin),
+    nombreMes: rangos.mesReporte.nombre,
+    nombreMesAnterior: rangos.mesComparacion.nombre,
+    radicadosEsteMes: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin),
+    radicadosMesAnterior: contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin),
     resumen: obtenerResumenComercial(EMAIL_A_PROBAR),
     pendientesPS: obtenerLotesPendientesPazYSalvo(nombreComercialMayus),
     erroresTerceros: obtenerErroresPendientesComercial(EMAIL_A_PROBAR)
