@@ -1774,10 +1774,13 @@ function _liberarSolicitud(filaNum) {
   callServer('api_reasignarSolicitud', filaNum, '')
     .then(function(res) {
       if (res && res.ok) {
-        CacheManager.invalidar(['asignaciones', 'mis-solicitudes']);
-        var asignaciones = CacheManager.get('asignaciones') || [];
-        asignaciones = asignaciones.filter(function(s) { return s.fila !== filaNum; });
+        // Leer el caché ANTES de tocarlo: invalidar primero dejaba el get() en null
+        // y la vista quedaba vacía (y el []  resultante se tomaba como cache-hit,
+        // sin volver a pedir datos al servidor).
+        var asignaciones = (CacheManager.get('asignaciones') || [])
+          .filter(function(s) { return s.fila !== filaNum; });
         CacheManager.set('asignaciones', asignaciones);
+        CacheManager.invalidar('mis-solicitudes');
         _renderizarAsignaciones(asignaciones);
       }
       else _toast(res ? res.mensaje : 'Error al liberar.', 'error');
