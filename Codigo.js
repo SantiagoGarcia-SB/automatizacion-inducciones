@@ -42,8 +42,12 @@ const DESTINOS_INVALIDOS = new Set([
 // ============================================================
 
 function doGet(e) {
-  // Nuevo frontend accesible con ?v=2 (no afecta operación actual)
-  if (e && e.parameter && e.parameter.v === '2') {
+  // v2 es el frontend por defecto desde el 1 de agosto de 2026.
+  // ?v=1 sirve de respaldo inmediato al frontend anterior si algo sale mal
+  // con v2, sin necesidad de un nuevo despliegue.
+  var quierePrevio = e && e.parameter && e.parameter.v === '1';
+
+  if (!quierePrevio) {
     var template = HtmlService.createTemplateFromFile('IndexNuevo');
     var usuario = obtenerUsuarioActual_v2();
     var datosIniciales = { usuario: usuario };
@@ -73,7 +77,7 @@ function doGet(e) {
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
 
-  // Frontend actual (operación sin cambios)
+  // Frontend anterior — disponible como respaldo con ?v=1
   return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle('Ingreso de Inducciones | El Libertador')
     .setFaviconUrl("https://www.ellibertador.co/favicon.ico")
