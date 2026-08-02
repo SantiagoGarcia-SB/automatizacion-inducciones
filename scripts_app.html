@@ -2956,32 +2956,66 @@ function _selPS(op) {
   else { lB.style.borderColor='var(--color-primary-navy)'; lB.style.background='rgba(37,49,80,0.03)'; lA.style.borderColor='var(--color-mono-300)'; lA.style.background=''; pz.style.display='block'; }
 }
 
+// ── Carga diferida de la librería de lectura de Excel (sheetjs) ────────────
+// Antes se cargaba con un <script> bloqueante en el <head> de IndexNuevo.html,
+// en TODAS las cargas de página, para TODOS los roles — aunque solo el
+// comercial la usa, y solo en este formulario. Ahora se descarga una única
+// vez, en el momento en que alguien de verdad selecciona un Excel.
+var _xlsxCargando = null;
+
+function _cargarLibreriaExcel() {
+  if (typeof XLSX !== 'undefined') return Promise.resolve();
+  if (_xlsxCargando) return _xlsxCargando;
+
+  _xlsxCargando = new Promise(function(resolve, reject) {
+    var script = document.createElement('script');
+    script.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    script.onload = function() { resolve(); };
+    script.onerror = function() {
+      _xlsxCargando = null; // permite reintentar en el próximo archivo
+      reject(new Error('No se pudo cargar el lector de Excel. Verifica tu conexión e intenta de nuevo.'));
+    };
+    document.head.appendChild(script);
+  });
+
+  return _xlsxCargando;
+}
+
 function _leerExcelRad(file) {
   if (!file) return;
   var info = document.getElementById('rad_excelInfo');
   var dropZone = document.getElementById('rad_dropZone');
   var dropLabel = document.getElementById('rad_dropLabel');
   _radExcelParseado = null;
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    try {
-      var wb = XLSX.read(e.target.result, { type: 'array' });
-      var datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
-      if (datos.length >= 4 && String(datos[3][2] || '').trim().toUpperCase() !== 'AMPARO INTEGRAL') {
-        info.textContent = '⚠️ Plantilla incorrecta'; info.style.color = '#bd0f14';
-        dropZone.style.borderColor = '#bd0f14'; return;
-      }
-      _radExcelParseado = datos;
-      var count = 0;
-      for (var i = 4; i < datos.length; i++) { if (datos[i] && String(datos[i][9] || '').trim()) count++; }
-      info.style.color = '#0d7a54';
-      info.textContent = '✅ ' + count + ' contrato(s) detectado(s)';
-      dropZone.style.borderColor = '#16A34A';
-      dropZone.style.background = 'rgba(22,163,74,0.02)';
-      dropLabel.textContent = file.name + ' ✓';
-    } catch (err) { info.textContent = '⚠️ No se pudo leer'; info.style.color = '#bd0f14'; }
-  };
-  reader.readAsArrayBuffer(file);
+
+  info.textContent = 'Preparando lector de Excel...';
+  info.style.color = '';
+
+  _cargarLibreriaExcel().then(function() {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var wb = XLSX.read(e.target.result, { type: 'array' });
+        var datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+        if (datos.length >= 4 && String(datos[3][2] || '').trim().toUpperCase() !== 'AMPARO INTEGRAL') {
+          info.textContent = '⚠️ Plantilla incorrecta'; info.style.color = '#bd0f14';
+          dropZone.style.borderColor = '#bd0f14'; return;
+        }
+        _radExcelParseado = datos;
+        var count = 0;
+        for (var i = 4; i < datos.length; i++) { if (datos[i] && String(datos[i][9] || '').trim()) count++; }
+        info.style.color = '#0d7a54';
+        info.textContent = '✅ ' + count + ' contrato(s) detectado(s)';
+        dropZone.style.borderColor = '#16A34A';
+        dropZone.style.background = 'rgba(22,163,74,0.02)';
+        dropLabel.textContent = file.name + ' ✓';
+      } catch (err) { info.textContent = '⚠️ No se pudo leer'; info.style.color = '#bd0f14'; }
+    };
+    reader.readAsArrayBuffer(file);
+  }).catch(function(err) {
+    info.textContent = '⚠️ ' + err.message;
+    info.style.color = '#bd0f14';
+  });
 }
 
 function _procesarRadicacion() {

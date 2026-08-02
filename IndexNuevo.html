@@ -6,7 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Inducciones | El Libertador</title>
   <link rel="icon" href="https://www.ellibertador.co/favicon.ico" type="image/x-icon">
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <!-- La librería de lectura de Excel (sheetjs) se carga bajo demanda desde
+       scripts_app.html (_cargarLibreriaExcel), solo cuando un comercial abre
+       el formulario de radicación — no aquí, para no bloquear la carga
+       inicial de todos los demás roles que nunca la usan. -->
   <?!= include('styles_tokens'); ?>
   <?!= include('styles_main'); ?>
 </head>
