@@ -282,29 +282,49 @@ function guardarEvaluacionAnalista(filaNum, campos, finalizar, emailAnalista) {
     'comentarios del analista'
   ];
 
-  // Escribir cada campo en su columna
+  // Resolver columna 1-based → valor, solo para campos permitidos y presentes.
+  // OJO: no se puede leer la fila completa y reescribirla (patrón usado en otras
+  // optimizaciones) — getValues() trae el VALOR calculado de una celda con
+  // fórmula, y volver a escribirlo con setValues() la convierte en un valor
+  // fijo, borrando la fórmula para siempre. Por eso solo se escriben, una por
+  // una o agrupadas, las columnas que están explícitamente en este mapa.
+  var valoresPorColumna = {};
+
   for (var campo in campos) {
     if (permitidos.indexOf(campo) === -1) continue; // Ignorar campos no permitidos
     var col = -1;
     for (var h = 0; h < headers.length; h++) {
       if (String(headers[h]).trim() === campo) { col = h + 1; break; }
     }
-    if (col > 0) {
-      hoja.getRange(filaNum, col).setValue(campos[campo]);
-    }
+    if (col > 0) valoresPorColumna[col] = campos[campo];
   }
 
-  // Si finalizar → escribir REGISTRO ANALISTA SAI + Fecha Evaluacion
+  // Si finalizar → agregar REGISTRO ANALISTA SAI + Fecha Evaluacion al mismo mapa
   if (finalizar) {
     for (var h2 = 0; h2 < headers.length; h2++) {
       var hdr = String(headers[h2]).trim();
-      if (hdr === 'REGISTRO ANALISTA SAI') {
-        hoja.getRange(filaNum, h2 + 1).setValue(emailAnalista);
-      }
-      if (hdr === 'Fecha Evaluacion') {
-        hoja.getRange(filaNum, h2 + 1).setValue(new Date());
-      }
+      if (hdr === 'REGISTRO ANALISTA SAI') valoresPorColumna[h2 + 1] = emailAnalista;
+      if (hdr === 'Fecha Evaluacion') valoresPorColumna[h2 + 1] = new Date();
     }
+  }
+
+  // OPTIMIZADO: agrupar columnas contiguas en un solo setValues() por bloque
+  // (ej. el bloque de Ingresos/Acierta/ocupación de un mismo COA suele quedar
+  // en columnas consecutivas) en vez de 1 setValue() por campo — sin tocar
+  // nunca ninguna columna que no esté en valoresPorColumna.
+  var columnasOrdenadas = Object.keys(valoresPorColumna).map(Number).sort(function(a, b) { return a - b; });
+
+  var i = 0;
+  while (i < columnasOrdenadas.length) {
+    var inicioCol = columnasOrdenadas[i];
+    var valoresBloque = [valoresPorColumna[inicioCol]];
+    var j = i + 1;
+    while (j < columnasOrdenadas.length && columnasOrdenadas[j] === columnasOrdenadas[j - 1] + 1) {
+      valoresBloque.push(valoresPorColumna[columnasOrdenadas[j]]);
+      j++;
+    }
+    hoja.getRange(filaNum, inicioCol, 1, valoresBloque.length).setValues([valoresBloque]);
+    i = j;
   }
 
   return { ok: true, mensaje: finalizar ? 'Evaluación finalizada.' : 'Borrador guardado.' };
