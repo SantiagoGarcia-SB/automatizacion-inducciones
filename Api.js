@@ -54,13 +54,17 @@ function api_obtenerResumenDashboard() {
  * Si es COMERCIAL → solo los suyos.
  * @param {number} pagina
  * @param {number} porPagina
+ * @param {string} [filtroEstado] - Filtro por estado
+ * @param {string} [busquedaId] - Búsqueda por ID de lote
+ * @param {string|null} [fechaDesde] - Fecha inicio para búsqueda histórica (ISO string o date string)
+ * @param {string|null} [fechaHasta] - Fecha fin para búsqueda histórica (ISO string o date string)
  * @returns {{datos:Array, total:number, pagina:number, totalPaginas:number}}
  */
-function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId) {
+function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
     var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    return obtenerLotesDeComercial(verTodos ? null : usuario.email, pagina, porPagina, filtroEstado, busquedaId);
+    return obtenerLotesDeComercial(verTodos ? null : usuario.email, pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisLotes', e.message);
     return { datos: [], total: 0, pagina: 1, totalPaginas: 0 };
@@ -85,6 +89,7 @@ function api_obtenerDetalleLote(idLote) {
 /**
  * Retorna TODOS los lotes (sin paginación servidor) para cache en frontend.
  * El frontend pagina y filtra localmente (instantáneo).
+ * Usa CacheServiceWrapper para manejar payloads > 100 KB con fragmentación automática.
  * @returns {Array} Lista de lotes con estados
  */
 function api_obtenerTodosLosLotes() {
@@ -93,18 +98,20 @@ function api_obtenerTodosLosLotes() {
     var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
     var cacheKey = 'LOTES_' + (verTodos ? 'GLOBAL' : usuario.email);
 
-    var cache = CacheService.getScriptCache();
-    var cached = cache.get(cacheKey);
-    if (cached) return JSON.parse(cached);
+    // Intentar cache primero (CacheWrapper maneja fragmentación automáticamente)
+    var cached = CacheWrapper_getJSON(cacheKey);
+    if (cached) return cached;
 
+    // Cache-miss → leer de Sheets
     var resultado = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 9999, '', '');
     var datos = resultado.datos || [];
 
-    // Cache solo si el payload no excede 100KB (CacheService limit)
-    var json = JSON.stringify(datos);
-    if (json.length < 99000) {
-      cache.put(cacheKey, json, 60);
-    }
+    // CacheWrapper maneja automáticamente:
+    // - JSON < 99 KB → 1 clave directa
+    // - JSON 99-500 KB → fragmentación automática en _PART_01, _PART_02...
+    // - JSON > 500 KB → no cachea, registra WARN
+    CacheWrapper_putJSON(cacheKey, datos, 60);
+
     return datos;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerTodosLosLotes', e.message);
@@ -523,6 +530,30 @@ function api_eliminarMotivo(id) {
 // ── Funciones internas del catálogo ──
 
 function _leerCatalogoMotivos() {
+  // Intentar leer desde CacheService primero (TTL 600s)
+  var cached = CacheWrapper_getJSON('CATALOGO_MOTIVOS');
+  if (cached) return cached;
+
+  // Cache-miss o error en CacheService → leer directamente de Sheets
+  var resultado = _leerCatalogoMotivosDesdeHoja();
+
+  // Almacenar en caché para próximas lecturas (TTL 600s = 10 min)
+  try {
+    CacheWrapper_putJSON('CATALOGO_MOTIVOS', resultado, 600);
+  } catch (e) {
+    // Si falla el put, continuar sin cachear (degradación elegante)
+    console.warn('_leerCatalogoMotivos: no se pudo cachear catálogo: ' + e.message);
+  }
+
+  return resultado;
+}
+
+/**
+ * Lee el catálogo de motivos directamente de la hoja CATALOGO_MOTIVOS.
+ * Crea la pestaña con datos por defecto si no existe.
+ * @returns {Array} Lista de motivos [{id, label, instruccion, activo}]
+ */
+function _leerCatalogoMotivosDesdeHoja() {
   var ss = SpreadsheetApp.openById(getHojaControlId());
   var hoja = ss.getSheetByName('CATALOGO_MOTIVOS');
   if (!hoja) {
@@ -576,6 +607,10 @@ function _guardarMotivo(motivo, esNuevo) {
   } else {
     hoja.appendRow(fila);
   }
+
+  // Invalidar caché del catálogo para que la próxima lectura obtenga datos frescos
+  CacheWrapper_remove('CATALOGO_MOTIVOS');
+
   return { ok: true, mensaje: esNuevo ? 'Motivo creado.' : 'Motivo actualizado.' };
 }
 
@@ -588,6 +623,8 @@ function _eliminarMotivo(id) {
   for (var i = 1; i < datos.length; i++) {
     if (String(datos[i][0]).trim() === id.trim()) {
       hoja.deleteRow(i + 1);
+      // Invalidar caché del catálogo para que la próxima lectura obtenga datos frescos
+      CacheWrapper_remove('CATALOGO_MOTIVOS');
       return { ok: true, mensaje: 'Motivo eliminado.' };
     }
   }

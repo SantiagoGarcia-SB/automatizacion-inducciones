@@ -48,25 +48,21 @@ function doGet(e) {
     var usuario = obtenerUsuarioActual_v2();
     var datosIniciales = { usuario: usuario };
 
-    // Pre-cargar solo el resumen SI ya está en CacheService (barato, no bloquea).
-    // En cache-miss, el cliente lo pide vía google.script.run con skeleton normal.
+    // Pre-cargar resumen y lotes SOLO si ya están en CacheService (lectura rápida, no bloquea).
+    // En cache-miss, el cliente los pide vía google.script.run con skeleton normal.
+    // NUNCA se invoca obtenerResumenComercial() ni obtenerLotesDeComercial() aquí.
     if (usuario && usuario.autorizado) {
-      try {
-        var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-        var cacheKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
-        var cache = CacheService.getScriptCache();
-        var resumenCached = cache.get(cacheKey);
+      var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
 
-        if (resumenCached) {
-          datosIniciales.resumen = JSON.parse(resumenCached);
-        } else {
-          datosIniciales.resumen = null;
-        }
-      } catch (err) {
-        datosIniciales.resumen = null;
-      }
-      // NO pre-cargamos lotes (se cargan al navegar, con cache local en frontend)
-      datosIniciales.lotes = null;
+      // Resumen: cache-hit → inyectar, cache-miss → null (cliente pide async)
+      var resumenKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+      var resumenCached = CacheWrapper_getJSON(resumenKey);
+      datosIniciales.resumen = resumenCached || null;
+
+      // Lotes: misma lógica — inyectar si cache-hit, null si cache-miss
+      var lotesKey = verTodos ? 'LOTES_GLOBAL' : 'LOTES_' + usuario.email;
+      var lotesCached = CacheWrapper_getJSON(lotesKey);
+      datosIniciales.lotes = lotesCached || null;
     }
 
     template.datosIniciales = JSON.stringify(datosIniciales);

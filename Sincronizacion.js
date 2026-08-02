@@ -207,6 +207,34 @@ function sincronizarLoteAutomatico() {
     });
   }
 
+  // ── 8b. ESCRIBIR FILA_REG_ANALISIS EN COLA_ANALISIS ───────────────────────
+  // Para cada fila nueva insertada en "registro analisis", registrar su número
+  // de fila (base-1 en Sheets) en la columna H de COLA_ANALISIS, identificada por UUID.
+  if (filasNuevasBuffer.length > 0) {
+    var hojaCola = libroOrigen.getSheetByName('COLA_ANALISIS');
+    if (hojaCola && hojaCola.getLastRow() >= 2) {
+      var datosCola = hojaCola.getDataRange().getValues();
+      // Construir mapa UUID → fila física en COLA_ANALISIS (base-1)
+      var mapaColaUUID = {};
+      for (var ci = 1; ci < datosCola.length; ci++) {
+        var uuidCola = String(datosCola[ci][0] || '').trim();
+        if (uuidCola) {
+          mapaColaUUID[uuidCola] = ci + 1; // fila física (base-1 en Sheets)
+        }
+      }
+      // Para cada fila nueva, escribir filaFisica en columna H (col 8)
+      for (var ni = 0; ni < filasNuevasBuffer.length; ni++) {
+        var filaInsertada = filasNuevasBuffer[ni].filaFisica;
+        var datosNueva = filasNuevasBuffer[ni].datos;
+        var uuidNuevo = String(datosNueva[colUUID] || '').trim();
+        if (uuidNuevo && mapaColaUUID[uuidNuevo]) {
+          hojaCola.getRange(mapaColaUUID[uuidNuevo], 8).setValue(filaInsertada);
+          Logger.log("  [FILA_REG_ANALISIS] UUID: " + uuidNuevo + " → COLA_ANALISIS fila " + mapaColaUUID[uuidNuevo] + ", col H = " + filaInsertada);
+        }
+      }
+    }
+  }
+
   // ── 9. ESCRITURA EN LOTE — ORIGEN (cambios de estado) ─────────────────────
   if (cambiosEstadoOrigen.length > 0) {
     cambiosEstadoOrigen.forEach(function(ce) {

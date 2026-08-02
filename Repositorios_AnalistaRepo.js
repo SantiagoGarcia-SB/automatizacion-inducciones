@@ -9,81 +9,152 @@
 
 /**
  * Helper: headers cacheados de "registro analisis" (comparte clave con AnalisisRepo).
+ * Usa CacheWrapper para serialización/deserialización unificada.
  * @param {Sheet} hoja
  * @returns {string[]}
  */
 function _headersRegistroAnalisis(hoja) {
-  var cache = CacheService.getScriptCache();
-  var cached = cache.get('HDR_REG_ANALISIS');
-  if (cached) return JSON.parse(cached);
+  var cached = CacheWrapper_getJSON('HDR_REG_ANALISIS');
+  if (cached) return cached;
   var headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0].map(function(h) { return String(h || '').trim(); });
-  cache.put('HDR_REG_ANALISIS', JSON.stringify(headers), 300);
+  CacheWrapper_putJSON('HDR_REG_ANALISIS', headers, 300);
   return headers;
 }
 
 /**
  * Obtiene las solicitudes asignadas a un analista + info de cupo.
- * OPTIMIZADO: Usa TextFinder para buscar solo filas del analista (no lee toda la hoja).
+ * OPTIMIZADO: Lee COLA_ANALISIS (pequeña) y accede directamente a filas específicas
+ * de "registro analisis" usando FILA_REG_ANALISIS — sin TextFinder.
+ *
+ * Llamadas a Sheets: máximo N+2 (1 COLA_ANALISIS + 1 headers + N filas individuales),
+ * donde N = solicitudes activas del analista (limitado por cupoMax ≤ 10).
+ *
  * @param {string} emailAnalista
  * @param {number} cupoMax
  * @returns {{solicitudes:Array, cupo:number, activas:number}}
  */
 function obtenerSolicitudesAnalista(emailAnalista, cupoMax) {
-  var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
-  if (!hoja || hoja.getLastRow() < 2) return { solicitudes: [], cupo: cupoMax || 0, activas: 0 };
+  // ── 1. Leer COLA_ANALISIS (1 llamada a Sheets) ──────────────────────────────
+  var ssCola = SpreadsheetApp.openById(getHojaControlId());
+  var hojaCola = ssCola.getSheetByName('COLA_ANALISIS');
+  if (!hojaCola || hojaCola.getLastRow() < 2) {
+    return { solicitudes: [], cupo: cupoMax || 0, activas: 0 };
+  }
 
-  var headers = _headersRegistroAnalisis(hoja);
+  var datosCola = hojaCola.getDataRange().getValues(); // 1 llamada
 
-  // Encontrar columnas necesarias
-  var colAsignada = -1, colRegSAI = -1, colArrendatario = -1;
-  var colId = -1, colCanon = -1, colCiudad = -1, colDestino = -1, colLote = -1, colPoliza = -1, colSolicitud = -1;
+  // ── 2. Filtrar filas: ESTADO=EN_EVALUACION y ASIGNADA_A=email ────────────────
+  // COLA_ANALISIS: UUID(0), ID_LOTE(1), ARRENDATARIO(2), POLIZA(3), CIUDAD(4),
+  //               DESTINO(5), FECHA_LOTE(6), FILA_REG_ANALISIS(7), ESTADO(8),
+  //               ASIGNADA_A(9), FECHA_ASIG(10)
+  var emailLower = String(emailAnalista || '').trim().toLowerCase();
+  var solicitudesActivas = [];
+
+  for (var i = 1; i < datosCola.length; i++) {
+    var estado = String(datosCola[i][8] || '').trim();
+    var asignada = String(datosCola[i][9] || '').trim().toLowerCase();
+
+    if (estado === 'EN_EVALUACION' && asignada === emailLower) {
+      solicitudesActivas.push({
+        uuid: String(datosCola[i][0] || '').trim(),
+        filaReg: datosCola[i][7],
+        arrendatario: String(datosCola[i][2] || ''),
+        poliza: String(datosCola[i][3] || ''),
+        ciudad: String(datosCola[i][4] || ''),
+        destino: String(datosCola[i][5] || ''),
+        codigoLote: String(datosCola[i][1] || '')
+      });
+    }
+  }
+
+  if (solicitudesActivas.length === 0) {
+    return { solicitudes: [], cupo: cupoMax || 0, activas: 0 };
+  }
+
+  // ── 3. Abrir "registro analisis" y obtener headers (1 llamada o caché) ───────
+  var hojaAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
+  if (!hojaAnalisis || hojaAnalisis.getLastRow() < 2) {
+    return { solicitudes: [], cupo: cupoMax || 0, activas: solicitudesActivas.length };
+  }
+
+  var headers = _headersRegistroAnalisis(hojaAnalisis); // usa caché HDR_REG_ANALISIS
+
+  // Mapear columnas necesarias de "registro analisis"
+  var colArrendatario = -1, colId = -1, colCanon = -1, colCiudad = -1;
+  var colDestino = -1, colLote = -1, colPoliza = -1, colSolicitud = -1;
+  var colUuid = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var hdr = String(headers[h]).trim();
-    if (hdr === 'ASIGNADA A\u2026' || hdr === 'ASIGNADA A...' || hdr === 'ASIGNADA A') colAsignada = h + 1;
-    if (hdr === 'REGISTRO ANALISTA SAI') colRegSAI = h + 1;
-    if (hdr === 'Arrendatario') colArrendatario = h + 1;
-    if (hdr === 'Id_arrendatario') colId = h + 1;
-    if (hdr === 'Canon') colCanon = h + 1;
-    if (hdr === 'ciudad del inmueble') colCiudad = h + 1;
-    if (hdr === 'Destino') colDestino = h + 1;
-    if (hdr === 'codigo lote') colLote = h + 1;
-    if (hdr === 'Poliza') colPoliza = h + 1;
-    if (hdr === 'Solicitud Inquilino') colSolicitud = h + 1;
+    if (hdr === 'Arrendatario') colArrendatario = h;
+    if (hdr === 'Id_arrendatario') colId = h;
+    if (hdr === 'Canon') colCanon = h;
+    if (hdr === 'ciudad del inmueble') colCiudad = h;
+    if (hdr === 'Destino') colDestino = h;
+    if (hdr === 'codigo lote') colLote = h;
+    if (hdr === 'Poliza') colPoliza = h;
+    if (hdr === 'Solicitud Inquilino') colSolicitud = h;
+    if (hdr === 'UUID_SISTEMA' || hdr === 'uuid_sistema') colUuid = h;
   }
 
-  if (colAsignada === -1) return { solicitudes: [], cupo: cupoMax || 0, activas: 0 };
+  var totalCols = headers.length;
+  var ultimaFilaAnalisis = hojaAnalisis.getLastRow();
 
-  // TextFinder: buscar el email del analista en la columna ASIGNADA A (rápido)
-  var finder = hoja.getRange(2, colAsignada, hoja.getLastRow() - 1, 1)
-    .createTextFinder(emailAnalista).matchCase(false);
-  var celdas = finder.findAll();
-
-  // Filtrar solo las que NO tienen REGISTRO SAI (no finalizadas)
+  // ── 4. Leer filas directas de "registro analisis" (N llamadas, máx cupoMax ≤ 10) ─
   var solicitudes = [];
-  for (var i = 0; i < celdas.length; i++) {
-    var fila = celdas[i].getRow();
-    var regSAI = colRegSAI > 0 ? String(hoja.getRange(fila, colRegSAI).getValue() || '').trim() : '';
-    if (regSAI) continue; // Ya finalizada
+  var limite = Math.min(solicitudesActivas.length, cupoMax || 10);
 
-    // Leer fila completa de una vez (1 llamada en vez de 8)
-    var maxCol = Math.max(colArrendatario, colId, colCanon, colCiudad, colDestino, colLote, colPoliza, colSolicitud);
-    var filaData = hoja.getRange(fila, 1, 1, maxCol).getValues()[0];
+  for (var s = 0; s < limite; s++) {
+    var sol = solicitudesActivas[s];
+    var filaNum = parseInt(sol.filaReg, 10);
+
+    // Validar FILA_REG_ANALISIS: vacío, 0, o no numérico → excluir
+    if (!filaNum || filaNum <= 0 || isNaN(filaNum)) {
+      console.warn(
+        'obtenerSolicitudesAnalista: FILA_REG_ANALISIS inválido para UUID "' +
+        sol.uuid + '" (valor: ' + sol.filaReg + '). Solicitud excluida.'
+      );
+      continue;
+    }
+
+    // Validar que la fila no excede el rango de la hoja
+    if (filaNum > ultimaFilaAnalisis) {
+      console.warn(
+        'obtenerSolicitudesAnalista: FILA_REG_ANALISIS=' + filaNum +
+        ' excede última fila (' + ultimaFilaAnalisis + ') para UUID "' + sol.uuid + '". Excluida.'
+      );
+      continue;
+    }
+
+    // Leer la fila directa (1 llamada por solicitud)
+    var filaData = hojaAnalisis.getRange(filaNum, 1, 1, totalCols).getValues()[0];
+
+    // Validar UUID: la fila debe contener el UUID esperado
+    if (colUuid >= 0) {
+      var uuidEnFila = String(filaData[colUuid] || '').trim();
+      if (uuidEnFila !== sol.uuid) {
+        console.warn(
+          'obtenerSolicitudesAnalista: UUID no coincide en fila ' + filaNum +
+          '. Esperado: "' + sol.uuid + '", encontrado: "' + uuidEnFila + '". Excluida.'
+        );
+        continue;
+      }
+    }
 
     solicitudes.push({
-      fila: fila,
-      arrendatario: colArrendatario > 0 ? String(filaData[colArrendatario - 1] || '') : '',
-      identificacion: colId > 0 ? String(filaData[colId - 1] || '') : '',
-      canon: colCanon > 0 ? String(filaData[colCanon - 1] || '') : '',
-      ciudad: colCiudad > 0 ? String(filaData[colCiudad - 1] || '') : '',
-      destino: colDestino > 0 ? String(filaData[colDestino - 1] || '') : '',
-      codigoLote: colLote > 0 ? String(filaData[colLote - 1] || '') : '',
-      poliza: colPoliza > 0 ? String(filaData[colPoliza - 1] || '') : '',
-      solicitudInquilino: colSolicitud > 0 ? String(filaData[colSolicitud - 1] || '') : ''
+      fila: filaNum,
+      arrendatario: colArrendatario >= 0 ? String(filaData[colArrendatario] || '') : '',
+      identificacion: colId >= 0 ? String(filaData[colId] || '') : '',
+      canon: colCanon >= 0 ? String(filaData[colCanon] || '') : '',
+      ciudad: colCiudad >= 0 ? String(filaData[colCiudad] || '') : '',
+      destino: colDestino >= 0 ? String(filaData[colDestino] || '') : '',
+      codigoLote: colLote >= 0 ? String(filaData[colLote] || '') : '',
+      poliza: colPoliza >= 0 ? String(filaData[colPoliza] || '') : '',
+      solicitudInquilino: colSolicitud >= 0 ? String(filaData[colSolicitud] || '') : ''
     });
   }
 
-  return { solicitudes: solicitudes, cupo: cupoMax || 0, activas: solicitudes.length };
+  return { solicitudes: solicitudes, cupo: cupoMax || 0, activas: solicitudesActivas.length };
 }
 
 /**
@@ -140,9 +211,15 @@ function pedirSolicitudAnalista(emailAnalista, cupoMax) {
     }
 
     // Asignar en COLA_ANALISIS (ESTADO, ASIGNADA_A, FECHA_ASIGNACION = cols 9-11)
-    hojaCola.getRange(filaDisponible, 9, 1, 3).setValues([['EN_EVALUACION', emailAnalista, new Date()]]);
+    // Batch write: 1 fila × 3 columnas en una sola llamada setValues()
+    try {
+      hojaCola.getRange(filaDisponible, 9, 1, 3).setValues([['EN_EVALUACION', emailAnalista, new Date()]]);
+    } catch (errWrite) {
+      // Si falla la escritura en COLA_ANALISIS: liberar lock, no modificar registro analisis, retornar error
+      return { ok: false, mensaje: 'No se pudo completar la asignación. Intenta de nuevo.' };
+    }
 
-    // También asignar en registro analisis (columna ASIGNADA A)
+    // Solo proceder a registro analisis si COLA_ANALISIS fue exitoso
     try {
       var hojaAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
       if (hojaAnalisis) {

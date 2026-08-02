@@ -104,9 +104,13 @@ function _resumenVacio() {
  * @param {string|null} emailComercial - Email del comercial (null = todos)
  * @param {number} pagina - Página actual (1-based)
  * @param {number} porPagina - Registros por página
+ * @param {string} [filtroEstado] - Filtro por estado
+ * @param {string} [busquedaId] - Búsqueda por ID de lote
+ * @param {string|Date|null} [fechaDesde] - Fecha inicio para filtrado histórico (opcional)
+ * @param {string|Date|null} [fechaHasta] - Fecha fin para filtrado histórico (opcional)
  * @returns {{datos:Array, total:number, pagina:number, totalPaginas:number}}
  */
-function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado, busquedaId) {
+function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta) {
   pagina = pagina || 1;
   porPagina = porPagina || 10;
   filtroEstado = (filtroEstado || '').toUpperCase().trim();
@@ -118,8 +122,23 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
   }
 
   var ultimaFila = hoja.getLastRow();
+  var VENTANA_LECTURA = 2000;
+  var filasDisponibles = ultimaFila - 1; // filas de datos (excluye header)
+
+  // Si se especifican filtros de fecha, leer TODAS las filas (búsqueda histórica)
+  // De lo contrario, usar la ventana de 2000 filas más recientes
+  var filasALeer;
+  var filaInicio;
+  if (fechaDesde || fechaHasta) {
+    filasALeer = filasDisponibles;
+    filaInicio = 2;
+  } else {
+    filasALeer = Math.min(filasDisponibles, VENTANA_LECTURA);
+    filaInicio = ultimaFila - filasALeer + 1; // fila de inicio (1-based, después del header)
+  }
+
   // Leer columnas relevantes: A-K (1-11) + col 24 (arrendatario)
-  var datos = hoja.getRange(2, 1, ultimaFila - 1, 24).getValues();
+  var datos = hoja.getRange(filaInicio, 1, filasALeer, 24).getValues();
   var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
 
   // Agrupar por lote (más recientes primero)
@@ -175,6 +194,30 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
       }
     }
     ordenLotes = lotesBusqueda;
+  }
+
+  // Filtrar por rango de fechas (para búsqueda de datos históricos)
+  if (fechaDesde || fechaHasta) {
+    var desde = fechaDesde ? new Date(fechaDesde) : null;
+    var hasta = fechaHasta ? new Date(fechaHasta) : null;
+    // Normalizar "hasta" al final del día si solo se proporcionó una fecha sin hora
+    if (hasta && hasta.getHours() === 0 && hasta.getMinutes() === 0 && hasta.getSeconds() === 0) {
+      hasta = new Date(hasta.getTime() + 24 * 60 * 60 * 1000 - 1);
+    }
+
+    var lotesFecha = [];
+    for (var f = 0; f < ordenLotes.length; f++) {
+      var loteParaFecha = lotesMap[ordenLotes[f]];
+      var fechaLote = loteParaFecha.fecha;
+      if (!(fechaLote instanceof Date)) {
+        fechaLote = new Date(fechaLote);
+      }
+      if (isNaN(fechaLote.getTime())) continue; // Omitir fechas inválidas
+      if (desde && fechaLote < desde) continue;
+      if (hasta && fechaLote > hasta) continue;
+      lotesFecha.push(ordenLotes[f]);
+    }
+    ordenLotes = lotesFecha;
   }
 
   // Paginar

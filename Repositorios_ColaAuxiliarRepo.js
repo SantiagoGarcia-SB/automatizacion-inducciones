@@ -9,8 +9,9 @@
 
 /**
  * Obtiene solicitudes disponibles para el auxiliar (estado PENDIENTE RADICAR).
- * OPTIMIZADO: Lee solo las columnas del listado. Los datos completos se leen
- * al abrir una solicitud específica (modal).
+ * OPTIMIZADO: Lee solo las últimas 2000 filas (ventana de lectura) en 1 sola
+ * Lectura_Batch de rango contiguo (cols 1-62). Si la hoja tiene < 2000 filas,
+ * lee todas las disponibles. Retorna máximo 100 resultados.
  * @returns {Array}
  */
 function obtenerColaAuxiliar() {
@@ -18,10 +19,11 @@ function obtenerColaAuxiliar() {
   if (!hoja || hoja.getLastRow() < 2) return [];
 
   var ultimaFila = hoja.getLastRow();
-  var filasData = ultimaFila - 1;
+  var filasData = Math.min(ultimaFila - 1, 2000);
+  var filaInicio = Math.max(2, ultimaFila - filasData + 1);
 
-  // Leer 1 solo bloque con todas las columnas necesarias (1-62)
-  var bloque = hoja.getRange(2, 1, filasData, 62).getValues();
+  // 1 SOLA llamada a Sheets — ventana de últimas 2000 filas
+  var bloque = hoja.getRange(filaInicio, 1, filasData, 62).getValues();
 
   var resultado = [];
   for (var i = filasData - 1; i >= 0; i--) {
@@ -29,7 +31,7 @@ function obtenerColaAuxiliar() {
     if (estado !== 'PENDIENTE RADICAR') continue;
 
     resultado.push({
-      fila: i + 2,
+      fila: filaInicio + i,
       uuid: String(bloque[i][61] || ''),       // col BJ = index 61
       idLote: String(bloque[i][0] || ''),       // col A  = index 0
       arrendatario: String(bloque[i][23] || ''), // col X  = index 23
@@ -407,18 +409,20 @@ function obtenerErroresPendientesComercial(emailComercial) {
 
   // Cruzar con Control_General — leer 1 vez y armar índice por UUID
   var hojaControl = ss.getSheetByName('Control_General');
+
+  // Defensive: si Control_General no existe o solo tiene encabezado → retornar []
+  if (!hojaControl || hojaControl.getLastRow() < 2) return [];
+
   var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
   var resultado = [];
 
   // Leer toda la data de Control_General en 1 llamada y armar mapa UUID→fila
   var ultimaFilaCtrl = hojaControl.getLastRow();
   var indicePorUuid = {};
-  if (ultimaFilaCtrl > 1) {
-    var datosControl = hojaControl.getRange(2, 1, ultimaFilaCtrl - 1, 62).getValues();
-    for (var dc = 0; dc < datosControl.length; dc++) {
-      var uuidCtrl = String(datosControl[dc][61] || '').trim();
-      if (uuidCtrl) indicePorUuid[uuidCtrl] = datosControl[dc];
-    }
+  var datosControl = hojaControl.getRange(2, 1, ultimaFilaCtrl - 1, 62).getValues();
+  for (var dc = 0; dc < datosControl.length; dc++) {
+    var uuidCtrl = String(datosControl[dc][61] || '').trim();
+    if (uuidCtrl) indicePorUuid[uuidCtrl] = datosControl[dc];
   }
 
   var uuids = Object.keys(erroresPendientes);

@@ -105,18 +105,11 @@ function obtenerDetalleSolicitud(filaNum) {
   var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja) return null;
 
-  // Headers cacheados (5 min)
-  var cache = CacheService.getScriptCache();
-  var headersCached = cache.get('HDR_REG_ANALISIS');
-  var headers;
-  if (headersCached) {
-    headers = JSON.parse(headersCached);
-  } else {
-    headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
-    // Cachear como array de strings
-    var headersStr = headers.map(function(h) { return String(h || '').trim(); });
-    cache.put('HDR_REG_ANALISIS', JSON.stringify(headersStr), 300);
-    headers = headersStr;
+  // Headers cacheados (5 min) — usa CacheWrapper unificado
+  var headers = CacheWrapper_getJSON('HDR_REG_ANALISIS');
+  if (!headers) {
+    headers = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0].map(function(h) { return String(h || '').trim(); });
+    CacheWrapper_putJSON('HDR_REG_ANALISIS', headers, 300);
   }
 
   // Definir las columnas que necesitamos (no todas las 100+)

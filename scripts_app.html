@@ -8,6 +8,306 @@
 /** Datos del usuario logueado (se llenan al iniciar) */
 var APP_USUARIO = null;
 
+/**
+ * CacheManager — Almacén en memoria de sesión con invalidación selectiva.
+ * Persiste SOLO durante la sesión del navegador (no usa localStorage).
+ */
+var CacheManager = {
+  _store: {},
+  _ttls: {
+    'dashboard': 30000,
+    'cola-auxiliar': 0,
+    'mis-solicitudes': 0,
+    'asignaciones': 0,
+    'errores': 0,
+    'lotes': 0,
+    'solicitudes': 0,
+    'usuarios': 0,
+    'config-motivos': 0
+  },
+
+  get: function(key) {
+    if (!this._store[key]) return null;
+    var entry = this._store[key];
+    var ttl = this._ttls[key] || 0;
+    if (ttl > 0 && (Date.now() - entry.timestamp > ttl)) {
+      delete this._store[key];
+      return null;
+    }
+    return entry.data;
+  },
+
+  set: function(key, data) {
+    this._store[key] = { data: data, timestamp: Date.now() };
+  },
+
+  invalidar: function(keys) {
+    if (typeof keys === 'string') keys = [keys];
+    for (var i = 0; i < keys.length; i++) {
+      delete this._store[keys[i]];
+    }
+  },
+
+  invalidarTodo: function() {
+    this._store = {};
+  },
+
+  esValido: function(key) {
+    return this.get(key) !== null;
+  }
+};
+
+/**
+ * SkeletonSystem — Genera skeletons apropiados por tipo de contenido.
+ *
+ * Tipos:
+ *   'tabla'      → thead real + N filas animadas
+ *   'dashboard'  → 4 KPI placeholders + barra de distribución
+ *   'detalle'    → formulario con campos placeholder
+ *   'lista'      → N cards placeholder
+ */
+var SkeletonSystem = {
+  /**
+   * Genera y renderiza un skeleton en el contenedor dado.
+   * @param {string} containerId — ID del div contenedor
+   * @param {string} tipo — 'tabla' | 'dashboard' | 'lista' | 'detalle'
+   * @param {Object} [opciones] — { columnas: string[], filas: number, campos: number, items: number, titulo: string }
+   */
+  mostrar: function(containerId, tipo, opciones) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    opciones = opciones || {};
+    var html = '';
+
+    switch (tipo) {
+      case 'tabla':
+        html = this._generarSkeletonTabla(opciones.columnas || [], opciones.filas || 5);
+        break;
+      case 'dashboard':
+        html = this._generarSkeletonDashboard();
+        break;
+      case 'detalle':
+        html = this._generarSkeletonDetalle(opciones.campos || 6);
+        break;
+      case 'lista':
+        html = this._generarSkeletonLista(opciones.items || 4);
+        break;
+    }
+
+    if (opciones.titulo) {
+      html = '<div class="stack"><h2>' + opciones.titulo + '</h2>' + html + '</div>';
+    }
+
+    container.innerHTML = html;
+  },
+
+  /**
+   * Transiciona suavemente del skeleton al contenido real.
+   * @param {string} containerId
+   * @param {string} htmlContenido
+   */
+  reemplazar: function(containerId, htmlContenido) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.style.opacity = '0';
+    container.innerHTML = htmlContenido;
+    requestAnimationFrame(function() {
+      container.style.transition = 'opacity var(--duration-base, 200ms) var(--ease-in-out, ease-in)';
+      container.style.opacity = '1';
+    });
+  },
+
+  /**
+   * Genera tabla con thead real (columnas con nombre) y filas animadas.
+   */
+  _generarSkeletonTabla: function(columnas, filas) {
+    var html = '<div class="card card--flat" style="padding:0;overflow:hidden;"><table class="table"><thead><tr>';
+    for (var c = 0; c < columnas.length; c++) {
+      html += '<th>' + columnas[c] + '</th>';
+    }
+    // Si no hay columnas definidas, generar columnas placeholder
+    if (columnas.length === 0) {
+      for (var p = 0; p < 5; p++) {
+        html += '<th><div class="skeleton-line" style="height:12px;width:60%;"></div></th>';
+      }
+    }
+    html += '</tr></thead><tbody>';
+    for (var i = 0; i < filas; i++) {
+      var cols = columnas.length || 5;
+      html += '<tr>';
+      for (var j = 0; j < cols; j++) {
+        var width = (j === 0) ? '70%' : ((j === cols - 1) ? '40%' : '55%');
+        html += '<td><div class="skeleton-line" style="height:14px;width:' + width + ';"></div></td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    return html;
+  },
+
+  /**
+   * Genera 4 KPI cards placeholder + barra de distribución.
+   */
+  _generarSkeletonDashboard: function() {
+    var html = '<div class="stack">';
+    // Hero card placeholder
+    html += '<div class="card card--hero" style="padding:var(--space-6);">'
+      + '<div class="skeleton-line" style="height:24px;width:50%;background:rgba(255,255,255,0.15);margin-bottom:var(--space-2);"></div>'
+      + '<div class="skeleton-line" style="height:14px;width:35%;background:rgba(255,255,255,0.1);"></div>'
+      + '</div>';
+    // 4 KPI placeholders
+    html += '<div class="grid grid--4" style="gap:var(--space-3);">';
+    for (var i = 0; i < 4; i++) {
+      html += '<div class="skeleton skeleton-card" style="height:88px;"></div>';
+    }
+    html += '</div>';
+    // Distribution bar placeholder
+    html += '<div class="card" style="padding:var(--space-5);">'
+      + '<div class="skeleton-line" style="height:14px;width:40%;margin-bottom:var(--space-4);"></div>'
+      + '<div class="skeleton-line" style="height:12px;width:100%;border-radius:var(--radius-full);"></div>'
+      + '<div style="display:flex;gap:var(--space-4);margin-top:var(--space-3);">'
+      + '<div class="skeleton-line" style="height:10px;width:60px;"></div>'
+      + '<div class="skeleton-line" style="height:10px;width:80px;"></div>'
+      + '<div class="skeleton-line" style="height:10px;width:50px;"></div>'
+      + '</div></div>';
+    html += '</div>';
+    return html;
+  },
+
+  /**
+   * Genera campos de formulario placeholder.
+   */
+  _generarSkeletonDetalle: function(campos) {
+    var html = '<div class="card"><div class="stack stack--tight">';
+    for (var i = 0; i < campos; i++) {
+      // Alternar entre campos anchos y cortos para simular un form real
+      var labelWidth = (i % 3 === 0) ? '25%' : ((i % 3 === 1) ? '35%' : '20%');
+      var fieldWidth = (i % 2 === 0) ? '100%' : '70%';
+      html += '<div style="margin-bottom:var(--space-4);">'
+        + '<div class="skeleton-line" style="height:10px;width:' + labelWidth + ';margin-bottom:var(--space-2);"></div>'
+        + '<div class="skeleton-line" style="height:36px;width:' + fieldWidth + ';"></div>'
+        + '</div>';
+    }
+    html += '</div></div>';
+    return html;
+  },
+
+  /**
+   * Genera cards placeholder para vistas de lista.
+   */
+  _generarSkeletonLista: function(items) {
+    var html = '<div class="stack stack--tight">';
+    for (var i = 0; i < items; i++) {
+      html += '<div class="card" style="padding:var(--space-4) var(--space-5);">'
+        + '<div style="display:flex;align-items:center;gap:var(--space-4);">'
+        + '<div class="skeleton-line" style="height:40px;width:40px;border-radius:var(--radius-sm);flex-shrink:0;"></div>'
+        + '<div style="flex:1;">'
+        + '<div class="skeleton-line" style="height:14px;width:' + (55 + (i % 3) * 10) + '%;margin-bottom:var(--space-2);"></div>'
+        + '<div class="skeleton-line" style="height:11px;width:' + (35 + (i % 2) * 15) + '%;"></div>'
+        + '</div>'
+        + '<div class="skeleton-line" style="height:24px;width:60px;border-radius:var(--radius-full);"></div>'
+        + '</div></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+};
+
+/**
+ * OptimisticUpdater — Ejecuta acciones con UI instantánea y rollback en fallo.
+ *
+ * Patrón:
+ *   1. Guardar snapshot del estado en CacheManager
+ *   2. Aplicar mutación local (optimista)
+ *   3. Re-renderizar UI (instantáneo)
+ *   4. Ejecutar callServer en background
+ *   5a. Si OK → descartar snapshot, invalidar vistas relacionadas
+ *   5b. Si FAIL/Timeout → restaurar snapshot, re-renderizar, toast error
+ */
+var OptimisticUpdater = {
+  /**
+   * Ejecuta una acción optimista con rollback automático.
+   * @param {Object} config
+   * @param {string} config.cacheKey — Clave del CacheManager a mutar
+   * @param {function} config.mutacion — fn(datosActuales) → datosModificados
+   * @param {function} config.render — fn() para re-renderizar la vista
+   * @param {string} config.serverFn — Nombre de la función servidor
+   * @param {Array} [config.serverArgs] — Argumentos para callServer
+   * @param {string[]} [config.invalidarKeys] — Claves a invalidar post-éxito
+   * @param {number} [config.timeout=10000] — Timeout en ms
+   */
+  ejecutar: function(config) {
+    var cacheKey = config.cacheKey;
+    var mutacion = config.mutacion;
+    var render = config.render;
+    var serverFn = config.serverFn;
+    var serverArgs = config.serverArgs || [];
+    var invalidarKeys = config.invalidarKeys || [];
+    var timeout = config.timeout || 10000;
+
+    // 1. Snapshot del estado actual
+    var datosActuales = CacheManager.get(cacheKey);
+    var snapshot = JSON.parse(JSON.stringify(datosActuales || []));
+
+    // 2. Mutación local optimista
+    var datosMutados = mutacion(datosActuales);
+    CacheManager.set(cacheKey, datosMutados);
+
+    // 3. Render instantáneo
+    render();
+
+    // 4. Capturar sección activa al momento de la acción
+    var seccionAlMomento = _seccionActiva;
+
+    // 5. Timer de timeout
+    var timedOut = false;
+    var timeoutId = setTimeout(function() {
+      timedOut = true;
+      // Rollback por timeout
+      CacheManager.set(cacheKey, snapshot);
+      if (_seccionActiva === seccionAlMomento) {
+        render();
+      }
+      _toast('La conexión está lenta. Verifica tu internet.', 'warning');
+    }, timeout);
+
+    // 6. Llamar al servidor (spread args para compatibilidad con callServer)
+    var callArgs = [serverFn].concat(serverArgs);
+    callServer.apply(null, callArgs)
+      .then(function(res) {
+        clearTimeout(timeoutId);
+        if (timedOut) return; // Ya se hizo rollback por timeout
+
+        if (res && res.ok) {
+          // Éxito: invalidar claves relacionadas
+          if (invalidarKeys.length > 0) {
+            CacheManager.invalidar(invalidarKeys);
+          }
+        } else {
+          // Fallo del servidor: rollback
+          CacheManager.set(cacheKey, snapshot);
+          if (_seccionActiva === seccionAlMomento) {
+            render();
+          }
+          _toast(res && res.mensaje ? res.mensaje : 'La acción no se pudo completar.', 'error');
+        }
+      })
+      .catch(function(err) {
+        clearTimeout(timeoutId);
+        if (timedOut) return;
+
+        // Error de red o excepción: rollback
+        CacheManager.set(cacheKey, snapshot);
+        if (_seccionActiva === seccionAlMomento) {
+          render();
+        } else {
+          // Usuario ya navegó a otra vista: rollback silencioso + toast
+          _toast('La acción anterior no se completó.', 'warning');
+        }
+      });
+  }
+};
+
 /** Menús por rol */
 var MENUS_POR_ROL = {
   COMERCIAL: [
@@ -76,15 +376,15 @@ function inicializarApp() {
   renderizarMenu(usuario.rol);
 
   // Cache local de datos pre-cargados
-  _cacheLocal.resumen = initData.resumen || null;
-  _cacheLocal.lotes = initData.lotes || null;
+  if (initData.resumen) CacheManager.set('dashboard', initData.resumen);
+  if (initData.lotes) CacheManager.set('lotes', initData.lotes.datos || initData.lotes);
 
   // Renderizar dashboard inmediatamente con datos pre-cargados (0 latencia)
-  if (_cacheLocal.resumen) {
-    _renderizarDashboardConDatos(_cacheLocal.resumen);
+  if (CacheManager.get('dashboard')) {
+    _renderizarDashboardConDatos(CacheManager.get('dashboard'));
     // Activar Línea de Vida con los datos del resumen
     if (typeof actualizarLineasDeVida === 'function') {
-      actualizarLineasDeVida(usuario.rol, _cacheLocal.resumen);
+      actualizarLineasDeVida(usuario.rol, CacheManager.get('dashboard'));
     }
   } else {
     _mostrarSkeletonDashboard();
@@ -92,26 +392,12 @@ function inicializarApp() {
   }
 }
 
-/** Cache en memoria del frontend para evitar re-llamadas innecesarias */
-var _cacheLocal = { resumen: null, lotes: null, ttl: 0 };
-var CACHE_TTL_MS = 30000; // 30 segundos
-
 /** Control de navegación — evita que respuestas tardías sobreescriban la vista actual */
 var _navId = 0;
 var _seccionActiva = 'dashboard';
 
 function _sigueVigente(navIdCapturado) {
   return navIdCapturado === _navId;
-}
-
-function _cacheValido() {
-  return _cacheLocal.ttl > Date.now();
-}
-
-function _invalidarCache() {
-  _cacheLocal.resumen = null;
-  _cacheLocal.lotes = null;
-  _cacheLocal.ttl = 0;
 }
 
 function renderizarHeader(usuario) {
@@ -122,23 +408,7 @@ function renderizarHeader(usuario) {
 }
 
 function _mostrarSkeletonDashboard() {
-  var container = document.getElementById('viewDashboard');
-  var nombre = APP_USUARIO ? APP_USUARIO.nombre : '';
-  var hora = new Date().getHours();
-  var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
-
-  container.innerHTML = '<div class="stack stack--loose">'
-    + '<div class="card card--hero">'
-    + '<h1 style="margin-bottom:var(--space-1);">' + saludo + ', ' + nombre + '</h1>'
-    + '<p style="margin:0;font-size:var(--text-sm);">Cargando tu resumen...</p>'
-    + '</div>'
-    + '<div class="grid grid--4">'
-    + '<div class="skeleton skeleton-card"></div>'
-    + '<div class="skeleton skeleton-card"></div>'
-    + '<div class="skeleton skeleton-card"></div>'
-    + '<div class="skeleton skeleton-card"></div>'
-    + '</div>'
-    + '</div>';
+  SkeletonSystem.mostrar('viewDashboard', 'dashboard');
   mostrarVista('viewDashboard');
 }
 
@@ -250,25 +520,39 @@ function navegarA(seccion) {
 function cargarDashboard() {
   var navIdLocal = _navId;
 
-  if (_cacheLocal.resumen && _cacheValido()) {
-    _renderizarDashboardConDatos(_cacheLocal.resumen);
-    return;
-  }
-  if (_cacheLocal.resumen) {
-    _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
-    _renderizarDashboardConDatos(_cacheLocal.resumen);
+  var cachedResumen = CacheManager.get('dashboard');
+  if (cachedResumen) {
+    _renderizarDashboardConDatos(cachedResumen);
     return;
   }
 
+  _mostrarSkeletonDashboard();
+
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarDashboard()">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerResumenDashboard')
     .then(function(r) {
+      clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
-      _cacheLocal.resumen = r;
-      _cacheLocal.ttl = Date.now() + CACHE_TTL_MS;
+      CacheManager.set('dashboard', r);
       _renderizarDashboardConDatos(r);
       if (typeof actualizarLineasDeVida === 'function') actualizarLineasDeVida(APP_USUARIO.rol, r);
     })
-    .catch(function(err) { if (!_sigueVigente(navIdLocal)) return; console.error(err); _mostrarError('No pudimos cargar el resumen.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar el resumen.</p>'
+        + '<button class="btn btn--primary" onclick="cargarDashboard()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarDashboardConDatos(r) {
@@ -441,37 +725,54 @@ document.addEventListener('DOMContentLoaded', function() {
 // ============================================================
 
 var _lotesPageActual = 1;
-var _todosLosLotes = null; // Cache de todos los lotes (se pide 1 vez)
 
 function cargarMisLotes(pagina) {
   _lotesPageActual = pagina || 1;
 
   // Si ya tenemos todos los lotes en memoria, filtrar localmente
-  if (_todosLosLotes) {
+  if (CacheManager.get('lotes')) {
     _renderizarLotesFiltrados();
     return;
   }
 
-  // Si tenemos pre-carga de doGet (primera vez), usarla
-  if (_cacheLocal.lotes && !_filtroEstadoActivo && !_busquedaLoteActiva) {
-    _todosLosLotes = _cacheLocal.lotes.datos;
-    _cacheLocal.lotes = null;
-    _renderizarLotesFiltrados();
-    return;
-  }
+  // Mostrar skeleton tipo tabla
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['ID Lote', 'Fecha', 'Comercial', 'Contratos', 'Estado'],
+    filas: 6,
+    titulo: 'Lotes'
+  });
+  mostrarVista('viewDashboard');
+
+  // 15s timeout
+  var timeoutId = setTimeout(function() {
+    if (_seccionActiva !== 'lotes') return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarMisLotes(1)">Reintentar</button></div>');
+  }, 15000);
 
   // Primera carga: pedir TODOS los lotes al servidor (sin filtro, sin paginación servidor)
   callServer('api_obtenerTodosLosLotes')
     .then(function(datos) {
+      clearTimeout(timeoutId);
       if (_seccionActiva !== 'lotes') return;
-      _todosLosLotes = datos || [];
+      CacheManager.set('lotes', datos || []);
       _renderizarLotesFiltrados();
     })
-    .catch(function(err) { if (_seccionActiva !== 'lotes') return; console.error('Error lotes:', err); _mostrarError('No pudimos cargar los lotes.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (_seccionActiva !== 'lotes') return;
+      console.error('Error lotes:', err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar los lotes.</p>'
+        + '<button class="btn btn--primary" onclick="cargarMisLotes(1)">Reintentar</button></div>');
+    });
 }
 
 function _renderizarLotesFiltrados() {
-  var filtrados = _todosLosLotes || [];
+  var filtrados = CacheManager.get('lotes') || [];
 
   // Filtrar por estado
   if (_filtroEstadoActivo) {
@@ -613,33 +914,45 @@ function _badgeEstado(estado) {
 //  VISTA: COLA DEL AUXILIAR
 // ============================================================
 
-var _colaAuxiliarCache = null;
-
 function cargarColaAuxiliar() {
-  if (_colaAuxiliarCache) { _renderizarColaAuxiliar(); return; }
+  if (CacheManager.get('cola-auxiliar')) { _renderizarColaAuxiliar(); return; }
 
-  // Mostrar skeleton
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack">'
-    + '<h2>Cola de solicitudes</h2>'
-    + '<p style="color:var(--color-mono-500);margin:0;">Solicitudes pendientes de radicar en SAI</p>'
-    + '<div class="card card--flat" style="padding:0;overflow:hidden;"><table class="table">'
-    + '<thead><tr><th>Arrendatario</th><th>Lote</th><th>Destino</th><th>Dirección</th><th>Canon</th><th></th></tr></thead><tbody>'
-    + _skeletonFilas(6)
-    + '</tbody></table></div></div>';
+  // Mostrar skeleton tipo tabla con columnas definidas
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Arrendatario', 'Lote', 'Destino', 'Dirección', 'Canon', ''],
+    filas: 6,
+    titulo: 'Cola de solicitudes'
+  });
   mostrarVista('viewDashboard');
+
+  var timeoutId = setTimeout(function() {
+    if (_seccionActiva !== 'cola-auxiliar') return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarColaAuxiliar()">Reintentar</button></div>');
+  }, 15000);
 
   callServer('api_obtenerColaAuxiliar')
     .then(function(datos) {
+      clearTimeout(timeoutId);
       if (_seccionActiva !== 'cola-auxiliar') return;
-      _colaAuxiliarCache = datos || [];
+      CacheManager.set('cola-auxiliar', datos || []);
       _renderizarColaAuxiliar();
     })
-    .catch(function(err) { if (_seccionActiva !== 'cola-auxiliar') return; console.error(err); _mostrarError('No pudimos cargar la cola.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (_seccionActiva !== 'cola-auxiliar') return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar la cola.</p>'
+        + '<button class="btn btn--primary" onclick="cargarColaAuxiliar()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarColaAuxiliar() {
-  var datos = _colaAuxiliarCache || [];
+  var datos = CacheManager.get('cola-auxiliar') || [];
   var container = document.getElementById('viewDashboard');
 
   var html = '<div class="stack">'
@@ -675,7 +988,8 @@ function _renderizarColaAuxiliar() {
 }
 
 function _abrirSolicitudAuxiliar(idx) {
-  var s = _colaAuxiliarCache[idx];
+  var colaData = CacheManager.get('cola-auxiliar') || [];
+  var s = colaData[idx];
   if (!s) return;
 
   // Mostrar modal con spinner mientras carga datos completos
@@ -821,17 +1135,18 @@ function _marcarRadicadoAuxiliar(uuid) {
     return;
   }
 
-  callServer('api_marcarRadicado', uuid, numeros)
-    .then(function(res) {
-      _cerrarModalAuxiliar();
-      if (res && res.ok) {
-        _colaAuxiliarCache = _colaAuxiliarCache.filter(function(s) { return s.uuid !== uuid; });
-        _renderizarColaAuxiliar();
-      } else {
-        _toast(res ? res.mensaje : 'Error al marcar.', 'error');
-      }
-    })
-    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
+  _cerrarModalAuxiliar();
+
+  OptimisticUpdater.ejecutar({
+    cacheKey: 'cola-auxiliar',
+    mutacion: function(datos) {
+      return (datos || []).filter(function(s) { return s.uuid !== uuid; });
+    },
+    render: function() { _renderizarColaAuxiliar(); },
+    serverFn: 'api_marcarRadicado',
+    serverArgs: [uuid, numeros],
+    invalidarKeys: ['dashboard']
+  });
 }
 
 function _toggleSiniestro(id) {
@@ -843,7 +1158,8 @@ function _toggleSiniestro(id) {
 }
 
 function _marcarErrorTerceros(idx) {
-  var s = idx >= 0 ? _colaAuxiliarCache[idx] : window._solicitudAuxiliarActual;
+  var colaData = CacheManager.get('cola-auxiliar') || [];
+  var s = idx >= 0 ? colaData[idx] : window._solicitudAuxiliarActual;
   if (!s) return;
 
   // Cerrar modal actual y abrir el de error en terceros
@@ -946,8 +1262,10 @@ function _enviarErrorTerceros(uuid) {
     .then(function(res) {
       _cerrarModalError();
       if (res && res.ok) {
+        CacheManager.invalidar(['cola-auxiliar', 'dashboard']);
         _toast('Error registrado. Se notificó al comercial.', 'success');
-        _colaAuxiliarCache = _colaAuxiliarCache.filter(function(s) { return s.uuid !== uuid; });
+        var colaActual = CacheManager.get('cola-auxiliar') || [];
+        CacheManager.set('cola-auxiliar', colaActual.filter(function(s) { return s.uuid !== uuid; }));
         _renderizarColaAuxiliar();
       } else {
         _toast(res ? res.mensaje : 'Error al guardar.', 'error');
@@ -1032,20 +1350,45 @@ function cargarMisSolicitudesAuxiliar() {
 //  VISTA: ANALISTA (Pedir solicitud + evaluar)
 // ============================================================
 
-var _vistaAnalistaCache = null;
-
 function _cargarVistaAnalista() {
-  if (_vistaAnalistaCache) { _renderizarVistaAnalista(_vistaAnalistaCache); return; }
+  // 1. Check cache first
+  var cached = CacheManager.get('mis-solicitudes');
+  if (cached) { _renderizarVistaAnalista(cached); return; }
 
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack"><h2>Mis solicitudes</h2>'
-    + '<div class="card card--flat skeleton-card" style="height:60px;"></div>'
-    + _skeletonFilas(4) + '</div>';
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Solicitud', 'Arrendatario', 'Estado', 'Fecha', ''],
+    filas: 4,
+    titulo: 'Mis solicitudes'
+  });
   mostrarVista('viewDashboard');
 
+  // 3. Fetch from server with 15s timeout
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="_cargarVistaAnalista()">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerMisSolicitudesAnalista')
-    .then(function(data) { _vistaAnalistaCache = data; _renderizarVistaAnalista(data); })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar tus solicitudes.'); });
+    .then(function(data) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('mis-solicitudes', data);
+      _renderizarVistaAnalista(data);
+    })
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar tus solicitudes.</p>'
+        + '<button class="btn btn--primary" onclick="_cargarVistaAnalista()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarVistaAnalista(data) {
@@ -1102,29 +1445,56 @@ function _pedirSolicitudAnalista() {
   callServer('api_pedirSolicitudAnalista')
     .then(function(res) {
       if (res && res.ok) {
-        _vistaAnalistaCache = null;
+        CacheManager.invalidar(['mis-solicitudes', 'asignaciones']);
         _cargarVistaAnalista();
       } else {
         _toast(res ? res.mensaje : 'No se pudo asignar.', 'error');
-        _vistaAnalistaCache = null;
+        CacheManager.invalidar(['mis-solicitudes']);
         _cargarVistaAnalista(); // Recargar para restaurar botón
       }
     })
     .catch(function(err) {
       _toast('Error: ' + (err.message || err), 'error');
-      _vistaAnalistaCache = null;
+      CacheManager.invalidar(['mis-solicitudes']);
       _cargarVistaAnalista();
     });
 }
 
 function _abrirEvaluacion(filaNum) {
-  mostrarVista('viewLoading');
+  SkeletonSystem.mostrar('viewDashboard', 'detalle', { campos: 10 });
+  mostrarVista('viewDashboard');
+
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="_abrirEvaluacion(' + filaNum + ')">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerSolicitudParaEvaluar', filaNum)
     .then(function(data) {
-      if (!data) { _mostrarError('No se pudo cargar la solicitud.'); return; }
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      if (!data) {
+        SkeletonSystem.reemplazar('viewDashboard',
+          '<div class="card" style="text-align:center;padding:var(--space-8);">'
+          + '<p style="color:var(--color-mono-500);">No se pudo cargar la solicitud.</p>'
+          + '<button class="btn btn--ghost" onclick="_cargarVistaAnalista()">← Volver</button></div>');
+        return;
+      }
       _renderizarFormEvaluacion(filaNum, data);
     })
-    .catch(function(err) { console.error(err); _mostrarError('Error al cargar solicitud.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">Error al cargar solicitud.</p>'
+        + '<button class="btn btn--primary" onclick="_abrirEvaluacion(' + filaNum + ')">Reintentar</button></div>');
+    });
 }
 
 function _renderizarFormEvaluacion(filaNum, d) {
@@ -1261,7 +1631,7 @@ function _finalizarEvaluacion(filaNum) {
   callServer('api_guardarEvaluacion', filaNum, campos, true)
     .then(function(res) {
       if (res && res.ok) {
-        _vistaAnalistaCache = null;
+        CacheManager.invalidar(['mis-solicitudes']);
         _cargarVistaAnalista();
       } else {
         _toast(res ? res.mensaje : 'Error al finalizar.', 'error');
@@ -1312,18 +1682,45 @@ function _enviarReporteGestion() {
 //  VISTA: ASIGNACIONES (Líder reasigna/libera)
 // ============================================================
 
-var _asignacionesCache = null;
-
 function cargarVistaAsignaciones() {
-  if (_asignacionesCache) { _renderizarAsignaciones(_asignacionesCache); return; }
+  // 1. Check cache first
+  var cached = CacheManager.get('asignaciones');
+  if (cached) { _renderizarAsignaciones(cached); return; }
 
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack"><h2>Asignaciones</h2>' + _skeletonFilas(5) + '</div>';
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Analista', 'Solicitud', 'Arrendatario', 'Fecha asignación', 'Estado', ''],
+    filas: 5,
+    titulo: 'Asignaciones'
+  });
   mostrarVista('viewDashboard');
 
+  // 3. Fetch from server with 15s timeout
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarVistaAsignaciones()">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerAsignaciones')
-    .then(function(datos) { _asignacionesCache = datos || []; _renderizarAsignaciones(_asignacionesCache); })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar las asignaciones.'); });
+    .then(function(datos) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('asignaciones', datos || []);
+      _renderizarAsignaciones(datos || []);
+    })
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar las asignaciones.</p>'
+        + '<button class="btn btn--primary" onclick="cargarVistaAsignaciones()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarAsignaciones(datos) {
@@ -1377,8 +1774,11 @@ function _liberarSolicitud(filaNum) {
   callServer('api_reasignarSolicitud', filaNum, '')
     .then(function(res) {
       if (res && res.ok) {
-        _asignacionesCache = _asignacionesCache.filter(function(s) { return s.fila !== filaNum; });
-        _renderizarAsignaciones(_asignacionesCache);
+        CacheManager.invalidar(['asignaciones', 'mis-solicitudes']);
+        var asignaciones = CacheManager.get('asignaciones') || [];
+        asignaciones = asignaciones.filter(function(s) { return s.fila !== filaNum; });
+        CacheManager.set('asignaciones', asignaciones);
+        _renderizarAsignaciones(asignaciones);
       }
       else _toast(res ? res.mensaje : 'Error al liberar.', 'error');
     })
@@ -1389,22 +1789,44 @@ function _liberarSolicitud(filaNum) {
 //  VISTA: ERRORES PENDIENTES (Comercial responde)
 // ============================================================
 
-var _erroresComercialCache = null;
-
 function cargarVistaErroresComercial() {
-  if (_erroresComercialCache) { _renderizarErroresComercial(_erroresComercialCache); return; }
+  // 1. Check cache first
+  var cached = CacheManager.get('errores');
+  if (cached) { _renderizarErroresComercial(cached); return; }
 
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack"><h2>Pendientes de corrección</h2>'
-    + _skeletonFilas(4) + '</div>';
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'lista', {
+    items: 4,
+    titulo: 'Pendientes de corrección'
+  });
   mostrarVista('viewDashboard');
+
+  // 3. Fetch from server with 15s timeout
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarVistaErroresComercial()">Reintentar</button></div>');
+  }, 15000);
 
   callServer('api_obtenerMisErroresPendientes')
     .then(function(errores) {
-      _erroresComercialCache = errores || [];
-      _renderizarErroresComercial(_erroresComercialCache);
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('errores', errores || []);
+      _renderizarErroresComercial(errores || []);
     })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar los pendientes.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar los pendientes.</p>'
+        + '<button class="btn btn--primary" onclick="cargarVistaErroresComercial()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarErroresComercial(errores) {
@@ -1609,22 +2031,25 @@ function _enviarCorreccion(uuid) {
   var btnEnv = document.querySelector('#modalCorreccion .btn--primary');
   if (btnEnv) { btnEnv.disabled = true; btnEnv.textContent = '⏳ Enviando...'; }
 
-  // Convertir archivos a base64 y enviar todo junto
+  // Convertir archivos a base64 y enviar con actualización optimista
   Promise.all(archivosPromises).then(function(archivos) {
     // Adjuntar info de archivos a respuestas
     for (var a = 0; a < archivos.length; a++) {
       respuestas[a].archivo = archivos[a]; // null o {bytes, nombre, tipo}
     }
-    return callServer('api_enviarCorreccion', uuid, respuestas);
-  }).then(function(res) {
+
     _cerrarModalCorreccion();
-    if (res && res.ok) {
-      _toast('Corrección enviada. El equipo la revisará.', 'success');
-      _erroresComercialCache = null;
-      cargarVistaErroresComercial();
-    } else {
-      _toast(res ? res.mensaje : 'Error al enviar.', 'error');
-    }
+
+    OptimisticUpdater.ejecutar({
+      cacheKey: 'errores',
+      mutacion: function(datos) {
+        return (datos || []).filter(function(e) { return e.uuid !== uuid; });
+      },
+      render: function() { _renderizarErroresComercial(CacheManager.get('errores') || []); },
+      serverFn: 'api_enviarCorreccion',
+      serverArgs: [uuid, respuestas],
+      invalidarKeys: ['dashboard']
+    });
   }).catch(function(err) {
     if (btnEnv) { btnEnv.disabled = false; btnEnv.textContent = 'Enviar corrección'; }
     _toast('Error: ' + (err.message || err), 'error');
@@ -1659,7 +2084,10 @@ var _solicitudesPage = 1;
 var _solicitudesTotal = 0;
 
 function cargarVistaSolicitudes() {
-  if (_solicitudesCache) {
+  // 1. Check cache first
+  var cached = CacheManager.get('solicitudes');
+  if (cached) {
+    _solicitudesCache = cached;
     _renderizarSolicitudesFiltradas();
     return;
   }
@@ -1667,33 +2095,41 @@ function cargarVistaSolicitudes() {
   // Reset sort al cargar por primera vez
   _solicitudesSort = { campo: '', dir: '' };
 
-  // Mostrar skeleton mientras carga
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack">'
-    + '<div class="flex flex--between"><h2>Solicitudes</h2><small style="color:var(--color-mono-500);">Cargando las más recientes...</small></div>'
-    + '<div class="card card--flat" style="padding:0; overflow:hidden;">'
-    + '<table class="table"><thead><tr><th>Arrendatario</th><th>Solicitud</th><th>Lote</th><th>Canon</th><th>Asignada a</th><th>Resultado análisis</th><th>Estado</th></tr></thead>'
-    + '<tbody>'
-    + _skeletonFilas(8)
-    + '</tbody></table></div></div>';
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Arrendatario', 'Solicitud', 'Lote', 'Canon', 'Asignada a', 'Resultado análisis', 'Estado'],
+    filas: 8,
+    titulo: 'Solicitudes'
+  });
   mostrarVista('viewDashboard');
+
+  // 3. Fetch from server with 15s timeout
+  var timeoutId = setTimeout(function() {
+    if (_seccionActiva !== 'solicitudes') return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarVistaSolicitudes()">Reintentar</button></div>');
+  }, 15000);
 
   callServer('api_obtenerSolicitudes', 0, 500)
     .then(function(res) {
+      clearTimeout(timeoutId);
       if (_seccionActiva !== 'solicitudes') return;
       _solicitudesCache = res.datos || [];
       _solicitudesTotal = res.total || 0;
+      CacheManager.set('solicitudes', _solicitudesCache);
       _renderizarSolicitudesFiltradas();
     })
-    .catch(function(err) { if (_seccionActiva !== 'solicitudes') return; console.error(err); _mostrarError('No pudimos cargar las solicitudes.'); });
-}
-
-function _skeletonFilas(n) {
-  var html = '';
-  for (var i = 0; i < n; i++) {
-    html += '<tr><td colspan="7" style="padding:0;"><div class="skeleton-row"></div></td></tr>';
-  }
-  return html;
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (_seccionActiva !== 'solicitudes') return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar las solicitudes.</p>'
+        + '<button class="btn btn--primary" onclick="cargarVistaSolicitudes()">Reintentar</button></div>');
+    });
 }
 
 function _cargarMasSolicitudes() {
@@ -1702,6 +2138,7 @@ function _cargarMasSolicitudes() {
     .then(function(res) {
       if (res.datos && res.datos.length > 0) {
         _solicitudesCache = _solicitudesCache.concat(res.datos);
+        CacheManager.set('solicitudes', _solicitudesCache);
       }
       _renderizarSolicitudesFiltradas();
     })
@@ -1923,19 +2360,48 @@ function _cerrarModalSolicitud() {
 //  VISTA: USUARIOS (CRUD)
 // ============================================================
 
-var _usuariosCache = null;
-
 function cargarVistaUsuarios() {
-  if (_usuariosCache) {
-    _renderizarUsuarios(_usuariosCache);
+  // 1. Check cache first
+  var cached = CacheManager.get('usuarios');
+  if (cached) {
+    _renderizarUsuarios(cached);
     return;
   }
+
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Nombre', 'Email', 'Rol', 'Estado', ''],
+    filas: 6,
+    titulo: 'Usuarios'
+  });
+  mostrarVista('viewDashboard');
+
+  // 3. Fetch from server with 15s timeout
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarVistaUsuarios()">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerUsuarios')
     .then(function(datos) {
-      _usuariosCache = datos || [];
-      _renderizarUsuarios(_usuariosCache);
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('usuarios', datos || []);
+      _renderizarUsuarios(datos || []);
     })
-    .catch(function(err) { console.error(err); _mostrarError('No pudimos cargar los usuarios.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar los usuarios.</p>'
+        + '<button class="btn btn--primary" onclick="cargarVistaUsuarios()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarUsuarios(usuarios) {
@@ -2071,27 +2537,24 @@ function _guardarUsuario(esNuevo) {
     return;
   }
 
-  callServer('api_guardarUsuario', datos, esNuevo)
-    .then(function(res) {
-      if (res && res.ok) {
-        _cerrarModal();
-        if (_usuariosCache) {
-          if (esNuevo) {
-            _usuariosCache.push(datos);
-          } else {
-            for (var u = 0; u < _usuariosCache.length; u++) {
-              if (_usuariosCache[u].email === datos.email) { _usuariosCache[u] = datos; break; }
-            }
-          }
-          _renderizarUsuarios(_usuariosCache);
-        } else {
-          cargarVistaUsuarios();
-        }
-      } else {
-        _toast(res ? res.mensaje : 'Error desconocido.', 'error');
+  _cerrarModal();
+
+  OptimisticUpdater.ejecutar({
+    cacheKey: 'usuarios',
+    mutacion: function(lista) {
+      lista = (lista || []).slice();
+      var idx = -1;
+      for (var i = 0; i < lista.length; i++) {
+        if (lista[i].email === datos.email) { idx = i; break; }
       }
-    })
-    .catch(function(err) { _toast('Error: ' + err.message, 'error'); });
+      if (idx >= 0) { lista[idx] = datos; } else { lista.push(datos); }
+      return lista;
+    },
+    render: function() { _renderizarUsuarios(CacheManager.get('usuarios') || []); },
+    serverFn: 'api_guardarUsuario',
+    serverArgs: [datos, esNuevo],
+    invalidarKeys: []
+  });
 }
 
 // ============================================================
@@ -2099,16 +2562,40 @@ function _guardarUsuario(esNuevo) {
 // ============================================================
 
 function _verDetalleLote(idLote) {
-  mostrarVista('viewLoading');
+  SkeletonSystem.mostrar('viewDashboard', 'detalle', { campos: 8 });
+  mostrarVista('viewDashboard');
+
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="_verDetalleLote(\'' + idLote + '\')">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerDetalleLote', idLote)
     .then(function(data) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
       if (!data || !data.lote) {
-        _mostrarError('No se encontró el lote "' + idLote + '".');
+        SkeletonSystem.reemplazar('viewDashboard',
+          '<div class="card" style="text-align:center;padding:var(--space-8);">'
+          + '<p style="color:var(--color-mono-500);">No se encontró el lote "' + idLote + '".</p>'
+          + '<button class="btn btn--ghost" onclick="cargarMisLotes(_lotesPageActual)">← Volver a lotes</button></div>');
         return;
       }
       _renderizarDetalleLote(data);
     })
-    .catch(function(err) { console.error(err); _mostrarError('Error al cargar detalle del lote.'); });
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">Error al cargar detalle del lote.</p>'
+        + '<button class="btn btn--primary" onclick="_verDetalleLote(\'' + idLote + '\')">Reintentar</button></div>');
+    });
 }
 
 function _renderizarDetalleLote(data) {
@@ -2155,13 +2642,42 @@ function _renderizarDetalleLote(data) {
 // ============================================================
 
 function cargarVistaConfiguracion() {
-  var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack"><h2>Configuración</h2><div class="skeleton skeleton-card"></div><div class="skeleton skeleton-card"></div></div>';
+  // 1. Check cache first
+  var cached = CacheManager.get('config-motivos');
+  if (cached) { _renderizarConfigMotivos(cached); return; }
+
+  // 2. Cache miss → show skeleton
+  SkeletonSystem.mostrar('viewDashboard', 'lista', {
+    items: 3,
+    titulo: 'Configuración'
+  });
   mostrarVista('viewDashboard');
 
+  // 3. Fetch from server with 15s timeout
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard',
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="cargarVistaConfiguracion()">Reintentar</button></div>');
+  }, 15000);
+
   callServer('api_obtenerCatalogoMotivos')
-    .then(function(motivos) { _renderizarConfigMotivos(motivos || []); })
-    .catch(function(err) { _toast('Error al cargar configuración.', 'error'); });
+    .then(function(motivos) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('config-motivos', motivos || []);
+      _renderizarConfigMotivos(motivos || []);
+    })
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      SkeletonSystem.reemplazar('viewDashboard',
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">Error al cargar configuración.</p>'
+        + '<button class="btn btn--primary" onclick="cargarVistaConfiguracion()">Reintentar</button></div>');
+    });
 }
 
 function _renderizarConfigMotivos(motivos) {
@@ -2239,32 +2755,40 @@ function _guardarMotivo(esNuevo) {
     return;
   }
 
-  callServer('api_guardarMotivo', motivo, esNuevo)
-    .then(function(res) {
-      if (res && res.ok) {
-        var modal = document.getElementById('modalMotivo');
-        if (modal) modal.remove();
-        _toast(res.mensaje, 'success');
-        cargarVistaConfiguracion();
-      } else {
-        _toast(res ? res.mensaje : 'Error al guardar.', 'error');
+  var modal = document.getElementById('modalMotivo');
+  if (modal) modal.remove();
+
+  OptimisticUpdater.ejecutar({
+    cacheKey: 'config-motivos',
+    mutacion: function(lista) {
+      lista = (lista || []).slice();
+      var idx = -1;
+      for (var i = 0; i < lista.length; i++) {
+        if (lista[i].id === motivo.id) { idx = i; break; }
       }
-    })
-    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
+      if (idx >= 0) { lista[idx] = motivo; } else { lista.push(motivo); }
+      return lista;
+    },
+    render: function() { _renderizarConfigMotivos(CacheManager.get('config-motivos') || []); },
+    serverFn: 'api_guardarMotivo',
+    serverArgs: [motivo, esNuevo],
+    invalidarKeys: ['errores']
+  });
 }
 
 function _eliminarMotivo(id) {
   if (!confirm('¿Eliminar este motivo? No se podrá deshacer.')) return;
-  callServer('api_eliminarMotivo', id)
-    .then(function(res) {
-      if (res && res.ok) {
-        _toast('Motivo eliminado.', 'success');
-        cargarVistaConfiguracion();
-      } else {
-        _toast(res ? res.mensaje : 'Error al eliminar.', 'error');
-      }
-    })
-    .catch(function(err) { _toast('Error: ' + (err.message || err), 'error'); });
+
+  OptimisticUpdater.ejecutar({
+    cacheKey: 'config-motivos',
+    mutacion: function(lista) {
+      return (lista || []).filter(function(m) { return m.id !== id; });
+    },
+    render: function() { _renderizarConfigMotivos(CacheManager.get('config-motivos') || []); },
+    serverFn: 'api_eliminarMotivo',
+    serverArgs: [id],
+    invalidarKeys: ['errores']
+  });
 }
 
 function mostrarVistaRadicar() {
