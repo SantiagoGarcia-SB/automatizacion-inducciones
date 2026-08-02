@@ -1,0 +1,14 @@
+# clasp push solo debe subir el proyecto de Apps Script real (.js/.html de la
+# raíz + appsscript.json). Todo lo demás es infraestructura de desarrollo local
+# (tests con vitest, node_modules, docs, specs) y no debe llegar al editor de GAS.
+
+node_modules/**
+tests/**
+docs/**
+.kiro/**
+.git/**
+.vscode/**
+package.json
+package-lock.json
+vitest.config.js
+README.md
