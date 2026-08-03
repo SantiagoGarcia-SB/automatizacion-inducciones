@@ -64,3 +64,81 @@ function probarEnvioSmsInfobip() {
   var resultado = _enviarSmsInfobip(NUMERO_PRUEBA, 'Prueba', 'Inmobiliaria Test');
   Logger.log('Resultado: ' + JSON.stringify(resultado));
 }
+
+/**
+ * ============================================================
+ * TEST COMBINADO — SMS + Email
+ *
+ * Envía UN SMS y UN correo de prueba para verificar que ambos
+ * canales funcionan correctamente antes de activar el flujo
+ * automático de Ley 2300.
+ *
+ * INSTRUCCIONES:
+ *   1. Cambia CELULAR_PRUEBA por tu número real
+ *   2. Cambia EMAIL_PRUEBA por tu correo real
+ *   3. Selecciona esta función en el desplegable
+ *   4. Ejecutar
+ *   5. Revisa el Log Y tu celular/bandeja de entrada
+ * ============================================================
+ */
+function testEnvioLey2300() {
+  // ─── CAMBIAR POR TUS DATOS REALES ───
+  var CELULAR_PRUEBA = '573XXXXXXXXX';       // ← tu celular
+  var EMAIL_PRUEBA   = 'santiago.garcia@segurosbolivar.com'; // ← tu correo
+  var NOMBRE_PRUEBA  = 'Santiago (PRUEBA)';
+  var INMOBILIARIA_PRUEBA = 'Inmobiliaria Test';
+  // ─── FIN ─────────────────────────────
+
+  Logger.log('═══════════════════════════════════════════');
+  Logger.log('  TEST DE ENVÍO LEY 2300 — SMS + EMAIL');
+  Logger.log('═══════════════════════════════════════════');
+
+  // ── 1. Verificar credenciales ──
+  var props = PropertiesService.getScriptProperties();
+  var baseUrl    = props.getProperty('INFOBIP_BASE_URL');
+  var apiKey     = props.getProperty('INFOBIP_API_KEY');
+  var emailFrom  = props.getProperty('INFOBIP_EMAIL_FROM');
+  var templateId = props.getProperty('INFOBIP_EMAIL_TEMPLATE_ID');
+
+  Logger.log('\n🔑 Credenciales:');
+  Logger.log('   BASE_URL:    ' + (baseUrl ? '✅' : '❌ falta'));
+  Logger.log('   API_KEY:     ' + (apiKey ? '✅' : '❌ falta'));
+  Logger.log('   EMAIL_FROM:  ' + (emailFrom || '❌ falta'));
+  Logger.log('   TEMPLATE_ID: ' + (templateId || '❌ falta'));
+
+  if (!baseUrl || !apiKey) {
+    Logger.log('\n❌ Faltan INFOBIP_BASE_URL o INFOBIP_API_KEY. No se puede continuar.');
+    return;
+  }
+
+  // ── 2. Test SMS ──
+  var resultadoSms = { ok: false, mensaje: 'No ejecutado' };
+  if (CELULAR_PRUEBA.indexOf('XXX') !== -1) {
+    Logger.log('\n📱 SMS: ⏭️ SALTADO (cambia CELULAR_PRUEBA por un número real)');
+  } else {
+    Logger.log('\n📱 Enviando SMS a ' + CELULAR_PRUEBA + '...');
+    resultadoSms = _enviarSmsInfobip(CELULAR_PRUEBA, NOMBRE_PRUEBA, INMOBILIARIA_PRUEBA);
+    Logger.log('   ' + (resultadoSms.ok ? '✅ ' : '❌ ') + resultadoSms.mensaje);
+  }
+
+  // ── 3. Test EMAIL ──
+  var resultadoEmail = { ok: false, mensaje: 'No ejecutado' };
+  if (!emailFrom || !templateId) {
+    Logger.log('\n📧 Email: ⏭️ SALTADO (faltan INFOBIP_EMAIL_FROM o INFOBIP_EMAIL_TEMPLATE_ID)');
+  } else {
+    Logger.log('\n📧 Enviando Email a ' + EMAIL_PRUEBA + '...');
+    resultadoEmail = _enviarEmailInfobip(EMAIL_PRUEBA, NOMBRE_PRUEBA, INMOBILIARIA_PRUEBA);
+    Logger.log('   ' + (resultadoEmail.ok ? '✅ ' : '❌ ') + resultadoEmail.mensaje);
+    if (resultadoEmail.messageId) {
+      Logger.log('   MessageId: ' + resultadoEmail.messageId);
+    }
+  }
+
+  // ── 4. Resumen ──
+  Logger.log('\n═══════════════════════════════════════════');
+  Logger.log('  RESUMEN:');
+  Logger.log('  SMS:   ' + (resultadoSms.ok ? '✅ Enviado' : '❌ ' + resultadoSms.mensaje));
+  Logger.log('  Email: ' + (resultadoEmail.ok ? '✅ Enviado' : '❌ ' + resultadoEmail.mensaje));
+  Logger.log('═══════════════════════════════════════════');
+  Logger.log('\n👉 Revisa tu celular y bandeja de entrada para confirmar.');
+}

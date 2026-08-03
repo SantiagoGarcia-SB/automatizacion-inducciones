@@ -3,7 +3,7 @@
  *
  * Cumplimiento Ley 2300: procesa solicitudes aprobadas en "registro analisis".
  * - Contactos con celular → SMS enviados automáticamente vía Infobip (API).
- * - Contactos con correo  → genera CORREOS.csv adjunto para envío manual.
+ * - Contactos con correo  → Email enviados automáticamente vía Infobip (API).
  * Notifica a líderes con resumen del corte. Corre cada 15 días.
  */
 function procesarDatosMejorado() {
@@ -126,14 +126,38 @@ function procesarDatosMejorado() {
       resultadoSms = procesarEnvioSmsLey2300(datosCelulares);
     }
 
-    // Adjuntar solo CORREOS.csv (los SMS ya se enviaron automáticamente)
-    const adjuntos = [];
+    // ── Envío automático de Email (reemplaza la carga manual de CSV) ──
+    var resultadoEmail = { enviados: 0, fallidos: 0, invalidosFormato: 0, duplicadosEliminados: 0, errores: [], abortado: false };
     if (datosCorreos.length > 1) {
-      adjuntos.push(_csvBlob_(datosCorreos, 'CORREOS.csv'));
+      try {
+        resultadoEmail = procesarEnvioEmailLey2300(datosCorreos);
+      } catch (err) {
+        _registrarEvento_("ERROR", "Cumplimiento.js", "Error crítico en envío email Ley 2300", err.message);
+        // El flujo continúa — SMS ya enviados, marcado de filas procede
+      }
     }
 
-    // Si no hay correos para enviar manualmente NI SMS enviados, no hay nada que reportar
-    if (adjuntos.length === 0 && resultadoSms.enviados === 0 && resultadoSms.fallidos === 0) {
+    // Adjuntar CSV solo de los fallidos para gestión manual
+    const adjuntos = [];
+    if (resultadoEmail.errores && resultadoEmail.errores.length > 0) {
+      // CSV solo de los fallidos para gestión manual
+      var csvFallidos = [['NOMBRE', 'CORREO', 'INMOBILIARIA']];
+      resultadoEmail.errores.forEach(function(e) {
+        // Find the inmobiliaria for this failed email
+        for (var idx = 1; idx < datosCorreos.length; idx++) {
+          if (String(datosCorreos[idx][1] || '').trim().toLowerCase() === e.email.toLowerCase()) {
+            csvFallidos.push([e.nombre, e.email, String(datosCorreos[idx][2] || '').trim()]);
+            break;
+          }
+        }
+      });
+      if (csvFallidos.length > 1) {
+        adjuntos.push(_csvBlob_(csvFallidos, 'CORREOS_FALLIDOS.csv'));
+      }
+    }
+
+    // Si no hay nada que reportar (ni SMS ni Email procesados)
+    if (adjuntos.length === 0 && resultadoSms.enviados === 0 && resultadoSms.fallidos === 0 && resultadoEmail.enviados === 0 && resultadoEmail.fallidos === 0) {
       Logger.log("No se encontraron datos nuevos para procesar.");
       return;
     }
@@ -170,7 +194,12 @@ function procesarDatosMejorado() {
       contactosCorreo: datosCorreos.length - 1,
       contactosCelular: datosCelulares.length - 1,
       smsEnviados: resultadoSms.enviados,
-      smsFallidos: resultadoSms.fallidos
+      smsFallidos: resultadoSms.fallidos,
+      emailEnviados: resultadoEmail.enviados,
+      emailFallidos: resultadoEmail.fallidos,
+      emailInvalidos: resultadoEmail.invalidosFormato,
+      emailDuplicados: resultadoEmail.duplicadosEliminados,
+      emailAbortado: resultadoEmail.abortado
     });
 
     // No se envuelve en retry(): un reintento tras un fallo ambiguo podría duplicar
@@ -185,24 +214,73 @@ function procesarDatosMejorado() {
       name: "Inducciones · El Libertador"
     });
 
-    // Marcar las filas procesadas en UNA sola escritura por lote (no una por fila)
+    // Construir conjuntos de contactos fallidos para determinar marca por fila
+    var smsFallidos = new Set();
+    if (resultadoSms.errores) {
+      resultadoSms.errores.forEach(function(e) { smsFallidos.add(String(e.celular || '').trim()); });
+    }
+    var emailFallidos = new Set();
+    if (resultadoEmail.errores) {
+      resultadoEmail.errores.forEach(function(e) { emailFallidos.add(e.email.toLowerCase().trim()); });
+    }
+
+    // Marcar filas con resultado combinado
     const fechaMarca = Utilities.formatDate(new Date(), "GMT-5", "yyyy-MM-dd HH:mm:ss");
     const primeraFila = filasParaMarcar[0];
     const ultimaFila = filasParaMarcar[filasParaMarcar.length - 1];
     const rangoMarca = hoja.getRange(primeraFila, colIndex.estadoAutomatizacion + 1, ultimaFila - primeraFila + 1, 1);
     const valoresMarca = retry(() => rangoMarca.getValues());
     const filasSet = new Set(filasParaMarcar);
+
+    // Para cada fila, re-evaluar qué personas tenían qué canales y si fallaron
     for (let f = primeraFila; f <= ultimaFila; f++) {
-      if (filasSet.has(f)) {
-        valoresMarca[f - primeraFila][0] = `Procesado ${fechaMarca}`;
-      }
+      if (!filasSet.has(f)) continue;
+
+      var filaData = datos[f - 1]; // datos[0] = headers, fila 2 del sheet = datos[1], etc.
+      var personasFila = [
+        { tel: String(filaData[colIndex.telInq] || '').trim(), correo: String(filaData[colIndex.correoInq] || '').trim() },
+        { tel: String(filaData[colIndex.telCoa1] || '').trim(), correo: String(filaData[colIndex.correoCoa1] || '').trim() },
+        { tel: String(filaData[colIndex.telCoa2] || '').trim(), correo: String(filaData[colIndex.correoCoa2] || '').trim() },
+        { tel: String(filaData[colIndex.telCoa3] || '').trim(), correo: String(filaData[colIndex.correoCoa3] || '').trim() },
+        { tel: String(filaData[colIndex.telCoa4] || '').trim(), correo: String(filaData[colIndex.correoCoa4] || '').trim() },
+        { tel: String(filaData[colIndex.telCoa5] || '').trim(), correo: String(filaData[colIndex.correoCoa5] || '').trim() },
+      ];
+
+      // Determinar peor caso entre todas las personas de la fila
+      var filaTeníaSms = false;
+      var filaTeníaEmail = false;
+      var filaSmsOk = true;
+      var filaEmailOk = true;
+
+      personasFila.forEach(function(p) {
+        if (p.correo && p.correo.includes('@')) {
+          filaTeníaEmail = true;
+          if (emailFallidos.has(p.correo.toLowerCase().trim())) {
+            filaEmailOk = false;
+          }
+        } else if (p.tel) {
+          filaTeníaSms = true;
+          var telNorm = p.tel.replace(/[\s\-\(\)]/g, '');
+          if (telNorm.startsWith('3') && telNorm.length === 10) telNorm = '57' + telNorm;
+          if (!telNorm.startsWith('57')) telNorm = '57' + telNorm;
+          if (smsFallidos.has(telNorm)) {
+            filaSmsOk = false;
+          }
+        }
+      });
+
+      var resSms = filaTeníaSms ? { ok: filaSmsOk } : null;
+      var resEmail = filaTeníaEmail ? { ok: filaEmailOk } : null;
+
+      valoresMarca[f - primeraFila][0] = _generarMarcaEstado(resSms, resEmail, fechaMarca);
     }
+
     retry(() => rangoMarca.setValues(valoresMarca));
 
     propiedades.setProperty('ultimaEjecucion', hoy.toUTCString());
-    Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Asunto: ${asunto}`);
+    Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Email enviados: ${resultadoEmail.enviados} | Email fallidos: ${resultadoEmail.fallidos} | Asunto: ${asunto}`);
     _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente",
-      "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Asunto: " + asunto);
+      "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Email: " + resultadoEmail.enviados + "/" + (resultadoEmail.enviados + resultadoEmail.fallidos) + " | Asunto: " + asunto);
 
   } catch (err) {
     Logger.log(`Error en procesarDatosMejorado: ${err.message}`);
@@ -259,10 +337,43 @@ function _csvBlob_(filas, nombreArchivo) {
 }
 
 /**
+ * Determina el texto de marca para la columna "Estado Automatización" de una fila,
+ * basándose en qué canal(es) aplicaban y si cada uno tuvo éxito o falló.
+ *
+ * @param {{ok: boolean}|null} resultadoSms - Resultado del SMS para esta fila, o null si no aplica
+ * @param {{ok: boolean}|null} resultadoEmail - Resultado del email para esta fila, o null si no aplica
+ * @param {string} fecha - Fecha formateada para incluir en la marca
+ * @returns {string} Texto descriptivo para "Estado Automatización"
+ */
+function _generarMarcaEstado(resultadoSms, resultadoEmail, fecha) {
+  var smsAplica = resultadoSms !== null;
+  var emailAplica = resultadoEmail !== null;
+  var smsOk = smsAplica ? resultadoSms.ok : null;
+  var emailOk = emailAplica ? resultadoEmail.ok : null;
+
+  if (smsAplica && emailAplica) {
+    if (smsOk && emailOk) return 'Procesado ' + fecha;
+    if (smsOk && !emailOk) return 'Parcial ' + fecha + ' · Email falló';
+    if (!smsOk && emailOk) return 'Parcial ' + fecha + ' · SMS falló';
+    return 'Parcial ' + fecha + ' · SMS y Email fallaron';
+  }
+
+  if (smsAplica && !emailAplica) {
+    return smsOk ? 'Procesado ' + fecha : 'Parcial ' + fecha + ' · SMS falló';
+  }
+
+  if (!smsAplica && emailAplica) {
+    return emailOk ? 'Procesado ' + fecha : 'Parcial ' + fecha + ' · Email falló';
+  }
+
+  return 'Procesado ' + fecha;
+}
+
+/**
  * Arma el cuerpo del correo de cumplimiento Ley 2300 usando los mismos
  * bloques modulares (cabecera, barra de estado, chips, nota, pie) que el
  * resto de notificaciones del sistema, definidos en Notificaciones.js.
- * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number, smsEnviados:number, smsFallidos:number}} datos
+ * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number, smsEnviados:number, smsFallidos:number, emailEnviados:number, emailFallidos:number, emailInvalidos:number, emailDuplicados:number, emailAbortado:boolean}} datos
  * @returns {string} HTML completo listo para MailApp.
  */
 function _construirCuerpoLey2300_(datos) {
@@ -270,13 +381,20 @@ function _construirCuerpoLey2300_(datos) {
   var smsFallidos = datos.smsFallidos || 0;
   var totalSms = smsEnviados + smsFallidos;
 
-  var mensajeInicio = totalSms > 0
-    ? `Se proces&oacute; el cumplimiento de la <strong>Ley 2300</strong> para las
-       solicitudes <strong>aprobadas</strong> desde el &uacute;ltimo corte.
-       Los SMS fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`
-    : `Se gener&oacute; el archivo adjunto con los datos de contacto por correo para dar
-       cumplimiento a la <strong>Ley 2300</strong>. No se encontraron contactos con celular
-       en este corte.`;
+  var emailEnviados = datos.emailEnviados || 0;
+  var emailFallidos = datos.emailFallidos || 0;
+  var totalEmail = emailEnviados + emailFallidos;
+
+  var mensajeInicio = `Se proces&oacute; el cumplimiento de la <strong>Ley 2300</strong> para las
+     solicitudes <strong>aprobadas</strong> desde el &uacute;ltimo corte.`;
+
+  if (totalSms > 0 && totalEmail > 0) {
+    mensajeInicio += ` Los SMS y correos electr&oacute;nicos fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`;
+  } else if (totalSms > 0) {
+    mensajeInicio += ` Los SMS fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`;
+  } else if (totalEmail > 0) {
+    mensajeInicio += ` Los correos electr&oacute;nicos fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`;
+  }
 
   var chips = [
     { label: "Corte / Periodo",         valor: datos.rangoFechas,               colorVal: _C_ROJO },
@@ -291,21 +409,44 @@ function _construirCuerpoLey2300_(datos) {
     }
   }
 
-  var notaHtml = datos.contactosCorreo > 0
-    ? `<strong style="color:#253150;">Pr&oacute;ximos pasos:</strong>
-       1) Descargar <strong>CORREOS.csv</strong> adjunto &middot;
-       2) Revisar la informaci&oacute;n &middot;
-       3) Realizar env&iacute;o de correos masivos.<br><br>
-       <strong>SMS:</strong> ya fueron enviados autom&aacute;ticamente &mdash; no se requiere acci&oacute;n manual.`
-    : `<strong style="color:#253150;">Resumen:</strong>
-       Todos los contactos fueron notificados autom&aacute;ticamente v&iacute;a SMS.
+  if (totalEmail > 0) {
+    chips.push({ label: "Email enviados", valor: String(emailEnviados), colorVal: '#16a34a' });
+    if (emailFallidos > 0) {
+      chips.push({ label: "Email fallidos", valor: String(emailFallidos), colorVal: _C_ROJO });
+    }
+  }
+
+  var notaHtml = '';
+  if (emailFallidos > 0 || smsFallidos > 0) {
+    notaHtml = `<strong style="color:#253150;">Atenci&oacute;n:</strong>
+       Algunos env&iacute;os no se pudieron completar.`;
+    if (emailFallidos > 0) {
+      notaHtml += ` Se adjunta el archivo <strong>CORREOS_FALLIDOS.csv</strong> con los destinatarios
+      que requieren gesti&oacute;n manual.`;
+    }
+    notaHtml += `<br><br><strong>Canales exitosos:</strong> no requieren acci&oacute;n adicional.`;
+  } else {
+    notaHtml = `<strong style="color:#253150;">Resumen:</strong>
+       Todos los contactos fueron notificados autom&aacute;ticamente (SMS + Email).
        No se requiere acci&oacute;n adicional para este corte.`;
+  }
+
+  if (datos.emailAbortado) {
+    notaHtml += `<br><br><strong style="color:#BD0F14;">&#9888; ALERTA:</strong>
+       El env&iacute;o de emails fue abortado por fallas masivas consecutivas.
+       Revisar Logs_Sistema para m&aacute;s detalles.`;
+  }
+
+  var barraEstadoTexto = "Procesamiento completado";
+  if (datos.emailAbortado) {
+    barraEstadoTexto = "Completado con alertas";
+  }
 
   return _envolver_([
 
     _bloque_cabecera_("Cumplimiento Ley 2300"),
 
-    _bloque_barra_estado_(_C_NAVY, "&#10003;", totalSms > 0 ? "SMS enviados automáticamente" : "Archivo generado"),
+    _bloque_barra_estado_(_C_NAVY, "&#10003;", barraEstadoTexto),
 
     _bloque_cuerpo_inicio_(
       "Hola equipo de inducciones",
