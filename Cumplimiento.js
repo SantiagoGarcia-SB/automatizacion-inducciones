@@ -162,11 +162,15 @@ function procesarDatosMejorado() {
       return;
     }
 
-    // Destinatarios derivados de CORREOS_LIDERES (Codigo.js) para no perder sincronía
-    // con la lista maestra si alguno de los dos deja de ser líder.
-    const destinatarios = CORREOS_LIDERES.filter(correo =>
-      correo === "jenny.ascanio@segurosbolivar.com" || correo === "kharen.garcia@segurosbolivar.com"
-    ).join(",");
+    // Destinatarios del reporte Ley 2300 (configurable via Script Properties)
+    // Si no está configurado, se envía a todos los líderes activos.
+    var propDestinatarios = PropertiesService.getScriptProperties().getProperty('CORREOS_LEY2300');
+    var destinatarios;
+    if (propDestinatarios && propDestinatarios.trim()) {
+      destinatarios = propDestinatarios.trim();
+    } else {
+      destinatarios = obtenerCorreosLideres().join(",");
+    }
 
     // Verificar cuota antes de enviar (Fase 2.2)
     if (!_verificarCuotaEmail_(1)) {

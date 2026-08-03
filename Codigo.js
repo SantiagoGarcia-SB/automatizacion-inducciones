@@ -8,6 +8,9 @@
 var ID_HOJA_CONTROL      = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
 var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
 var ID_CARPETA_RAIZ      = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
+// ── LEGACY: Array de respaldo (se usa solo si la pestaña USUARIOS no tiene líderes activos) ──
+// La fuente de verdad ahora es la pestaña USUARIOS (rol = LIDER).
+// Para agregar/quitar líderes, usar la vista Usuarios en la webapp.
 var CORREOS_LIDERES   = [ 
   "lady.vargas@segurosbolivar.com", 
   "jonathan.enciso@segurosbolivar.com", 

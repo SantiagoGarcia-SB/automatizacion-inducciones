@@ -123,4 +123,44 @@ function _leerPestanaUsuarios() {
 function invalidarCacheUsuario(email) {
   var cache = CacheService.getScriptCache();
   cache.remove('USR_' + email.toLowerCase().trim());
+  // También invalidar la lista de líderes ya que pudo cambiar de rol
+  cache.remove('CORREOS_LIDERES');
+}
+
+// ============================================================
+//  LISTA DINÁMICA DE CORREOS DE LÍDERES
+// ============================================================
+
+/**
+ * Obtiene los emails de todos los usuarios con rol LIDER (activos).
+ * Reemplaza el antiguo array hardcodeado CORREOS_LIDERES de Codigo.js.
+ * Usa CacheService (TTL 300s) para evitar lecturas repetidas a Sheets.
+ * @returns {string[]} Array de emails de líderes activos
+ */
+function obtenerCorreosLideres() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get('CORREOS_LIDERES');
+
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  // Cache miss → leer pestaña USUARIOS y filtrar por rol LIDER
+  var usuarios = _leerPestanaUsuarios();
+  var lideres = [];
+
+  for (var i = 0; i < usuarios.length; i++) {
+    if (usuarios[i].rol === 'LIDER' && usuarios[i].activo && usuarios[i].email) {
+      lideres.push(usuarios[i].email);
+    }
+  }
+
+  // Fallback: si no hay líderes en la pestaña, usar la variable global como respaldo
+  if (lideres.length === 0 && typeof CORREOS_LIDERES !== 'undefined' && CORREOS_LIDERES.length > 0) {
+    Logger.log('WARN: No se encontraron líderes activos en USUARIOS. Usando fallback hardcodeado.');
+    lideres = CORREOS_LIDERES;
+  }
+
+  cache.put('CORREOS_LIDERES', JSON.stringify(lideres), 300);
+  return lideres;
 }
