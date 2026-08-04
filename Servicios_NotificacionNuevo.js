@@ -38,7 +38,7 @@ function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
 
   MailApp.sendEmail({
     to: emailComercial,
-    cc: CORREOS_LIDERES.join(','),
+    cc: obtenerCorreosLideres().join(','),
     bcc: BCC_AUDITORIA,
     subject: '⚠️ Necesitamos tu ayuda · ' + arrendatario,
     htmlBody: htmlBody,
@@ -76,7 +76,7 @@ function notificarCorreccionAlAuxiliar(arrendatario, emailAuxiliar, emailComerci
 
   MailApp.sendEmail({
     to: emailAuxiliar,
-    cc: CORREOS_LIDERES.join(','),
+    cc: obtenerCorreosLideres().join(','),
     bcc: BCC_AUDITORIA,
     subject: '⚡ Corrección recibida · ' + arrendatario,
     htmlBody: htmlBody,

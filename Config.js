@@ -208,7 +208,7 @@ function verificarSaludDelSistema() {
       ].join(""));
 
       MailApp.sendEmail({
-        to:       CORREOS_LIDERES.join(","),
+        to:       obtenerCorreosLideres().join(","),
         bcc:      BCC_AUDITORIA,
         subject:  "⏱️ Lotes estancados · Inducciones El Libertador",
         htmlBody: cuerpoLideres,

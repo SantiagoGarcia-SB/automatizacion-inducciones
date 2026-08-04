@@ -501,7 +501,7 @@ if (10 < colStart || 10 > colEnd) return;
   const correoDirector  = obtenerCorreoDeDirector(emailFinal);
   const correoBackup    = obtenerCorreoDeBackup(emailFinal);
   const nombreComercial = obtenerNombreDeComercial(emailFinal);
-  const correosCC       = CORREOS_LIDERES.join(",") + (correoDirector ? "," + correoDirector : "") + (correoBackup ? "," + correoBackup : "");
+  const correosCC       = obtenerCorreosLideres().join(",") + (correoDirector ? "," + correoDirector : "") + (correoBackup ? "," + correoBackup : "");
 
   const htmlBody = _envolver_([
 
@@ -665,7 +665,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
       const correoBackup   = obtenerCorreoDeBackup(emailReal);
       
       // A3: CCs escalan según nivel
-      const ccsBase = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@"));
+      const ccsBase = [...new Set([...obtenerCorreosLideres(), correoDirector, correoBackup])].filter(e => e && e.includes("@"));
       const ccs = ccsBase.join(",");
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
@@ -822,7 +822,7 @@ function enviarRecordatoriosErrorTercerosDiario() {
       const correoDirector = obtenerCorreoDeDirector(emailReal);
       const correoBackup   = obtenerCorreoDeBackup(emailReal);
 
-      const ccsBase = [...new Set([...CORREOS_LIDERES, correoDirector, correoBackup])].filter(e => e && e.includes("@"));
+      const ccsBase = [...new Set([...obtenerCorreosLideres(), correoDirector, correoBackup])].filter(e => e && e.includes("@"));
       const ccs = ccsBase.join(",");
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
@@ -970,7 +970,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
   // ── Unificar destinatarios CC (director + líderes + backup si activo), filtrando vacíos ──
-  const correosCC = [...CORREOS_LIDERES, correoDirector, correoBackup]
+  const correosCC = [...obtenerCorreosLideres(), correoDirector, correoBackup]
     .filter(e => e && e.includes("@"))
     .join(",");
 

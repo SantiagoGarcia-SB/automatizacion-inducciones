@@ -162,9 +162,9 @@ function procesarDatosMejorado() {
       return;
     }
 
-    // Destinatarios derivados de CORREOS_LIDERES (Codigo.js) para no perder sincronía
+    // Destinatarios derivados de la hoja USUARIOS para no perder sincronía
     // con la lista maestra si alguno de los dos deja de ser líder.
-    const destinatarios = CORREOS_LIDERES.filter(correo =>
+    const destinatarios = obtenerCorreosLideres().filter(correo =>
       correo === "jenny.ascanio@segurosbolivar.com" || correo === "kharen.garcia@segurosbolivar.com"
     ).join(",");
 

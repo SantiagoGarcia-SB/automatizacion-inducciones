@@ -94,7 +94,7 @@ function crearPestanaUsuarios() {
     Logger.log('✅ USUARIOS creada vacía (no se encontró CORREOS o está vacía).');
   }
 
-  // Agregar los líderes conocidos (de CORREOS_LIDERES en Codigo.js)
+  // Agregar los líderes conocidos (de hoja USUARIOS)
   _agregarLideres(hoja, headers.length);
 
   // Agregar al admin del sistema
@@ -105,7 +105,7 @@ function crearPestanaUsuarios() {
 }
 
 /**
- * Agrega los correos de CORREOS_LIDERES como rol LIDER (si no están ya).
+ * Agrega los correos de líderes activos como rol LIDER (si no están ya).
  */
 function _agregarLideres(hoja, numCols) {
   var datosExistentes = hoja.getDataRange().getValues();
@@ -114,7 +114,7 @@ function _agregarLideres(hoja, numCols) {
     emailsExistentes[String(datosExistentes[i][0]).toLowerCase()] = true;
   }
 
-  var lideres = CORREOS_LIDERES || [];
+  var lideres = obtenerCorreosLideres();
   var filasNuevas = [];
 
   for (var j = 0; j < lideres.length; j++) {

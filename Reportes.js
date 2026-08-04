@@ -362,7 +362,7 @@ function enviarReporteGestionInducciones() {
     const correo = _construirCorreoReporteGestion_(m);
 
     MailApp.sendEmail({
-      to:       CORREOS_LIDERES.join(","),
+      to:       obtenerCorreosLideres().join(","),
       bcc:      BCC_AUDITORIA,
       subject:  correo.asunto,
       htmlBody: correo.htmlBody,
@@ -371,7 +371,7 @@ function enviarReporteGestionInducciones() {
     });
 
     Logger.log("✅ Reporte de gestión enviado a líderes.");
-    _registrarEvento_("INFO", "Reportes.js", "Reporte de gestión enviado", "Destinatarios: " + CORREOS_LIDERES.length);
+    _registrarEvento_("INFO", "Reportes.js", "Reporte de gestión enviado", "Destinatarios: " + obtenerCorreosLideres().length);
   } catch (err) {
     console.error("Error en enviarReporteGestionInducciones: " + err.message);
     _registrarEvento_("ERROR", "Reportes.js", "Error al enviar reporte de gestión", err.message);
