@@ -387,22 +387,23 @@ function inicializarApp() {
   APP_USUARIO = usuario;
   renderizarHeader(usuario);
   renderizarMenu(usuario.rol);
-  _ocultarBootOverlay();
 
   // Cache local de datos pre-cargados
   if (initData.resumen) CacheManager.set('dashboard', initData.resumen);
   if (initData.lotes) CacheManager.set('lotes', initData.lotes.datos || initData.lotes);
 
-  // Renderizar dashboard inmediatamente con datos pre-cargados (0 latencia)
+  // Si hay datos pre-cargados, renderizar dashboard y quitar overlay
   if (CacheManager.get('dashboard')) {
+    _ocultarBootOverlay();
     _renderizarDashboardConDatos(CacheManager.get('dashboard'));
-    // Activar Línea de Vida con los datos del resumen
     if (typeof actualizarLineasDeVida === 'function') {
       actualizarLineasDeVida(usuario.rol, CacheManager.get('dashboard'));
     }
   } else {
-    _mostrarSkeletonDashboard();
-    cargarDashboard();
+    // No hay datos en cache — mantener el overlay visible mientras se cargan
+    cargarDashboard(function() {
+      _ocultarBootOverlay();
+    });
   }
 }
 
@@ -531,23 +532,27 @@ function navegarA(seccion) {
   }
 }
 
-function cargarDashboard() {
+function cargarDashboard(onReady) {
   var navIdLocal = _navId;
 
   var cachedResumen = CacheManager.get('dashboard');
   if (cachedResumen) {
     _renderizarDashboardConDatos(cachedResumen);
+    if (onReady) onReady();
     return;
   }
 
-  _mostrarSkeletonDashboard();
+  // No mostrar skeleton si el overlay sigue visible (primera carga)
+  if (!onReady) _mostrarSkeletonDashboard();
 
   var timeoutId = setTimeout(function() {
     if (!_sigueVigente(navIdLocal)) return;
+    if (onReady) onReady();
     SkeletonSystem.reemplazar('viewDashboard',
       '<div class="card" style="text-align:center;padding:var(--space-8);">'
       + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
       + '<button class="btn btn--primary" onclick="cargarDashboard()">Reintentar</button></div>');
+    mostrarVista('viewDashboard');
   }, 15000);
 
   callServer('api_obtenerResumenDashboard')
@@ -555,17 +560,21 @@ function cargarDashboard() {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
       CacheManager.set('dashboard', r);
+      if (onReady) onReady();
       _renderizarDashboardConDatos(r);
+      mostrarVista('viewDashboard');
       if (typeof actualizarLineasDeVida === 'function') actualizarLineasDeVida(APP_USUARIO.rol, r);
     })
     .catch(function(err) {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
+      if (onReady) onReady();
       console.error(err);
       SkeletonSystem.reemplazar('viewDashboard',
         '<div class="card" style="text-align:center;padding:var(--space-8);">'
         + '<p style="color:var(--color-mono-500);">No pudimos cargar el resumen.</p>'
         + '<button class="btn btn--primary" onclick="cargarDashboard()">Reintentar</button></div>');
+      mostrarVista('viewDashboard');
     });
 }
 
