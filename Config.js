@@ -142,34 +142,83 @@ function verificarSaludDelSistema() {
     alertas.push("❌ No se pudo abrir el libro de Análisis: " + e.message);
   }
 
-  // ── 4. Lotes estancados (>7 días en PENDIENTE RADICAR) ──
+  // ── 4. Lotes estancados (>7 días en estados críticos) ──
+  const estadosEstancamiento = ["PENDIENTE RADICAR", "PENDIENTE ASIGNAR", "ERROR EN TERCEROS", "EN ANÁLISIS"];
+  var lotesEstancadosPorEstado = {};
   try {
     const ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
     const hoja = ss.getSheetByName("Control_General");
     const data = hoja.getDataRange().getValues();
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-    const lotesEstancados = new Set();
+
+    estadosEstancamiento.forEach(function(est) { lotesEstancadosPorEstado[est] = []; });
 
     for (let i = 1; i < data.length; i++) {
       const idLote = String(data[i][0] || "").trim();
       const estado = String(data[i][9] || "").trim().toUpperCase();
       const fechaIngreso = data[i][2];
 
-      if (!idLote || estado !== "PENDIENTE RADICAR") continue;
+      if (!idLote || !estadosEstancamiento.includes(estado)) continue;
       if (!(fechaIngreso instanceof Date)) continue;
 
       const dias = Math.floor((hoy.getTime() - fechaIngreso.getTime()) / (1000 * 60 * 60 * 24));
-      if (dias > 7) lotesEstancados.add(idLote);
+      if (dias > 7) {
+        lotesEstancadosPorEstado[estado].push({ id: idLote, dias: dias });
+      }
     }
 
-    if (lotesEstancados.size > 0) {
-      alertas.push("⏱️ " + lotesEstancados.size + " lote(s) llevan >7 días en PENDIENTE RADICAR: " +
-        Array.from(lotesEstancados).slice(0, 5).join(", ") +
-        (lotesEstancados.size > 5 ? " (y más...)" : ""));
+    const totalEstancados = Object.values(lotesEstancadosPorEstado).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+
+    if (totalEstancados > 0) {
+      alertas.push("⏱️ " + totalEstancados + " lote(s) llevan >7 días estancados en estados críticos.");
     }
   } catch (e) {
     alertas.push("⚠️ Error al verificar lotes estancados: " + e.message);
+  }
+
+  // ── 4b. Enviar alerta de lotes estancados a líderes ──
+  try {
+    const totalEstancados = Object.values(lotesEstancadosPorEstado).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+    if (totalEstancados > 0) {
+      var detalleHtml = "";
+      estadosEstancamiento.forEach(function(est) {
+        var lotes = lotesEstancadosPorEstado[est];
+        if (lotes.length === 0) return;
+        detalleHtml += "<b>" + est + " (" + lotes.length + ")</b><br>";
+        lotes.sort(function(a, b) { return b.dias - a.dias; });
+        lotes.slice(0, 10).forEach(function(l) {
+          detalleHtml += "• " + l.id + " — " + l.dias + " días<br>";
+        });
+        if (lotes.length > 10) {
+          detalleHtml += "<i>... y " + (lotes.length - 10) + " más</i><br>";
+        }
+        detalleHtml += "<br>";
+      });
+
+      var cuerpoLideres = _envolver_([
+        _bloque_cabecera_("Lotes estancados"),
+        _bloque_barra_estado_("#E65100", "&#9200;", totalEstancados + " lote(s) con más de 7 días sin avance"),
+        _bloque_cuerpo_inicio_(
+          "Detalle por estado",
+          "Los siguientes lotes llevan más de 7 días sin cambio de estado y requieren atención:"
+        ),
+        _bloque_nota_(detalleHtml),
+        _bloque_pie_()
+      ].join(""));
+
+      MailApp.sendEmail({
+        to:       CORREOS_LIDERES.join(","),
+        bcc:      BCC_AUDITORIA,
+        subject:  "⏱️ Lotes estancados · Inducciones El Libertador",
+        htmlBody: cuerpoLideres,
+        name:     "Inducciones · El Libertador"
+      });
+
+      _registrarEvento_("WARN", "Config.js", "Alerta lotes estancados enviada a líderes", "Total: " + totalEstancados);
+    }
+  } catch (e) {
+    alertas.push("⚠️ Error al enviar alerta de lotes estancados a líderes: " + e.message);
   }
 
   // ── Resultado ──
@@ -194,7 +243,7 @@ function verificarSaludDelSistema() {
     to:       BCC_AUDITORIA,
     subject:  "🚨 Alerta de sistema · Inducciones El Libertador",
     htmlBody: cuerpoHtml,
-    name:     "Inducciones · Monitor de Salud"
+    name:     "Inducciones · El Libertador"
   });
 
   _registrarEvento_("WARN", "Config.js", "Alertas de salud detectadas (" + alertas.length + ")", alertas.join(" | "));
