@@ -164,9 +164,13 @@ function verificarSaludDelSistema() {
 
       const dias = Math.floor((hoy.getTime() - fechaIngreso.getTime()) / (1000 * 60 * 60 * 24));
       if (dias > 7) {
-        // Quedarse solo con el mayor número de días por lote
-        if (!lotesEstancadosPorEstado[estado][idLote] || lotesEstancadosPorEstado[estado][idLote] < dias) {
-          lotesEstancadosPorEstado[estado][idLote] = dias;
+        if (!lotesEstancadosPorEstado[estado][idLote]) {
+          lotesEstancadosPorEstado[estado][idLote] = { dias: dias, contratos: 1 };
+        } else {
+          lotesEstancadosPorEstado[estado][idLote].contratos++;
+          if (dias > lotesEstancadosPorEstado[estado][idLote].dias) {
+            lotesEstancadosPorEstado[estado][idLote].dias = dias;
+          }
         }
       }
     }
@@ -194,10 +198,10 @@ function verificarSaludDelSistema() {
         var ids = Object.keys(lotesObj);
         if (ids.length === 0) return;
         // Ordenar por días desc
-        ids.sort(function(a, b) { return lotesObj[b] - lotesObj[a]; });
+        ids.sort(function(a, b) { return lotesObj[b].dias - lotesObj[a].dias; });
         detalleHtml += "<b>" + est + " (" + ids.length + ")</b><br>";
         ids.slice(0, 10).forEach(function(id) {
-          detalleHtml += "• " + id + " — " + lotesObj[id] + " días<br>";
+          detalleHtml += "• " + id + " — " + lotesObj[id].dias + " días, " + lotesObj[id].contratos + " contrato(s)<br>";
         });
         if (ids.length > 10) {
           detalleHtml += "<i>... y " + (ids.length - 10) + " más</i><br>";
