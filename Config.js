@@ -152,7 +152,7 @@ function verificarSaludDelSistema() {
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
 
-    estadosEstancamiento.forEach(function(est) { lotesEstancadosPorEstado[est] = []; });
+    estadosEstancamiento.forEach(function(est) { lotesEstancadosPorEstado[est] = {}; });
 
     for (let i = 1; i < data.length; i++) {
       const idLote = String(data[i][0] || "").trim();
@@ -164,11 +164,16 @@ function verificarSaludDelSistema() {
 
       const dias = Math.floor((hoy.getTime() - fechaIngreso.getTime()) / (1000 * 60 * 60 * 24));
       if (dias > 7) {
-        lotesEstancadosPorEstado[estado].push({ id: idLote, dias: dias });
+        // Quedarse solo con el mayor número de días por lote
+        if (!lotesEstancadosPorEstado[estado][idLote] || lotesEstancadosPorEstado[estado][idLote] < dias) {
+          lotesEstancadosPorEstado[estado][idLote] = dias;
+        }
       }
     }
 
-    const totalEstancados = Object.values(lotesEstancadosPorEstado).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+    const totalEstancados = Object.keys(lotesEstancadosPorEstado).reduce(function(sum, est) {
+      return sum + Object.keys(lotesEstancadosPorEstado[est]).length;
+    }, 0);
 
     if (totalEstancados > 0) {
       alertas.push("⏱️ " + totalEstancados + " lote(s) llevan >7 días estancados en estados críticos.");
@@ -179,19 +184,23 @@ function verificarSaludDelSistema() {
 
   // ── 4b. Enviar alerta de lotes estancados a líderes ──
   try {
-    const totalEstancados = Object.values(lotesEstancadosPorEstado).reduce(function(sum, arr) { return sum + arr.length; }, 0);
+    const totalEstancados = Object.keys(lotesEstancadosPorEstado).reduce(function(sum, est) {
+      return sum + Object.keys(lotesEstancadosPorEstado[est]).length;
+    }, 0);
     if (totalEstancados > 0) {
       var detalleHtml = "";
       estadosEstancamiento.forEach(function(est) {
-        var lotes = lotesEstancadosPorEstado[est];
-        if (lotes.length === 0) return;
-        detalleHtml += "<b>" + est + " (" + lotes.length + ")</b><br>";
-        lotes.sort(function(a, b) { return b.dias - a.dias; });
-        lotes.slice(0, 10).forEach(function(l) {
-          detalleHtml += "• " + l.id + " — " + l.dias + " días<br>";
+        var lotesObj = lotesEstancadosPorEstado[est];
+        var ids = Object.keys(lotesObj);
+        if (ids.length === 0) return;
+        // Ordenar por días desc
+        ids.sort(function(a, b) { return lotesObj[b] - lotesObj[a]; });
+        detalleHtml += "<b>" + est + " (" + ids.length + ")</b><br>";
+        ids.slice(0, 10).forEach(function(id) {
+          detalleHtml += "• " + id + " — " + lotesObj[id] + " días<br>";
         });
-        if (lotes.length > 10) {
-          detalleHtml += "<i>... y " + (lotes.length - 10) + " más</i><br>";
+        if (ids.length > 10) {
+          detalleHtml += "<i>... y " + (ids.length - 10) + " más</i><br>";
         }
         detalleHtml += "<br>";
       });
