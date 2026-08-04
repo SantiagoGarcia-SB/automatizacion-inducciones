@@ -119,7 +119,7 @@ function enviarSmsMasivoLey2300(destinatarios) {
  * Reemplaza la carga manual de CSV de celulares en Infobip.
  * Se integra con procesarDatosMejorado() de Cumplimiento.js.
  * @param {Array} datosCelulares - Array de filas [NOMBRE, CELULAR, INMOBILIARIA]
- * @returns {{enviados:number, fallidos:number}}
+ * @returns {{enviados:number, fallidos:number, errores:Array<{celular:string, nombre:string, error:string}>}}
  */
 function procesarEnvioSmsLey2300(datosCelulares) {
   if (!datosCelulares || datosCelulares.length <= 1) {

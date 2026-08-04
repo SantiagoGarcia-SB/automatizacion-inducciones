@@ -94,14 +94,17 @@ Ejecutar la función `testEnvioLey2300()` desde el editor de Apps Script (si exi
 ## Comportamiento esperado
 
 - Se ejecuta **cada 15 días** junto con el envío de SMS, dentro de `procesarDatosMejorado()`
-- El orden de ejecución es: SMS → Email → Reporte a líderes → Marcado de filas
+- **Prioridad de canal:** SMS es el canal principal. Email actúa como respaldo (fallback).
+- El orden de ejecución es: SMS (prioridad) → Fallback de SMS fallidos a Email → Email directo (sin celular) → Reporte a líderes → Marcado de filas
+- Si un contacto tiene celular, se intenta primero por SMS. Si el SMS falla y el contacto también tiene correo, se reintenta automáticamente por email.
+- Si un contacto no tiene celular pero sí correo, se envía directamente por email.
 - Si faltan las propiedades de email (`INFOBIP_EMAIL_FROM` o `INFOBIP_EMAIL_TEMPLATE_ID`), el módulo registra un error en `Logs_Sistema` pero **no interrumpe** el flujo de SMS ni el marcado de filas
-- Los resultados del envío de email aparecen en el reporte quincenal enviado a líderes (jenny.ascanio@segurosbolivar.com y kharen.garcia@segurosbolivar.com)
+- Los resultados del envío aparecen en el reporte quincenal enviado a líderes (jenny.ascanio@segurosbolivar.com y kharen.garcia@segurosbolivar.com)
 - Las filas se marcan en la columna "Estado Automatización" con el resultado combinado:
-  - `Procesado {fecha}` — todos los canales que aplican fueron exitosos
-  - `Parcial {fecha} · Email falló` — SMS exitoso, email falló
-  - `Parcial {fecha} · SMS falló` — email exitoso, SMS falló
-  - `Parcial {fecha} · SMS y Email fallaron` — ambos canales fallaron
+  - `Procesado {fecha}` — la persona fue notificada (por SMS exitoso, o por email fallback/directo exitoso)
+  - `Parcial {fecha} · SMS falló` — SMS falló y no había correo de respaldo
+  - `Parcial {fecha} · Email falló` — contacto sin celular y email falló
+  - `Parcial {fecha} · SMS y Email fallaron` — SMS falló y el email de respaldo también falló
 
 ---
 

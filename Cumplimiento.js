@@ -2,9 +2,10 @@
  * @OnlyCurrentDoc
  *
  * Cumplimiento Ley 2300: procesa solicitudes aprobadas en "registro analisis".
- * - Contactos con celular → SMS enviados automáticamente vía Infobip (API).
- * - Contactos con correo  → Email enviados automáticamente vía Infobip (API).
- * Notifica a líderes con resumen del corte. Corre cada 15 días.
+ * - PRIORIDAD: Contactos con celular → SMS enviados automáticamente vía Infobip (API).
+ * - FALLBACK:  Si el SMS falla y el contacto tiene correo → se reintenta por Email vía Infobip.
+ * - DIRECTO:   Contactos sin celular pero con correo → Email enviado directamente.
+ * Notifica a líderes con resumen del corte. Corre cada sábado.
  */
 function procesarDatosMejorado() {
   // ── 0. LOCK — evita chocar con Sincronizacion.js mientras toca 'registro analisis' ──
@@ -23,19 +24,10 @@ function procesarDatosMejorado() {
       return;
     }
 
-    // Verificación de periodicidad (cada 15 días)
+    // Verificación de periodicidad removida — ahora se ejecuta cada sábado vía trigger semanal.
+    // La propiedad 'ultimaEjecucion' se mantiene como registro histórico.
     const propiedades = PropertiesService.getScriptProperties();
-    const ultimaEjecucion = propiedades.getProperty('ultimaEjecucion');
     const hoy = new Date();
-
-    if (ultimaEjecucion) {
-      const fechaUltima = new Date(ultimaEjecucion);
-      const diasDiferencia = (hoy.getTime() - fechaUltima.getTime()) / (1000 * 3600 * 24);
-      if (diasDiferencia < 15) {
-        Logger.log(`Aún no han pasado 15 días. Faltan ${15 - Math.floor(diasDiferencia)} días.`);
-        return;
-      }
-    }
 
     const datos = retry(() => hoja.getDataRange().getValues());
     const encabezados = datos[0];
@@ -77,6 +69,10 @@ function procesarDatosMejorado() {
     const filasParaMarcar = [];
     const fechasProcesadas = []; // Array para guardar las fechas del periodo
 
+    // Mapa de fallback: celular normalizado → {nombre, correo, inmobiliaria}
+    // Permite reenviar por email si el SMS falla y la persona tiene correo
+    const fallbackEmailPorCelular = {};
+
     // Iterar sobre cada fila de datos
     for (let i = 1; i < datos.length; i++) {
       const fila = datos[i];
@@ -108,10 +104,27 @@ function procesarDatosMejorado() {
 
         personas.forEach(persona => {
           if (persona.nombre) {
-            if (persona.correo && persona.correo.toString().includes('@')) {
-              datosCorreos.push([persona.nombre, persona.correo, inmobiliaria]);
-            } else if (persona.tel) {
+            const tieneCorreo = persona.correo && persona.correo.toString().includes('@');
+            const tieneTel = persona.tel && String(persona.tel).trim() !== '';
+
+            if (tieneTel) {
+              // PRIORIDAD: SMS si hay celular
               datosCelulares.push([persona.nombre, persona.tel.toString(), inmobiliaria]);
+
+              // Guardar correo como fallback en caso de que SMS falle
+              if (tieneCorreo) {
+                var telNorm = String(persona.tel).replace(/[\s\-\(\)]/g, '');
+                if (telNorm.startsWith('3') && telNorm.length === 10) telNorm = '57' + telNorm;
+                if (!telNorm.startsWith('57')) telNorm = '57' + telNorm;
+                fallbackEmailPorCelular[telNorm] = {
+                  nombre: persona.nombre,
+                  correo: persona.correo.toString().trim(),
+                  inmobiliaria: inmobiliaria
+                };
+              }
+            } else if (tieneCorreo) {
+              // FALLBACK DIRECTO: solo email si no hay celular
+              datosCorreos.push([persona.nombre, persona.correo, inmobiliaria]);
             }
           }
         });
@@ -120,13 +133,30 @@ function procesarDatosMejorado() {
       }
     }
 
-    // ── Envío automático de SMS (reemplaza la carga manual de CSV en Infobip) ──
-    var resultadoSms = { enviados: 0, fallidos: 0 };
+    // ── Envío automático de SMS (PRIORIDAD — reemplaza la carga manual de CSV en Infobip) ──
+    var resultadoSms = { enviados: 0, fallidos: 0, errores: [] };
     if (datosCelulares.length > 1) {
       resultadoSms = procesarEnvioSmsLey2300(datosCelulares);
     }
 
-    // ── Envío automático de Email (reemplaza la carga manual de CSV) ──
+    // ── Fallback: SMS fallidos con correo disponible → se reenvían por email ──
+    var fallbacksAgregados = 0;
+    if (resultadoSms.errores && resultadoSms.errores.length > 0) {
+      resultadoSms.errores.forEach(function(e) {
+        var celNorm = String(e.celular || '').trim();
+        var fb = fallbackEmailPorCelular[celNorm];
+        if (fb) {
+          datosCorreos.push([fb.nombre, fb.correo, fb.inmobiliaria]);
+          fallbacksAgregados++;
+        }
+      });
+      if (fallbacksAgregados > 0) {
+        _registrarEvento_("INFO", "Cumplimiento.js", "Fallback SMS→Email activado",
+          fallbacksAgregados + " contacto(s) con SMS fallido serán reintentados por email.");
+      }
+    }
+
+    // ── Envío automático de Email (fallback de SMS fallidos + contactos sin celular) ──
     var resultadoEmail = { enviados: 0, fallidos: 0, invalidosFormato: 0, duplicadosEliminados: 0, errores: [], abortado: false };
     if (datosCorreos.length > 1) {
       try {
@@ -137,23 +167,34 @@ function procesarDatosMejorado() {
       }
     }
 
-    // Adjuntar CSV solo de los fallidos para gestión manual
+    // Adjuntar CSV solo de los fallidos (ambos canales fallaron) para gestión manual
     const adjuntos = [];
+    // Contactos donde falló todo: SMS falló y no tenían correo, o email directo falló
+    var contactosFallidosTotales = [];
     if (resultadoEmail.errores && resultadoEmail.errores.length > 0) {
-      // CSV solo de los fallidos para gestión manual
-      var csvFallidos = [['NOMBRE', 'CORREO', 'INMOBILIARIA']];
       resultadoEmail.errores.forEach(function(e) {
-        // Find the inmobiliaria for this failed email
         for (var idx = 1; idx < datosCorreos.length; idx++) {
           if (String(datosCorreos[idx][1] || '').trim().toLowerCase() === e.email.toLowerCase()) {
-            csvFallidos.push([e.nombre, e.email, String(datosCorreos[idx][2] || '').trim()]);
+            contactosFallidosTotales.push([e.nombre, e.email, String(datosCorreos[idx][2] || '').trim()]);
             break;
           }
         }
       });
-      if (csvFallidos.length > 1) {
-        adjuntos.push(_csvBlob_(csvFallidos, 'CORREOS_FALLIDOS.csv'));
-      }
+    }
+    // SMS fallidos sin correo de fallback → requieren gestión manual
+    if (resultadoSms.errores) {
+      resultadoSms.errores.forEach(function(e) {
+        var celNorm = String(e.celular || '').trim();
+        if (!fallbackEmailPorCelular[celNorm]) {
+          // No tenía correo para fallback
+          contactosFallidosTotales.push([e.nombre, e.celular, 'SMS sin email de respaldo']);
+        }
+      });
+    }
+    if (contactosFallidosTotales.length > 0) {
+      var csvFallidos = [['NOMBRE', 'CONTACTO', 'DETALLE']];
+      csvFallidos = csvFallidos.concat(contactosFallidosTotales);
+      adjuntos.push(_csvBlob_(csvFallidos, 'CONTACTOS_FALLIDOS.csv'));
     }
 
     // Si no hay nada que reportar (ni SMS ni Email procesados)
@@ -203,7 +244,8 @@ function procesarDatosMejorado() {
       emailFallidos: resultadoEmail.fallidos,
       emailInvalidos: resultadoEmail.invalidosFormato,
       emailDuplicados: resultadoEmail.duplicadosEliminados,
-      emailAbortado: resultadoEmail.abortado
+      emailAbortado: resultadoEmail.abortado,
+      fallbacksActivados: fallbacksAgregados
     });
 
     // No se envuelve en retry(): un reintento tras un fallo ambiguo podría duplicar
@@ -228,6 +270,19 @@ function procesarDatosMejorado() {
       resultadoEmail.errores.forEach(function(e) { emailFallidos.add(e.email.toLowerCase().trim()); });
     }
 
+    // Set de SMS fallidos que fueron exitosamente enviados por email (fallback exitoso)
+    var fallbackExitoso = new Set();
+    if (resultadoSms.errores) {
+      resultadoSms.errores.forEach(function(e) {
+        var celNorm = String(e.celular || '').trim();
+        var fb = fallbackEmailPorCelular[celNorm];
+        if (fb && !emailFallidos.has(fb.correo.toLowerCase().trim())) {
+          // El SMS falló pero el email de fallback fue exitoso
+          fallbackExitoso.add(celNorm);
+        }
+      });
+    }
+
     // Marcar filas con resultado combinado
     const fechaMarca = Utilities.formatDate(new Date(), "GMT-5", "yyyy-MM-dd HH:mm:ss");
     const primeraFila = filasParaMarcar[0];
@@ -236,11 +291,11 @@ function procesarDatosMejorado() {
     const valoresMarca = retry(() => rangoMarca.getValues());
     const filasSet = new Set(filasParaMarcar);
 
-    // Para cada fila, re-evaluar qué personas tenían qué canales y si fallaron
+    // Para cada fila, evaluar si las personas fueron notificadas exitosamente
     for (let f = primeraFila; f <= ultimaFila; f++) {
       if (!filasSet.has(f)) continue;
 
-      var filaData = datos[f - 1]; // datos[0] = headers, fila 2 del sheet = datos[1], etc.
+      var filaData = datos[f - 1];
       var personasFila = [
         { tel: String(filaData[colIndex.telInq] || '').trim(), correo: String(filaData[colIndex.correoInq] || '').trim() },
         { tel: String(filaData[colIndex.telCoa1] || '').trim(), correo: String(filaData[colIndex.correoCoa1] || '').trim() },
@@ -250,41 +305,71 @@ function procesarDatosMejorado() {
         { tel: String(filaData[colIndex.telCoa5] || '').trim(), correo: String(filaData[colIndex.correoCoa5] || '').trim() },
       ];
 
-      // Determinar peor caso entre todas las personas de la fila
-      var filaTeníaSms = false;
-      var filaTeníaEmail = false;
-      var filaSmsOk = true;
-      var filaEmailOk = true;
+      // Nueva lógica: SMS es prioritario. Si falla, email es fallback.
+      // Una persona se considera "notificada" si:
+      //   - SMS exitoso, O
+      //   - SMS falló pero email fallback fue exitoso, O
+      //   - No tenía celular pero email directo fue exitoso
+      var filaNotificada = true; // optimista — se vuelve false si alguna persona falla completamente
+      var filaTeníaContacto = false;
+      var filaUsóSms = false;
+      var filaUsóEmail = false;
+      var filaFalloTotal = false;
 
       personasFila.forEach(function(p) {
-        if (p.correo && p.correo.includes('@')) {
-          filaTeníaEmail = true;
-          if (emailFallidos.has(p.correo.toLowerCase().trim())) {
-            filaEmailOk = false;
-          }
-        } else if (p.tel) {
-          filaTeníaSms = true;
+        var tieneTel = p.tel && p.tel !== '';
+        var tieneCorreo = p.correo && p.correo.includes('@');
+
+        if (!tieneTel && !tieneCorreo) return; // persona sin datos de contacto, ignorar
+
+        filaTeníaContacto = true;
+
+        if (tieneTel) {
+          filaUsóSms = true;
           var telNorm = p.tel.replace(/[\s\-\(\)]/g, '');
           if (telNorm.startsWith('3') && telNorm.length === 10) telNorm = '57' + telNorm;
           if (!telNorm.startsWith('57')) telNorm = '57' + telNorm;
+
           if (smsFallidos.has(telNorm)) {
-            filaSmsOk = false;
+            // SMS falló — verificar fallback por email
+            if (tieneCorreo && fallbackExitoso.has(telNorm)) {
+              filaUsóEmail = true; // se notificó por email (fallback exitoso)
+            } else {
+              filaFalloTotal = true; // ni SMS ni email funcionaron
+            }
+          }
+          // Si no está en smsFallidos → SMS exitoso, persona notificada
+        } else if (tieneCorreo) {
+          filaUsóEmail = true;
+          if (emailFallidos.has(p.correo.toLowerCase().trim())) {
+            filaFalloTotal = true;
           }
         }
       });
 
-      var resSms = filaTeníaSms ? { ok: filaSmsOk } : null;
-      var resEmail = filaTeníaEmail ? { ok: filaEmailOk } : null;
+      // Generar marca basada en resultado
+      var marca;
+      if (!filaTeníaContacto) {
+        marca = 'Procesado ' + fechaMarca; // sin datos de contacto, nada que hacer
+      } else if (!filaFalloTotal) {
+        marca = 'Procesado ' + fechaMarca;
+      } else if (filaUsóSms && filaUsóEmail) {
+        marca = 'Parcial ' + fechaMarca + ' · SMS y Email fallaron';
+      } else if (filaUsóSms) {
+        marca = 'Parcial ' + fechaMarca + ' · SMS falló';
+      } else {
+        marca = 'Parcial ' + fechaMarca + ' · Email falló';
+      }
 
-      valoresMarca[f - primeraFila][0] = _generarMarcaEstado(resSms, resEmail, fechaMarca);
+      valoresMarca[f - primeraFila][0] = marca;
     }
 
     retry(() => rangoMarca.setValues(valoresMarca));
 
     propiedades.setProperty('ultimaEjecucion', hoy.toUTCString());
-    Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Email enviados: ${resultadoEmail.enviados} | Email fallidos: ${resultadoEmail.fallidos} | Asunto: ${asunto}`);
+    Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Fallbacks SMS→Email: ${fallbacksAgregados} | Email enviados: ${resultadoEmail.enviados} | Email fallidos: ${resultadoEmail.fallidos} | Asunto: ${asunto}`);
     _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente",
-      "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Email: " + resultadoEmail.enviados + "/" + (resultadoEmail.enviados + resultadoEmail.fallidos) + " | Asunto: " + asunto);
+      "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Fallbacks: " + fallbacksAgregados + " | Email: " + resultadoEmail.enviados + "/" + (resultadoEmail.enviados + resultadoEmail.fallidos) + " | Asunto: " + asunto);
 
   } catch (err) {
     Logger.log(`Error en procesarDatosMejorado: ${err.message}`);
@@ -297,25 +382,22 @@ function procesarDatosMejorado() {
 /**
  * Ejecutar UNA VEZ, manualmente, desde el editor de Apps Script
  * (seleccionar esta función en el desplegable > Ejecutar) para crear
- * el trigger de tiempo de procesarDatosMejorado. Es idempotente: si el
- * trigger ya existe, no crea uno duplicado.
+ * el trigger semanal de procesarDatosMejorado (cada sábado a las 6am).
+ * Es idempotente: elimina triggers anteriores y crea uno nuevo.
  */
 function configurarTriggerCumplimiento() {
-  const yaExiste = ScriptApp.getProjectTriggers()
-    .some(t => t.getHandlerFunction() === 'procesarDatosMejorado');
-
-  if (yaExiste) {
-    Logger.log('El trigger de procesarDatosMejorado ya existe. No se creó uno nuevo.');
-    return;
-  }
+  // Eliminar triggers anteriores de esta función (evita duplicados o triggers legacy de 15 días)
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'procesarDatosMejorado')
+    .forEach(t => ScriptApp.deleteTrigger(t));
 
   ScriptApp.newTrigger('procesarDatosMejorado')
     .timeBased()
-    .everyDays(15)
-    .atHour(6)
+    .onWeekDay(ScriptApp.WeekDay.SATURDAY)
+    .atHour(9)
     .create();
 
-  Logger.log('Trigger creado: procesarDatosMejorado cada 15 días, alrededor de las 6am (America/Bogota).');
+  Logger.log('Trigger creado: procesarDatosMejorado cada sábado a las 9am (America/Bogota).');
 }
 
 /**
@@ -377,7 +459,7 @@ function _generarMarcaEstado(resultadoSms, resultadoEmail, fecha) {
  * Arma el cuerpo del correo de cumplimiento Ley 2300 usando los mismos
  * bloques modulares (cabecera, barra de estado, chips, nota, pie) que el
  * resto de notificaciones del sistema, definidos en Notificaciones.js.
- * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number, smsEnviados:number, smsFallidos:number, emailEnviados:number, emailFallidos:number, emailInvalidos:number, emailDuplicados:number, emailAbortado:boolean}} datos
+ * @param {{rangoFechas:string, contratos:number, contactosCorreo:number, contactosCelular:number, smsEnviados:number, smsFallidos:number, emailEnviados:number, emailFallidos:number, emailInvalidos:number, emailDuplicados:number, emailAbortado:boolean, fallbacksActivados:number}} datos
  * @returns {string} HTML completo listo para MailApp.
  */
 function _construirCuerpoLey2300_(datos) {
@@ -389,8 +471,12 @@ function _construirCuerpoLey2300_(datos) {
   var emailFallidos = datos.emailFallidos || 0;
   var totalEmail = emailEnviados + emailFallidos;
 
+  var fallbacksActivados = datos.fallbacksActivados || 0;
+
   var mensajeInicio = `Se proces&oacute; el cumplimiento de la <strong>Ley 2300</strong> para las
-     solicitudes <strong>aprobadas</strong> desde el &uacute;ltimo corte.`;
+     solicitudes <strong>aprobadas</strong> desde el &uacute;ltimo corte.
+     <br><br><strong>Prioridad:</strong> SMS como canal principal. Email como respaldo
+     (si el SMS falla o el contacto no tiene celular).`;
 
   if (totalSms > 0 && totalEmail > 0) {
     mensajeInicio += ` Los SMS y correos electr&oacute;nicos fueron enviados autom&aacute;ticamente v&iacute;a Infobip.`;
@@ -403,7 +489,7 @@ function _construirCuerpoLey2300_(datos) {
   var chips = [
     { label: "Corte / Periodo",         valor: datos.rangoFechas,               colorVal: _C_ROJO },
     { label: "Contratos incluidos",     valor: String(datos.contratos)                             },
-    { label: "Contactos con correo",    valor: String(datos.contactosCorreo)                       }
+    { label: "Contactos con celular",   valor: String(datos.contactosCelular)                      }
   ];
 
   if (totalSms > 0) {
@@ -413,25 +499,36 @@ function _construirCuerpoLey2300_(datos) {
     }
   }
 
+  if (fallbacksActivados > 0) {
+    chips.push({ label: "Fallback SMS→Email", valor: String(fallbacksActivados), colorVal: '#d97706' });
+  }
+
   if (totalEmail > 0) {
-    chips.push({ label: "Email enviados", valor: String(emailEnviados), colorVal: '#16a34a' });
+    chips.push({ label: "Email enviados (respaldo)", valor: String(emailEnviados), colorVal: '#16a34a' });
     if (emailFallidos > 0) {
       chips.push({ label: "Email fallidos", valor: String(emailFallidos), colorVal: _C_ROJO });
     }
+  }
+
+  if (datos.contactosCorreo > 0 && totalEmail === 0 && fallbacksActivados === 0) {
+    chips.push({ label: "Contactos solo email (sin celular)", valor: String(datos.contactosCorreo) });
   }
 
   var notaHtml = '';
   if (emailFallidos > 0 || smsFallidos > 0) {
     notaHtml = `<strong style="color:#253150;">Atenci&oacute;n:</strong>
        Algunos env&iacute;os no se pudieron completar.`;
+    if (fallbacksActivados > 0) {
+      notaHtml += ` De los SMS fallidos, <strong>${fallbacksActivados}</strong> fueron reintentados por email.`;
+    }
     if (emailFallidos > 0) {
-      notaHtml += ` Se adjunta el archivo <strong>CORREOS_FALLIDOS.csv</strong> con los destinatarios
+      notaHtml += ` Se adjunta el archivo <strong>CONTACTOS_FALLIDOS.csv</strong> con los destinatarios
       que requieren gesti&oacute;n manual.`;
     }
     notaHtml += `<br><br><strong>Canales exitosos:</strong> no requieren acci&oacute;n adicional.`;
   } else {
     notaHtml = `<strong style="color:#253150;">Resumen:</strong>
-       Todos los contactos fueron notificados autom&aacute;ticamente (SMS + Email).
+       Todos los contactos fueron notificados exitosamente (SMS prioritario, Email como respaldo).
        No se requiere acci&oacute;n adicional para este corte.`;
   }
 
