@@ -23,20 +23,6 @@ function procesarDatosMejorado() {
       return;
     }
 
-    // Verificación de periodicidad (cada 15 días)
-    const propiedades = PropertiesService.getScriptProperties();
-    const ultimaEjecucion = propiedades.getProperty('ultimaEjecucion');
-    const hoy = new Date();
-
-    if (ultimaEjecucion) {
-      const fechaUltima = new Date(ultimaEjecucion);
-      const diasDiferencia = (hoy.getTime() - fechaUltima.getTime()) / (1000 * 3600 * 24);
-      if (diasDiferencia < 15) {
-        Logger.log(`Aún no han pasado 15 días. Faltan ${15 - Math.floor(diasDiferencia)} días.`);
-        return;
-      }
-    }
-
     const datos = retry(() => hoja.getDataRange().getValues());
     const encabezados = datos[0];
 
@@ -277,7 +263,6 @@ function procesarDatosMejorado() {
 
     retry(() => rangoMarca.setValues(valoresMarca));
 
-    propiedades.setProperty('ultimaEjecucion', hoy.toUTCString());
     Logger.log(`Proceso completado. Filas: ${filasParaMarcar.length} | SMS enviados: ${resultadoSms.enviados} | SMS fallidos: ${resultadoSms.fallidos} | Email enviados: ${resultadoEmail.enviados} | Email fallidos: ${resultadoEmail.fallidos} | Asunto: ${asunto}`);
     _registrarEvento_("INFO", "Cumplimiento.js", "Ley 2300 procesada exitosamente",
       "Filas: " + filasParaMarcar.length + " | SMS: " + resultadoSms.enviados + "/" + (resultadoSms.enviados + resultadoSms.fallidos) + " | Email: " + resultadoEmail.enviados + "/" + (resultadoEmail.enviados + resultadoEmail.fallidos) + " | Asunto: " + asunto);
