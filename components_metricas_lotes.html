@@ -1,0 +1,1270 @@
+<style>
+/**
+ * ============================================================
+ * Métricas Operativas de Lotes — Estilos del componente
+ * ============================================================
+ */
+.metricas-lotes__filtros {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.metricas-lotes__input-date {
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--color-mono-300);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  background: var(--color-mono-0);
+  color: var(--color-mono-900);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-in-out),
+              box-shadow var(--duration-fast) var(--ease-in-out);
+}
+
+.metricas-lotes__input-date:focus {
+  border-color: var(--color-primary-navy);
+  box-shadow: 0 0 0 3px rgba(37, 49, 80, 0.08);
+  outline: none;
+}
+
+.metricas-lotes__filtro-error {
+  font-size: var(--text-xs);
+  color: var(--color-primary-red);
+  width: 100%;
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.metricas-lotes__chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  padding: var(--space-2) 0;
+}
+
+.metricas-lotes__chips-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  color: var(--color-mono-500);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  margin-right: var(--space-2);
+}
+
+.metricas-lotes__chip {
+  padding: var(--space-2) var(--space-4);
+  border: 1.5px solid var(--color-mono-200);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--color-mono-600);
+  background: var(--color-mono-0);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-in-out);
+  white-space: nowrap;
+}
+
+.metricas-lotes__chip:hover {
+  border-color: var(--color-primary-navy);
+  color: var(--color-primary-navy);
+  background: rgba(37, 49, 80, 0.03);
+}
+
+.metricas-lotes__chip--active {
+  background: var(--color-primary-navy);
+  color: var(--color-mono-0);
+  border-color: var(--color-primary-navy);
+}
+
+.metricas-lotes__chip--active:hover {
+  background: var(--color-primary-navy);
+  color: var(--color-mono-0);
+}
+
+.metricas-lotes__kpis-group {
+  margin-bottom: var(--space-3);
+}
+
+.metricas-lotes__kpis-group-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-mono-400);
+  margin-bottom: var(--space-2);
+  padding-left: var(--space-1);
+}
+
+.metricas-lotes__kpis--4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+.metricas-lotes__kpis--5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-3);
+}
+
+.metricas-lotes__kpi {
+  background: var(--color-mono-0);
+  border-radius: var(--radius-md);
+  padding: var(--space-5) var(--space-4);
+  text-align: center;
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out);
+  border: 2px solid transparent;
+}
+
+.metricas-lotes__kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+}
+
+.metricas-lotes__kpi--active {
+  border-color: var(--color-primary-navy);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+
+.metricas-lotes__kpi-label {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-mono-500);
+  margin-bottom: var(--space-2);
+}
+
+.metricas-lotes__kpi-value {
+  font-size: var(--text-h1);
+  font-weight: var(--font-extrabold);
+  line-height: 1;
+  letter-spacing: var(--tracking-tight);
+  color: var(--color-primary-navy);
+}
+
+.metricas-lotes__kpi-value--success { color: var(--color-success); }
+.metricas-lotes__kpi-value--danger { color: var(--color-primary-red); }
+.metricas-lotes__kpi-value--warning { color: var(--color-warning); }
+
+.metricas-lotes__kpi-pct {
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--color-mono-400);
+  margin-top: var(--space-1);
+}
+
+.metricas-lotes__tabla-wrap {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-mono-100);
+  max-height: none;
+}
+
+.metricas-lotes__tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  min-width: 850px;
+}
+
+.metricas-lotes__tabla thead {
+  background: var(--color-primary-navy);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.metricas-lotes__tabla th {
+  padding: var(--space-3) var(--space-3);
+  text-align: center;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--color-mono-0);
+  border-bottom: 2px solid rgba(255,255,255,0.1);
+  border-right: 1px solid rgba(255,255,255,0.1);
+  white-space: normal;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.metricas-lotes__tabla th:last-child {
+  border-right: none;
+}
+
+.metricas-lotes__tabla th small {
+  display: block;
+  font-size: 9px;
+  font-weight: var(--font-medium);
+  color: rgba(255,255,255,0.65);
+  text-transform: none;
+  letter-spacing: normal;
+  margin-top: 2px;
+}
+
+.metricas-lotes__tabla th:first-child,
+.metricas-lotes__tabla th:nth-child(2),
+.metricas-lotes__tabla th:nth-child(3) {
+  text-align: left;
+}
+
+.metricas-lotes__tabla td {
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  color: var(--color-mono-800);
+  vertical-align: middle;
+  text-align: center;
+}
+
+.metricas-lotes__tabla td:first-child,
+.metricas-lotes__tabla td:nth-child(2),
+.metricas-lotes__tabla td:nth-child(3) {
+  text-align: left;
+}
+
+.metricas-lotes__tabla tbody tr:nth-child(even) {
+  background: rgba(37, 49, 80, 0.02);
+}
+
+.metricas-lotes__tabla tbody tr:hover {
+  background: rgba(37, 49, 80, 0.05);
+}
+
+.metricas-lotes__tabla .num-cell {
+  text-align: center;
+  font-weight: var(--font-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.metricas-lotes__tabla .num-cell--highlight {
+  font-weight: var(--font-bold);
+  color: var(--color-primary-navy);
+}
+
+.metricas-lotes__paginacion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--color-mono-100);
+  background: var(--color-mono-0);
+}
+
+.metricas-lotes__paginacion-info {
+  font-size: var(--text-xs);
+  color: var(--color-mono-500);
+}
+
+.metricas-lotes__paginacion-btns {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.metricas-lotes__pag-btn {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-mono-200);
+  border-radius: var(--radius-xs);
+  background: var(--color-mono-0);
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--color-mono-700);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-in-out),
+              border-color var(--duration-fast) var(--ease-in-out);
+}
+
+.metricas-lotes__pag-btn:hover:not(:disabled) {
+  background: rgba(37, 49, 80, 0.05);
+  border-color: var(--color-primary-navy);
+}
+
+.metricas-lotes__pag-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.metricas-lotes__pag-btn--active {
+  background: var(--color-primary-navy);
+  color: var(--color-mono-0);
+  border-color: var(--color-primary-navy);
+}
+
+.metricas-lotes__pag-btn--active:hover {
+  background: var(--color-primary-navy);
+}
+
+.metricas-lotes__badge--aprobado {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.metricas-lotes__badge--negado {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  background: var(--color-error-bg);
+  color: var(--color-primary-red);
+}
+
+.metricas-lotes__badge--proceso {
+  display: inline-flex;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--color-warning);
+}
+
+.metricas-lotes__empty {
+  text-align: center;
+  padding: var(--space-12) var(--space-6);
+}
+
+.metricas-lotes__empty-icon {
+  font-size: 3rem;
+  margin-bottom: var(--space-4);
+  opacity: 0.7;
+}
+
+.metricas-lotes__empty-text {
+  font-size: var(--text-body);
+  color: var(--color-mono-500);
+  margin: 0;
+}
+
+.metricas-lotes__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10);
+  gap: var(--space-3);
+}
+
+.metricas-lotes__loading-text {
+  font-size: var(--text-sm);
+  color: var(--color-mono-500);
+}
+
+.metricas-lotes__charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.metricas-lotes__chart-card {
+  background: var(--color-mono-0);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-4);
+  min-height: 280px;
+}
+
+.metricas-lotes__chart-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-mono-500);
+  margin-bottom: var(--space-3);
+}
+
+@media (max-width: 768px) {
+  .metricas-lotes__charts {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .metricas-lotes__kpis--4,
+  .metricas-lotes__kpis--5 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .metricas-lotes__filtros {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .metricas-lotes__input-date {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .metricas-lotes__kpis--4,
+  .metricas-lotes__kpis--5 {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<div id="viewMetricasLotes" style="display:none;">
+  <div class="stack">
+    <!-- Header de sección -->
+    <div class="section-header">
+      <h2>Métricas Operativas de Lotes</h2>
+    </div>
+
+    <!-- Filtros de periodo -->
+    <div class="card card--flat">
+      <div class="metricas-lotes__filtros">
+        <label style="margin-bottom:0; white-space:nowrap; font-size:var(--text-sm); font-weight:var(--font-semibold); color:var(--color-mono-600);">Desde:</label>
+        <input type="date" id="metricasLotesFechaDesde"
+               class="metricas-lotes__input-date"
+               aria-label="Fecha inicio del rango">
+        <label style="margin-bottom:0; white-space:nowrap; font-size:var(--text-sm); font-weight:var(--font-semibold); color:var(--color-mono-600);">Hasta:</label>
+        <input type="date" id="metricasLotesFechaHasta"
+               class="metricas-lotes__input-date"
+               aria-label="Fecha fin del rango">
+        <button id="metricasLotesBtn"
+                class="btn btn--primary"
+                type="button"
+                aria-label="Consultar métricas del rango seleccionado">
+          Consultar
+        </button>
+        <button id="metricasLotesCsvBtn"
+                class="btn btn--outline"
+                type="button"
+                style="margin-left:auto;"
+                aria-label="Descargar datos en formato CSV"
+                disabled>
+          ⬇ Descargar CSV
+        </button>
+      </div>
+      <div id="metricasLotesFiltroError" class="metricas-lotes__filtro-error" style="display:none;"></div>
+      <!-- Chips de segmentación por solicitudes -->
+      <div class="metricas-lotes__chips">
+        <span class="metricas-lotes__chips-label">Solicitudes/Lote:</span>
+        <button class="metricas-lotes__chip metricas-lotes__chip--active" data-segmento="todos" type="button">Todos</button>
+        <button class="metricas-lotes__chip" data-segmento="1-50" type="button">1 – 50</button>
+        <button class="metricas-lotes__chip" data-segmento="51-100" type="button">51 – 100</button>
+        <button class="metricas-lotes__chip" data-segmento="101-200" type="button">101 – 200</button>
+        <button class="metricas-lotes__chip" data-segmento="201-300" type="button">201 – 300</button>
+        <button class="metricas-lotes__chip" data-segmento="301+" type="button">≥ 301</button>
+      </div>
+    </div>
+
+    <!-- Contenedor de resultados -->
+    <div id="metricasLotesContenido">
+      <!-- Se renderiza dinámicamente: KPIs + Tabla o estado vacío -->
+    </div>
+  </div>
+</div>
+
+<script>
+/**
+ * ============================================================
+ * Métricas Operativas de Lotes — Lógica del componente
+ * ============================================================
+ */
+
+// Cargar Google Charts al iniciar
+if (typeof google !== 'undefined' && google.charts) {
+  google.charts.load('current', { packages: ['corechart'] });
+}
+
+var MetricasLotesView = (function() {
+  'use strict';
+
+  var ROLES_PERMITIDOS = ['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER'];
+  var _cargando = false;
+  var _datosActuales = null;
+  var _filtroActivo = null;
+  var _paginaActual = 1;
+  var _filasPorPagina = 10;
+  var _segmentoActivo = 'todos';
+  var _MAX_RANGO_DIAS = 183;
+
+  /**
+   * Inicializa el componente: llena inputs de fecha, carga datos.
+   * Se invoca cuando el usuario navega a la vista de métricas.
+   */
+  function init() {
+    _inicializarFechas();
+    _cargarMetricas();
+    _conectarEventos();
+  }
+
+  /**
+   * Verifica si el usuario actual tiene acceso a esta vista.
+   * @returns {boolean}
+   */
+  function tieneAcceso() {
+    if (!APP_USUARIO || !APP_USUARIO.rol) return false;
+    return ROLES_PERMITIDOS.indexOf(APP_USUARIO.rol.toUpperCase()) !== -1;
+  }
+
+  /**
+   * Inicializa los inputs de fecha nativos.
+   * Desde = primer día del mes actual, Hasta = hoy.
+   */
+  function _inicializarFechas() {
+    var hoy = new Date();
+    var primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+
+    if (inputDesde) inputDesde.value = _formatearFechaISO(primerDia);
+    if (inputHasta) inputHasta.value = _formatearFechaISO(hoy);
+  }
+
+  /**
+   * Formatea Date a YYYY-MM-DD.
+   * @param {Date} fecha
+   * @returns {string}
+   */
+  function _formatearFechaISO(fecha) {
+    var y = fecha.getFullYear();
+    var m = String(fecha.getMonth() + 1).padStart(2, '0');
+    var d = String(fecha.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + d;
+  }
+
+  /**
+   * Conecta los eventos de los filtros, botón consultar y chips de segmentación.
+   */
+  function _conectarEventos() {
+    var btnConsultar = document.getElementById('metricasLotesBtn');
+    if (btnConsultar) {
+      btnConsultar.addEventListener('click', function() {
+        _cargarMetricas();
+      });
+    }
+
+    var btnCsv = document.getElementById('metricasLotesCsvBtn');
+    if (btnCsv) {
+      btnCsv.addEventListener('click', function() {
+        _descargarCSV();
+      });
+    }
+
+    // Chips de segmentación
+    var chips = document.querySelectorAll('.metricas-lotes__chip[data-segmento]');
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].addEventListener('click', function() {
+        _segmentoActivo = this.getAttribute('data-segmento');
+        // Actualizar visual de chips
+        var allChips = document.querySelectorAll('.metricas-lotes__chip[data-segmento]');
+        for (var j = 0; j < allChips.length; j++) {
+          allChips[j].classList.remove('metricas-lotes__chip--active');
+        }
+        this.classList.add('metricas-lotes__chip--active');
+        _paginaActual = 1;
+        _renderizarVista();
+      });
+    }
+  }
+
+  /**
+   * Obtiene las fechas del rango seleccionado desde los inputs nativos.
+   * @returns {{fechaDesde: string, fechaHasta: string}|null}
+   */
+  function _obtenerRangoFechas() {
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+
+    var fechaDesde = inputDesde ? inputDesde.value : '';
+    var fechaHasta = inputHasta ? inputHasta.value : '';
+
+    if (!fechaDesde || !fechaHasta) {
+      _mostrarError('Selecciona ambas fechas (Desde y Hasta).');
+      return null;
+    }
+
+    var dDesde = new Date(fechaDesde + 'T00:00:00');
+    var dHasta = new Date(fechaHasta + 'T00:00:00');
+
+    if (dDesde.getTime() > dHasta.getTime()) {
+      _mostrarError('La fecha "Desde" no puede ser posterior a "Hasta".');
+      return null;
+    }
+
+    var diffDias = Math.ceil((dHasta.getTime() - dDesde.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDias > _MAX_RANGO_DIAS) {
+      _mostrarError('El rango máximo es de 6 meses (' + _MAX_RANGO_DIAS + ' días). Rango actual: ' + diffDias + ' días.');
+      return null;
+    }
+
+    _ocultarError();
+    return { fechaDesde: fechaDesde, fechaHasta: fechaHasta };
+  }
+
+  /**
+   * Muestra un mensaje de error en el panel de filtros.
+   * @param {string} msg
+   */
+  function _mostrarError(msg) {
+    var errorDiv = document.getElementById('metricasLotesFiltroError');
+    if (errorDiv) {
+      errorDiv.textContent = msg;
+      errorDiv.style.display = 'block';
+    }
+  }
+
+  /**
+   * Oculta el mensaje de error.
+   */
+  function _ocultarError() {
+    var errorDiv = document.getElementById('metricasLotesFiltroError');
+    if (errorDiv) {
+      errorDiv.style.display = 'none';
+      errorDiv.textContent = '';
+    }
+  }
+
+  /**
+   * Carga las métricas del rango de fechas seleccionado desde el backend.
+   */
+  function _cargarMetricas() {
+    if (_cargando) return;
+
+    var rango = _obtenerRangoFechas();
+    if (!rango) return; // Validación falló
+
+    _cargando = true;
+
+    var contenedor = document.getElementById('metricasLotesContenido');
+    if (contenedor) {
+      contenedor.innerHTML = _htmlLoading();
+    }
+
+    callServer('api_obtenerMetricasLotes', rango.fechaDesde, rango.fechaHasta)
+      .then(function(datos) {
+        _cargando = false;
+        _renderizarResultados(datos);
+      })
+      .catch(function(err) {
+        _cargando = false;
+        console.error('Error cargando métricas de lotes:', err);
+        _renderizarResultados(null);
+      });
+  }
+
+  /**
+   * Renderiza los resultados (resumen + tabla) o el estado vacío.
+   * @param {Object|null} datos - Respuesta de api_obtenerMetricasLotes
+   */
+  function _renderizarResultados(datos) {
+    var contenedor = document.getElementById('metricasLotesContenido');
+    if (!contenedor) return;
+
+    _datosActuales = datos;
+    _filtroActivo = null;
+    _paginaActual = 1;
+
+    var btnCsv = document.getElementById('metricasLotesCsvBtn');
+
+    if (!datos || !datos.detallePorLote || datos.detallePorLote.length === 0) {
+      contenedor.innerHTML = _htmlEstadoVacio();
+      if (btnCsv) btnCsv.disabled = true;
+      return;
+    }
+
+    if (btnCsv) btnCsv.disabled = false;
+    _renderizarVista();
+  }
+
+  /**
+   * Renderiza KPIs + gráficas + tabla paginada + controles de paginación.
+   * Los KPIs y gráficas se recalculan en base al segmento de solicitudes activo.
+   */
+  function _renderizarVista() {
+    var contenedor = document.getElementById('metricasLotesContenido');
+    if (!contenedor || !_datosActuales) return;
+
+    var detalleFiltrado = _obtenerDetalleFiltrado();
+    var totalPaginas = Math.ceil(detalleFiltrado.length / _filasPorPagina);
+    if (_paginaActual > totalPaginas) _paginaActual = totalPaginas || 1;
+
+    var inicio = (_paginaActual - 1) * _filasPorPagina;
+    var fin = inicio + _filasPorPagina;
+    var detallePagina = detalleFiltrado.slice(inicio, fin);
+
+    // Recalcular resumen basado en el segmento activo (sin filtro de card)
+    var resumenVista = _calcularResumenFiltrado();
+
+    var html = _htmlResumen(resumenVista)
+      + _htmlCharts()
+      + _htmlTablaDetalle(detallePagina)
+      + _htmlPaginacion(detalleFiltrado.length, totalPaginas);
+
+    contenedor.innerHTML = html;
+    _conectarEventosKpis();
+    _conectarEventosPaginacion();
+    _actualizarEstadoActivoKpis();
+    _dibujarGraficas(resumenVista);
+  }
+
+  /**
+   * Recalcula el resumen (cards) considerando el segmento de solicitudes activo.
+   * @returns {Object} resumen recalculado
+   */
+  function _calcularResumenFiltrado() {
+    if (!_datosActuales || !_datosActuales.detallePorLote) {
+      return _datosActuales ? _datosActuales.resumen : {};
+    }
+
+    // Si no hay segmento activo, usar el resumen original del backend
+    if (!_segmentoActivo || _segmentoActivo === 'todos') {
+      return _datosActuales.resumen;
+    }
+
+    // Filtrar detalle solo por segmento (sin filtro de card)
+    var detalleSegmentado = _datosActuales.detallePorLote.filter(function(d) {
+      var cant = d.cantidadSolicitudes || 0;
+      switch (_segmentoActivo) {
+        case '1-50': return cant >= 1 && cant <= 50;
+        case '51-100': return cant >= 51 && cant <= 100;
+        case '101-200': return cant >= 101 && cant <= 200;
+        case '201-300': return cant >= 201 && cant <= 300;
+        case '301+': return cant >= 301;
+        default: return true;
+      }
+    });
+
+    // Recalcular métricas de lotes
+    var lotesAprobados = 0;
+    var lotesNegados = 0;
+    var lotesEnProceso = 0;
+    var totalSolicitudes = 0;
+    var solicitudesAprobadas = 0;
+    var solicitudesNegadas = 0;
+    var solicitudesReconsideradas = 0;
+    var solicitudesEnProceso = 0;
+
+    for (var i = 0; i < detalleSegmentado.length; i++) {
+      var d = detalleSegmentado[i];
+      var res = (d.resultadoLote || '').toUpperCase();
+
+      if (res === 'APROBADO') lotesAprobados++;
+      else if (res === 'NEGADO') lotesNegados++;
+      else lotesEnProceso++;
+
+      totalSolicitudes += d.cantidadSolicitudes || 0;
+      solicitudesAprobadas += d.solicitudesAprobadasEnLote || 0;
+      solicitudesNegadas += d.solicitudesNegadas || 0;
+      solicitudesReconsideradas += d.negadaPorLoteReconsideradaPorGerencia || 0;
+      solicitudesEnProceso += d.solicitudesEnProcesoEnLote || 0;
+    }
+
+    return {
+      totalLotes: detalleSegmentado.length,
+      lotesAprobados: lotesAprobados,
+      lotesNegados: lotesNegados,
+      lotesEnProceso: lotesEnProceso,
+      totalSolicitudes: totalSolicitudes,
+      solicitudesAprobadas: solicitudesAprobadas,
+      solicitudesNegadas: solicitudesNegadas,
+      solicitudesReconsideradas: solicitudesReconsideradas,
+      solicitudesEnProceso: solicitudesEnProceso
+    };
+  }
+
+  /**
+   * Aplica un filtro por tipo de card sobre la tabla de detalle (toggle).
+   * @param {string} tipo - Tipo de filtro: 'totalLotes', 'lotesAprobados', 'lotesNegados', 'lotesEnProceso', 'totalSolicitudes', 'solicitudesAprobadas', 'solicitudesNegadas', 'solicitudesReconsideradas'
+   */
+  function _aplicarFiltro(tipo) {
+    if (!_datosActuales || !_datosActuales.detallePorLote) return;
+
+    // Toggle: si el mismo filtro está activo, desactivar
+    if (_filtroActivo === tipo) {
+      _filtroActivo = null;
+    } else {
+      _filtroActivo = tipo;
+    }
+
+    _paginaActual = 1;
+    _renderizarVista();
+  }
+
+  /**
+   * Conecta eventos click a las tarjetas KPI para filtrado.
+   */
+  function _conectarEventosKpis() {
+    var kpis = document.querySelectorAll('.metricas-lotes__kpi[data-filtro]');
+    for (var i = 0; i < kpis.length; i++) {
+      kpis[i].addEventListener('click', function() {
+        _aplicarFiltro(this.getAttribute('data-filtro'));
+      });
+    }
+  }
+
+  /**
+   * Actualiza la clase --active en los KPIs según el filtro activo.
+   */
+  function _actualizarEstadoActivoKpis() {
+    var kpis = document.querySelectorAll('.metricas-lotes__kpi[data-filtro]');
+    for (var i = 0; i < kpis.length; i++) {
+      var filtro = kpis[i].getAttribute('data-filtro');
+      if (filtro === _filtroActivo) {
+        kpis[i].classList.add('metricas-lotes__kpi--active');
+      } else {
+        kpis[i].classList.remove('metricas-lotes__kpi--active');
+      }
+    }
+  }
+
+  /**
+   * HTML de los controles de paginación.
+   * @param {number} totalRegistros
+   * @param {number} totalPaginas
+   * @returns {string}
+   */
+  function _htmlPaginacion(totalRegistros, totalPaginas) {
+    if (totalPaginas <= 1) {
+      return '<div class="metricas-lotes__paginacion">'
+        + '<span class="metricas-lotes__paginacion-info">' + totalRegistros + ' registro' + (totalRegistros !== 1 ? 's' : '') + '</span>'
+        + '<span></span></div>';
+    }
+
+    var inicio = ((_paginaActual - 1) * _filasPorPagina) + 1;
+    var fin = Math.min(_paginaActual * _filasPorPagina, totalRegistros);
+
+    var html = '<div class="metricas-lotes__paginacion">';
+    html += '<span class="metricas-lotes__paginacion-info">' + inicio + '–' + fin + ' de ' + totalRegistros + ' lotes</span>';
+    html += '<div class="metricas-lotes__paginacion-btns">';
+
+    // Botón anterior
+    html += '<button class="metricas-lotes__pag-btn" data-pagina="prev"' + (_paginaActual <= 1 ? ' disabled' : '') + '>← Anterior</button>';
+
+    // Números de página (mostrar máx 5 alrededor de la actual)
+    var paginaInicio = Math.max(1, _paginaActual - 2);
+    var paginaFin = Math.min(totalPaginas, paginaInicio + 4);
+    if (paginaFin - paginaInicio < 4) {
+      paginaInicio = Math.max(1, paginaFin - 4);
+    }
+
+    for (var p = paginaInicio; p <= paginaFin; p++) {
+      var activeClass = (p === _paginaActual) ? ' metricas-lotes__pag-btn--active' : '';
+      html += '<button class="metricas-lotes__pag-btn' + activeClass + '" data-pagina="' + p + '">' + p + '</button>';
+    }
+
+    // Botón siguiente
+    html += '<button class="metricas-lotes__pag-btn" data-pagina="next"' + (_paginaActual >= totalPaginas ? ' disabled' : '') + '>Siguiente →</button>';
+
+    html += '</div></div>';
+    return html;
+  }
+
+  /**
+   * Conecta eventos click a los botones de paginación.
+   */
+  function _conectarEventosPaginacion() {
+    var btns = document.querySelectorAll('.metricas-lotes__pag-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function() {
+        var pagina = this.getAttribute('data-pagina');
+        if (pagina === 'prev') {
+          if (_paginaActual > 1) _paginaActual--;
+        } else if (pagina === 'next') {
+          var detalleFiltrado = _obtenerDetalleFiltrado();
+          var totalPaginas = Math.ceil(detalleFiltrado.length / _filasPorPagina);
+          if (_paginaActual < totalPaginas) _paginaActual++;
+        } else {
+          _paginaActual = parseInt(pagina, 10);
+        }
+        _renderizarVista();
+      });
+    }
+  }
+
+  /**
+   * Genera y descarga un archivo CSV con el detalle de lotes (respeta filtro activo).
+   */
+  function _descargarCSV() {
+    if (!_datosActuales || !_datosActuales.detallePorLote || _datosActuales.detallePorLote.length === 0) return;
+
+    // Usar datos filtrados si hay filtro activo
+    var detalle = _obtenerDetalleFiltrado();
+
+    var headers = [
+      'Fecha Lote',
+      'Código Lote',
+      'Resultado Lote',
+      'Cant. Solicitudes',
+      'Aprob. en Lote',
+      'Aprob. Indiv. / Lote Neg.',
+      'Neg. Indiv. / Lote Aprob.',
+      'Negadas',
+      'Aprob. Lote / Neg. Analista',
+      'Reconsideradas',
+      'En Proceso'
+    ];
+
+    var filas = [headers.join(';')];
+
+    for (var i = 0; i < detalle.length; i++) {
+      var d = detalle[i];
+      var fila = [
+        d.fechaLote || '',
+        d.codigoLote || '',
+        d.resultadoLote || '',
+        d.cantidadSolicitudes || 0,
+        d.solicitudesAprobadasEnLote || 0,
+        d.solicitudesAprobadasIndividualNegadaPorLote || 0,
+        d.solicitudesNegadasIndividualAprobadasPorLote || 0,
+        d.solicitudesNegadas || 0,
+        d.aprobadaPorLoteNegadaPorAnalista || 0,
+        d.negadaPorLoteReconsideradaPorGerencia || 0,
+        d.solicitudesEnProcesoEnLote || 0
+      ];
+      filas.push(fila.join(';'));
+    }
+
+    var csvContent = '\uFEFF' + filas.join('\r\n');
+    var blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+    var desde = inputDesde ? inputDesde.value.replace(/-/g, '') : '';
+    var hasta = inputHasta ? inputHasta.value.replace(/-/g, '') : '';
+    var nombreArchivo = 'metricas_lotes_' + desde + '_' + hasta + '.csv';
+
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = nombreArchivo;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Retorna el detalle filtrado según el filtro de card activo + segmentación por solicitudes.
+   * @returns {Array}
+   */
+  function _obtenerDetalleFiltrado() {
+    if (!_datosActuales || !_datosActuales.detallePorLote) return [];
+
+    var detalle = _datosActuales.detallePorLote;
+
+    // 1. Filtro por card KPI
+    if (_filtroActivo && _filtroActivo !== 'totalLotes' && _filtroActivo !== 'totalSolicitudes') {
+      if (_filtroActivo === 'lotesAprobados') {
+        detalle = detalle.filter(function(d) { return (d.resultadoLote || '').toUpperCase() === 'APROBADO'; });
+      } else if (_filtroActivo === 'lotesNegados') {
+        detalle = detalle.filter(function(d) { return (d.resultadoLote || '').toUpperCase() === 'NEGADO'; });
+      } else if (_filtroActivo === 'lotesEnProceso') {
+        detalle = detalle.filter(function(d) { var r = (d.resultadoLote || '').toUpperCase(); return r !== 'APROBADO' && r !== 'NEGADO'; });
+      } else if (_filtroActivo === 'solicitudesAprobadas') {
+        detalle = detalle.filter(function(d) { return d.solicitudesAprobadasEnLote > 0; });
+      } else if (_filtroActivo === 'solicitudesNegadas') {
+        detalle = detalle.filter(function(d) { return d.solicitudesNegadas > 0; });
+      } else if (_filtroActivo === 'solicitudesReconsideradas') {
+        detalle = detalle.filter(function(d) { return d.negadaPorLoteReconsideradaPorGerencia > 0; });
+      } else if (_filtroActivo === 'solicitudesEnProceso') {
+        detalle = detalle.filter(function(d) { return d.solicitudesEnProcesoEnLote > 0; });
+      }
+    }
+
+    // 2. Filtro por segmento de solicitudes/lote
+    if (_segmentoActivo && _segmentoActivo !== 'todos') {
+      detalle = detalle.filter(function(d) {
+        var cant = d.cantidadSolicitudes || 0;
+        switch (_segmentoActivo) {
+          case '1-50': return cant >= 1 && cant <= 50;
+          case '51-100': return cant >= 51 && cant <= 100;
+          case '101-200': return cant >= 101 && cant <= 200;
+          case '201-300': return cant >= 201 && cant <= 300;
+          case '301+': return cant >= 301;
+          default: return true;
+        }
+      });
+    }
+
+    return detalle;
+  }
+
+  /**
+   * HTML de los contenedores de gráficas.
+   * @returns {string}
+   */
+  function _htmlCharts() {
+    return '<div class="metricas-lotes__charts">'
+      + '<div class="metricas-lotes__chart-card">'
+      + '<div class="metricas-lotes__chart-title">Distribución de Lotes</div>'
+      + '<div id="metricasLotesChartDona" style="width:100%;height:240px;"></div>'
+      + '</div>'
+      + '<div class="metricas-lotes__chart-card">'
+      + '<div class="metricas-lotes__chart-title">Solicitudes por Estado</div>'
+      + '<div id="metricasLotesChartBarras" style="width:100%;height:240px;"></div>'
+      + '</div>'
+      + '</div>';
+  }
+
+  /**
+   * Dibuja las gráficas de Google Charts con los datos del resumen.
+   * @param {Object} resumen - Resumen recalculado
+   */
+  function _dibujarGraficas(resumen) {
+    if (!resumen) return;
+    if (typeof google === 'undefined' || !google.visualization) {
+      // Google Charts aún cargando — esperar callback
+      if (typeof google !== 'undefined' && google.charts) {
+        google.charts.setOnLoadCallback(function() {
+          _dibujarGraficasInterno(resumen);
+        });
+      }
+      return;
+    }
+    _dibujarGraficasInterno(resumen);
+  }
+
+  /**
+   * Dibuja las gráficas (internamente, asumiendo google.visualization disponible).
+   * @param {Object} resumen
+   */
+  function _dibujarGraficasInterno(resumen) {
+    if (!google || !google.visualization) return;
+
+    // ── Gráfica Dona: Distribución de Lotes ──
+    var containerDona = document.getElementById('metricasLotesChartDona');
+    if (containerDona) {
+      var dataDona = google.visualization.arrayToDataTable([
+        ['Estado', 'Cantidad'],
+        ['Aprobados', resumen.lotesAprobados || 0],
+        ['Negados', resumen.lotesNegados || 0],
+        ['En Proceso', resumen.lotesEnProceso || 0]
+      ]);
+
+      var optionsDona = {
+        pieHole: 0.45,
+        colors: ['#22c55e', '#dc2626', '#f59e0b'],
+        legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+        chartArea: { width: '90%', height: '75%' },
+        pieSliceTextStyle: { fontSize: 12 },
+        backgroundColor: 'transparent',
+        tooltip: { textStyle: { fontSize: 12 } }
+      };
+
+      var chartDona = new google.visualization.PieChart(containerDona);
+      chartDona.draw(dataDona, optionsDona);
+    }
+
+    // ── Gráfica Barras: Solicitudes por Estado ──
+    var containerBarras = document.getElementById('metricasLotesChartBarras');
+    if (containerBarras) {
+      var dataBarras = google.visualization.arrayToDataTable([
+        ['Estado', 'Cantidad', { role: 'style' }, { role: 'annotation' }],
+        ['Aprobadas', resumen.solicitudesAprobadas || 0, '#22c55e', String(resumen.solicitudesAprobadas || 0)],
+        ['Negadas', resumen.solicitudesNegadas || 0, '#dc2626', String(resumen.solicitudesNegadas || 0)],
+        ['Reconsideradas', resumen.solicitudesReconsideradas || 0, '#f59e0b', String(resumen.solicitudesReconsideradas || 0)],
+        ['En Proceso', resumen.solicitudesEnProceso || 0, '#6b7280', String(resumen.solicitudesEnProceso || 0)]
+      ]);
+
+      var optionsBarras = {
+        legend: { position: 'none' },
+        chartArea: { width: '75%', height: '75%' },
+        backgroundColor: 'transparent',
+        hAxis: { textStyle: { fontSize: 11 } },
+        vAxis: { textStyle: { fontSize: 11 }, minValue: 0 },
+        bar: { groupWidth: '60%' },
+        annotations: { textStyle: { fontSize: 11, bold: true } },
+        tooltip: { textStyle: { fontSize: 12 } }
+      };
+
+      var chartBarras = new google.visualization.ColumnChart(containerBarras);
+      chartBarras.draw(dataBarras, optionsBarras);
+    }
+  }
+
+  /**
+   * HTML del indicador de carga.
+   * @returns {string}
+   */
+  function _htmlLoading() {
+    return '<div class="metricas-lotes__loading">'
+      + '<div class="spinner"></div>'
+      + '<span class="metricas-lotes__loading-text">Cargando métricas...</span>'
+      + '</div>';
+  }
+
+  /**
+   * HTML del estado vacío (sin datos).
+   * @returns {string}
+   */
+  function _htmlEstadoVacio() {
+    return '<div class="card card--flat">'
+      + '<div class="metricas-lotes__empty">'
+      + '<div class="metricas-lotes__empty-icon" aria-hidden="true">📭</div>'
+      + '<p class="metricas-lotes__empty-text">No hay registros para el periodo consultado</p>'
+      + '</div></div>';
+  }
+
+  /**
+   * HTML de las tarjetas de resumen (KPIs).
+   * @param {Object} resumen
+   * @returns {string}
+   */
+  function _htmlResumen(resumen) {
+    var r = resumen || {};
+    var tl = parseInt(r.totalLotes, 10) || 0;
+    var ts = parseInt(r.totalSolicitudes, 10) || 0;
+
+    // Grupo 1: Lotes (4 cards)
+    var htmlLotes = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Lotes</div>'
+      + '<div class="metricas-lotes__kpis--4">'
+      + _kpi('Total Lotes', _num(r.totalLotes), '', 'totalLotes', '')
+      + _kpi('Aprobados', _num(r.lotesAprobados), 'success', 'lotesAprobados', _pct(r.lotesAprobados, tl))
+      + _kpi('Negados', _num(r.lotesNegados), 'danger', 'lotesNegados', _pct(r.lotesNegados, tl))
+      + _kpi('En Proceso', _num(r.lotesEnProceso), 'warning', 'lotesEnProceso', _pct(r.lotesEnProceso, tl))
+      + '</div></div>';
+
+    // Grupo 2: Solicitudes (5 cards)
+    var htmlSol = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Solicitudes</div>'
+      + '<div class="metricas-lotes__kpis--5">'
+      + _kpi('Total', _num(r.totalSolicitudes), '', 'totalSolicitudes', '')
+      + _kpi('Aprobadas', _num(r.solicitudesAprobadas), 'success', 'solicitudesAprobadas', _pct(r.solicitudesAprobadas, ts))
+      + _kpi('Negadas', _num(r.solicitudesNegadas), 'danger', 'solicitudesNegadas', _pct(r.solicitudesNegadas, ts))
+      + _kpi('Reconsideradas', _num(r.solicitudesReconsideradas), 'warning', 'solicitudesReconsideradas', _pct(r.solicitudesReconsideradas, ts))
+      + _kpi('En Proceso', _num(r.solicitudesEnProceso), 'warning', 'solicitudesEnProceso', _pct(r.solicitudesEnProceso, ts))
+      + '</div></div>';
+
+    return htmlLotes + htmlSol;
+  }
+
+  /**
+   * Genera HTML de una tarjeta KPI individual con soporte para filtrado por click.
+   * @param {string} label
+   * @param {string} value
+   * @param {string} colorClass - 'success' | 'danger' | 'warning' | ''
+   * @param {string} filtro - Identificador del filtro asociado al click
+   * @param {string} porcentaje - Texto de porcentaje (ej: "77%") o vacío
+   * @returns {string}
+   */
+  function _kpi(label, value, colorClass, filtro, porcentaje) {
+    var cls = colorClass ? ' metricas-lotes__kpi-value--' + colorClass : '';
+    var activeClass = (_filtroActivo === filtro) ? ' metricas-lotes__kpi--active' : '';
+    var dataAttr = filtro ? ' data-filtro="' + filtro + '"' : '';
+    var pctHtml = porcentaje ? '<div class="metricas-lotes__kpi-pct">' + porcentaje + '</div>' : '';
+    return '<div class="metricas-lotes__kpi' + activeClass + '"' + dataAttr + ' role="button" tabindex="0" aria-pressed="' + (_filtroActivo === filtro) + '" title="Click para filtrar la tabla">'
+      + '<div class="metricas-lotes__kpi-label">' + _escapeHtml(label) + '</div>'
+      + '<div class="metricas-lotes__kpi-value' + cls + '">' + value + '</div>'
+      + pctHtml
+      + '</div>';
+  }
+
+  /**
+   * Calcula el porcentaje y retorna string formateado (ej: "77%").
+   * @param {*} valor
+   * @param {number} total
+   * @returns {string}
+   */
+  function _pct(valor, total) {
+    var n = parseInt(valor, 10) || 0;
+    if (!total || total === 0) return '0%';
+    return Math.round((n / total) * 100) + '%';
+  }
+
+  /**
+   * HTML de la tabla de detalle por lote.
+   * @param {Array} detalle
+   * @returns {string}
+   */
+  function _htmlTablaDetalle(detalle) {
+    var html = '<div class="card card--flat" style="padding:0;overflow:hidden;margin-top:var(--space-4);">'
+      + '<div class="metricas-lotes__tabla-wrap">'
+      + '<table class="metricas-lotes__tabla" role="table" aria-label="Detalle de métricas por lote">'
+      + '<thead><tr>'
+      + '<th scope="col">Fecha</th>'
+      + '<th scope="col">Código Lote</th>'
+      + '<th scope="col">Resultado</th>'
+      + '<th scope="col" class="num-cell">Solicitudes</th>'
+      + '<th scope="col" class="num-cell">Aprobadas<br><small>en Lote</small></th>'
+      + '<th scope="col" class="num-cell">Aprob. Indiv.<br><small>Lote Negado</small></th>'
+      + '<th scope="col" class="num-cell">Neg. Indiv.<br><small>Lote Aprob.</small></th>'
+      + '<th scope="col" class="num-cell">Negadas</th>'
+      + '<th scope="col" class="num-cell">Aprob. Lote<br><small>Neg. Analista</small></th>'
+      + '<th scope="col" class="num-cell">Recons.</th>'
+      + '</tr></thead><tbody>';
+
+    for (var i = 0; i < detalle.length; i++) {
+      var d = detalle[i];
+      var resLote = (d.resultadoLote || '').toUpperCase();
+      var badgeClass, badgeText;
+
+      if (resLote === 'APROBADO') {
+        badgeClass = 'metricas-lotes__badge--aprobado';
+        badgeText = 'APROBADO';
+      } else if (resLote === 'NEGADO') {
+        badgeClass = 'metricas-lotes__badge--negado';
+        badgeText = 'NEGADO';
+      } else {
+        badgeClass = 'metricas-lotes__badge--proceso';
+        badgeText = 'EN PROCESO';
+      }
+
+      html += '<tr>'
+        + '<td>' + _escapeHtml(d.fechaLote || '') + '</td>'
+        + '<td style="font-family:var(--font-mono);font-size:var(--text-xs);">' + _escapeHtml(d.codigoLote || '') + '</td>'
+        + '<td><span class="' + badgeClass + '">' + badgeText + '</span></td>'
+        + '<td class="num-cell num-cell--highlight">' + _num(d.cantidadSolicitudes) + '</td>'
+        + '<td class="num-cell">' + _num(d.solicitudesAprobadasEnLote) + '</td>'
+        + '<td class="num-cell">' + _num(d.solicitudesAprobadasIndividualNegadaPorLote) + '</td>'
+        + '<td class="num-cell">' + _num(d.solicitudesNegadasIndividualAprobadasPorLote) + '</td>'
+        + '<td class="num-cell">' + _num(d.solicitudesNegadas) + '</td>'
+        + '<td class="num-cell">' + _num(d.aprobadaPorLoteNegadaPorAnalista) + '</td>'
+        + '<td class="num-cell">' + _num(d.negadaPorLoteReconsideradaPorGerencia) + '</td>'
+        + '</tr>';
+    }
+
+    html += '</tbody></table></div></div>';
+    return html;
+  }
+
+  /**
+   * Formatea un número, mostrando 0 si es falsy.
+   * @param {*} val
+   * @returns {string}
+   */
+  function _num(val) {
+    var n = parseInt(val, 10);
+    return isNaN(n) ? '0' : String(n);
+  }
+
+  /**
+   * Escapa HTML para prevenir XSS en datos provenientes del backend.
+   * @param {string} str
+   * @returns {string}
+   */
+  function _escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // API pública del módulo
+  return {
+    init: init,
+    tieneAcceso: tieneAcceso
+  };
+})();
+</script>

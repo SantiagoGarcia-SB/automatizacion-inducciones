@@ -697,6 +697,31 @@ function _eliminarMotivo(id) {
   return { ok: false, mensaje: 'Motivo no encontrado.' };
 }
 
+// ============================================================
+//  API — MÉTRICAS OPERATIVAS DE LOTES
+// ============================================================
+
+/**
+ * Retorna métricas operativas de lotes para un periodo mensual.
+ * Expuesta vía google.script.run.
+ * @param {number} mes - Entero 1-12
+/**
+ * API: Obtiene métricas operativas de lotes para un rango de fechas.
+ *
+ * @param {string} fechaDesde - Fecha inicio en formato YYYY-MM-DD
+ * @param {string} fechaHasta - Fecha fin en formato YYYY-MM-DD
+ * @returns {{resumen: Object, detallePorLote: Array}}
+ */
+function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
+  try {
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    return calcularMetricasLotes(fechaDesde, fechaHasta);
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMetricasLotes', e.message);
+    return _metricasLotesVacias();
+  }
+}
+
 // ── Funciones internas de Api.js ──
 
 /**

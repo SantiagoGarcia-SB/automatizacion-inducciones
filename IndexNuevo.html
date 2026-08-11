@@ -12,6 +12,8 @@
        inicial de todos los demás roles que nunca la usan. -->
   <?!= include('styles_tokens'); ?>
   <?!= include('styles_main'); ?>
+  <!-- Google Charts -->
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
 </head>
 <body>
   <!-- Pantalla de carga inicial a pantalla completa. Cubre el tiempo real de
@@ -81,6 +83,9 @@
 
       <!-- Vistas se inyectan aquí dinámicamente -->
       <div id="viewDashboard" style="display:none;"></div>
+
+      <!-- Vista Métricas Operativas de Lotes -->
+      <?!= include('components_metricas_lotes'); ?>
       <div id="viewNoAcceso" style="display:none;">
         <div class="card" style="text-align:center; padding:var(--spacing-2xl);">
           <div style="font-size:3rem; margin-bottom:var(--spacing-md);">🔒</div>
