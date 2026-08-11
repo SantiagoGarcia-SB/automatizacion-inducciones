@@ -1,0 +1,291 @@
+<script>
+/**
+ * ============================================================
+ * SVGRenderer — Módulo de generación de gráficos SVG inline
+ * ============================================================
+ *
+ * Genera gráficos SVG accesibles sin dependencias externas.
+ * Usa document.createElementNS con namespace SVG correcto.
+ *
+ * Requisitos: 9.1, 9.2, 9.3, 9.4, 10.1, 10.2
+ */
+
+var SVGRenderer = {
+  /** @private Namespace SVG estándar */
+  _NS: 'http://www.w3.org/2000/svg',
+
+  /** @private Contador incremental para IDs únicos de <title> */
+  _idCounter: 0,
+
+  /**
+   * Crea un elemento SVG con el namespace correcto y atributos dados.
+   * @param {string} tag - Nombre del elemento SVG (svg, rect, text, etc.)
+   * @param {Object} attrs - Mapa de atributos a asignar al elemento
+   * @returns {SVGElement} Elemento SVG creado
+   */
+  _crearElemento: function(tag, attrs) {
+    var el = document.createElementNS(this._NS, tag);
+    if (attrs) {
+      var keys = Object.keys(attrs);
+      for (var i = 0; i < keys.length; i++) {
+        el.setAttribute(keys[i], attrs[keys[i]]);
+      }
+    }
+    return el;
+  },
+
+  /**
+   * Calcula el string de viewBox para un SVG dado ancho y alto lógicos.
+   * @param {number} ancho - Ancho lógico del SVG
+   * @param {number} alto - Alto lógico del SVG
+   * @returns {string} Valor del atributo viewBox ("0 0 ancho alto")
+   */
+  _calcularViewBox: function(ancho, alto) {
+    return '0 0 ' + ancho + ' ' + alto;
+  },
+
+  /**
+   * Genera un ID único para elementos <title> de SVG.
+   * @returns {string} ID único con prefijo 'svg-title-'
+   * @private
+   */
+  _generarTitleId: function() {
+    this._idCounter++;
+    return 'svg-title-' + this._idCounter;
+  },
+
+  /**
+   * Crea el elemento SVG raíz con atributos de accesibilidad y responsividad.
+   * Incluye: width="100%", viewBox calculado, role="img", aria-labelledby → <title>.
+   *
+   * @param {Object} config
+   * @param {string} config.titulo - Texto descriptivo para el <title> de accesibilidad
+   * @param {number} config.ancho - Ancho lógico del viewBox
+   * @param {number} config.alto - Alto lógico del viewBox
+   * @returns {{svg: SVGElement, titleId: string}} Elemento SVG raíz y el ID del title
+   */
+  _crearSvgRaiz: function(config) {
+    var titleId = this._generarTitleId();
+
+    var svg = this._crearElemento('svg', {
+      'width': '100%',
+      'viewBox': this._calcularViewBox(config.ancho, config.alto),
+      'role': 'img',
+      'aria-labelledby': titleId,
+      'xmlns': this._NS
+    });
+
+    var title = this._crearElemento('title', { 'id': titleId });
+    title.textContent = config.titulo;
+    svg.appendChild(title);
+
+    return { svg: svg, titleId: titleId };
+  },
+
+  /**
+   * Genera un gráfico de barras horizontales (ranking/antigüedad).
+   * @param {Object} config
+   * @param {string} config.containerId - ID del div contenedor
+   * @param {string} config.titulo - Título descriptivo para accesibilidad
+   * @param {Array<{label: string, valor: number}>} config.datos - Datos a graficar
+   * @param {Object} [config.opciones]
+   * @param {string} [config.opciones.colorBarra] - Color CSS de las barras (default: #1a3a5c)
+   * @param {number} [config.opciones.umbralAlerta] - Valor encima del cual se resalta
+   * @param {string} [config.opciones.colorAlerta] - Color para barras que superen umbral (default: #c0392b)
+   * @param {string} [config.opciones.sufijo] - Sufijo para los valores (ej: " días")
+   */
+  barrasHorizontales: function(config) {
+    var container = document.getElementById(config.containerId);
+    if (!container) return;
+
+    var datos = config.datos || [];
+    var opciones = config.opciones || {};
+    var colorBarra = opciones.colorBarra || '#1a3a5c';
+    var colorAlerta = opciones.colorAlerta || '#c0392b';
+    var umbralAlerta = opciones.umbralAlerta;
+    var sufijo = opciones.sufijo || '';
+
+    // Dimensiones lógicas
+    var margenIzq = 120;
+    var margenDer = 60;
+    var alturaBarra = 28;
+    var espacioBarra = 8;
+    var margenTop = 10;
+    var ancho = 500;
+    var alto = margenTop + datos.length * (alturaBarra + espacioBarra) + 10;
+
+    var root = this._crearSvgRaiz({
+      titulo: config.titulo,
+      ancho: ancho,
+      alto: alto
+    });
+    var svg = root.svg;
+
+    var maxValor = 0;
+    for (var i = 0; i < datos.length; i++) {
+      if (datos[i].valor > maxValor) maxValor = datos[i].valor;
+    }
+    if (maxValor === 0) maxValor = 1;
+
+    var anchoDisponible = ancho - margenIzq - margenDer;
+
+    for (var j = 0; j < datos.length; j++) {
+      var item = datos[j];
+      var y = margenTop + j * (alturaBarra + espacioBarra);
+      var anchoBarra = (item.valor / maxValor) * anchoDisponible;
+      var color = (umbralAlerta !== undefined && item.valor > umbralAlerta) ? colorAlerta : colorBarra;
+
+      // Label
+      var label = this._crearElemento('text', {
+        'x': margenIzq - 8,
+        'y': y + alturaBarra / 2 + 5,
+        'text-anchor': 'end',
+        'font-size': '12',
+        'fill': '#333'
+      });
+      label.textContent = item.label;
+      svg.appendChild(label);
+
+      // Barra
+      var rect = this._crearElemento('rect', {
+        'x': margenIzq,
+        'y': y,
+        'width': anchoBarra,
+        'height': alturaBarra,
+        'fill': color,
+        'rx': '3',
+        'ry': '3'
+      });
+      svg.appendChild(rect);
+
+      // Valor numérico
+      var valorText = this._crearElemento('text', {
+        'x': margenIzq + anchoBarra + 6,
+        'y': y + alturaBarra / 2 + 5,
+        'text-anchor': 'start',
+        'font-size': '12',
+        'font-weight': 'bold',
+        'fill': '#333'
+      });
+      valorText.textContent = item.valor + sufijo;
+      svg.appendChild(valorText);
+    }
+
+    container.innerHTML = '';
+    container.appendChild(svg);
+  },
+
+  /**
+   * Genera un gráfico de línea (tendencia semanal).
+   * @param {Object} config
+   * @param {string} config.containerId - ID del div contenedor
+   * @param {string} config.titulo - Título descriptivo para accesibilidad
+   * @param {Array<{label: string, valor: number}>} config.datos - Puntos de la línea
+   */
+  lineaTendencia: function(config) {
+    var container = document.getElementById(config.containerId);
+    if (!container) return;
+
+    var datos = config.datos || [];
+    var margenIzq = 40;
+    var margenDer = 20;
+    var margenTop = 20;
+    var margenBottom = 40;
+    var ancho = 500;
+    var alto = 200;
+
+    var root = this._crearSvgRaiz({
+      titulo: config.titulo,
+      ancho: ancho,
+      alto: alto
+    });
+    var svg = root.svg;
+
+    var areaAncho = ancho - margenIzq - margenDer;
+    var areaAlto = alto - margenTop - margenBottom;
+
+    var maxValor = 0;
+    for (var i = 0; i < datos.length; i++) {
+      if (datos[i].valor > maxValor) maxValor = datos[i].valor;
+    }
+    if (maxValor === 0) maxValor = 1;
+
+    // Calcular puntos
+    var puntos = [];
+    var numPuntos = datos.length;
+    for (var j = 0; j < numPuntos; j++) {
+      var x = margenIzq + (numPuntos > 1 ? (j / (numPuntos - 1)) * areaAncho : areaAncho / 2);
+      var y = margenTop + areaAlto - (datos[j].valor / maxValor) * areaAlto;
+      puntos.push({ x: x, y: y });
+    }
+
+    // Línea (polyline)
+    if (puntos.length > 1) {
+      var puntosStr = '';
+      for (var k = 0; k < puntos.length; k++) {
+        puntosStr += puntos[k].x + ',' + puntos[k].y;
+        if (k < puntos.length - 1) puntosStr += ' ';
+      }
+      var polyline = this._crearElemento('polyline', {
+        'points': puntosStr,
+        'fill': 'none',
+        'stroke': '#1a3a5c',
+        'stroke-width': '2',
+        'stroke-linejoin': 'round'
+      });
+      svg.appendChild(polyline);
+    }
+
+    // Marcadores circulares en cada punto
+    for (var m = 0; m < puntos.length; m++) {
+      var circle = this._crearElemento('circle', {
+        'cx': puntos[m].x,
+        'cy': puntos[m].y,
+        'r': '4',
+        'fill': '#1a3a5c',
+        'stroke': '#fff',
+        'stroke-width': '2'
+      });
+      svg.appendChild(circle);
+    }
+
+    // Etiquetas del eje X
+    for (var n = 0; n < datos.length; n++) {
+      var xLabel = margenIzq + (numPuntos > 1 ? (n / (numPuntos - 1)) * areaAncho : areaAncho / 2);
+      var etiqueta = this._crearElemento('text', {
+        'x': xLabel,
+        'y': alto - 10,
+        'text-anchor': 'middle',
+        'font-size': '10',
+        'fill': '#666'
+      });
+      etiqueta.textContent = datos[n].label;
+      svg.appendChild(etiqueta);
+    }
+
+    // Etiquetas del eje Y (min y max)
+    var yMin = this._crearElemento('text', {
+      'x': margenIzq - 8,
+      'y': margenTop + areaAlto + 4,
+      'text-anchor': 'end',
+      'font-size': '10',
+      'fill': '#666'
+    });
+    yMin.textContent = '0';
+    svg.appendChild(yMin);
+
+    var yMax = this._crearElemento('text', {
+      'x': margenIzq - 8,
+      'y': margenTop + 4,
+      'text-anchor': 'end',
+      'font-size': '10',
+      'fill': '#666'
+    });
+    yMax.textContent = maxValor.toString();
+    svg.appendChild(yMax);
+
+    container.innerHTML = '';
+    container.appendChild(svg);
+  }
+};
+</script>

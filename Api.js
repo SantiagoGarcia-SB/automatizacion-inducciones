@@ -8,9 +8,11 @@
  */
 
 /**
- * Retorna datos del usuario logueado (rol, nombre, permisos).
+ * Retorna datos del usuario logueado (rol, permisos, jerarquía).
  * Es la primera llamada que hace el frontend al cargar.
- * @returns {{autorizado:boolean, email:string, nombre?:string, rol?:string, cupo?:number}}
+ * Expone emailDirector y emailGerente para que el frontend muestre la cadena de supervisión.
+ * @returns {{autorizado:boolean, email:string, rol?:string, cupo?:number,
+ *            emailDirector?:string, emailGerente?:string}}
  */
 function api_obtenerUsuarioActual() {
   try {
@@ -23,15 +25,18 @@ function api_obtenerUsuarioActual() {
 
 /**
  * Retorna KPIs del dashboard para el usuario logueado.
- * LIDER/ADMIN → métricas globales (todos los comerciales).
- * COMERCIAL → solo sus propias métricas.
+ * Usa getEmailsEquipoVisible para determinar la visibilidad jerárquica:
+ * - null → métricas globales (ADMIN, ASESOR)
+ * - string[] → métricas del equipo visible (DIRECTOR, GERENTE, CONSULTOR, etc.)
  * @returns {{radicados:number, enAnalisis:number, pendientePS:number, errorTerceros:number, terminados:number}}
  */
 function api_obtenerResumenDashboard() {
   try {
-    var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
-    var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    var cacheKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    // emailsEquipo === null → sin filtro (acceso total)
+    // emailsEquipo es array → filtrar por esos emails
+    var cacheKey = 'RESUMEN_' + _hashEquipoVisible(emailsEquipo);
 
     // Intentar cache primero (TTL 60s)
     var cache = CacheService.getScriptCache();
@@ -39,7 +44,7 @@ function api_obtenerResumenDashboard() {
     if (cached) return JSON.parse(cached);
 
     // Cache miss → leer de Sheets
-    var resumen = obtenerResumenComercial(verTodos ? null : usuario.email);
+    var resumen = obtenerResumenComercial(emailsEquipo);
     cache.put(cacheKey, JSON.stringify(resumen), 60);
     return resumen;
   } catch (e) {
@@ -50,8 +55,9 @@ function api_obtenerResumenDashboard() {
 
 /**
  * Retorna los lotes del usuario logueado (paginado).
- * Si es LIDER/ADMIN → muestra TODOS los lotes.
- * Si es COMERCIAL → solo los suyos.
+ * Usa getEmailsEquipoVisible para determinar la visibilidad jerárquica:
+ * - null → muestra TODOS los lotes (ADMIN, ASESOR)
+ * - string[] → solo lotes del equipo visible
  * @param {number} pagina
  * @param {number} porPagina
  * @param {string} [filtroEstado] - Filtro por estado
@@ -62,9 +68,11 @@ function api_obtenerResumenDashboard() {
  */
 function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta) {
   try {
-    var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
-    var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    return obtenerLotesDeComercial(verTodos ? null : usuario.email, pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    // emailsEquipo === null → sin filtro (acceso total)
+    // emailsEquipo es array → filtrar por esos emails
+    return obtenerLotesDeComercial(emailsEquipo, pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisLotes', e.message);
     return { datos: [], total: 0, pagina: 1, totalPaginas: 0 };
@@ -78,7 +86,7 @@ function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaD
  */
 function api_obtenerDetalleLote(idLote) {
   try {
-    verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
+    verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
     return obtenerDetalleLote(idLote);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDetalleLote', e.message);
@@ -90,20 +98,23 @@ function api_obtenerDetalleLote(idLote) {
  * Retorna TODOS los lotes (sin paginación servidor) para cache en frontend.
  * El frontend pagina y filtra localmente (instantáneo).
  * Usa CacheServiceWrapper para manejar payloads > 100 KB con fragmentación automática.
+ * Filtrado por vista jerárquica: cada rol ve solo los lotes de su equipo visible.
  * @returns {Array} Lista de lotes con estados
  */
 function api_obtenerTodosLosLotes() {
   try {
-    var usuario = verificarRol(['COMERCIAL', 'AUXILIAR', 'ANALISTA', 'LIDER', 'ADMIN']);
-    var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    var cacheKey = 'LOTES_' + (verTodos ? 'GLOBAL' : usuario.email);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    // null → acceso total (ADMIN/ASESOR), array → filtrar por esos emails
+    var filtroEmail = emailsEquipo === null ? null : emailsEquipo;
+    var cacheKey = 'LOTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
 
     // Intentar cache primero (CacheWrapper maneja fragmentación automáticamente)
     var cached = CacheWrapper_getJSON(cacheKey);
     if (cached) return cached;
 
     // Cache-miss → leer de Sheets
-    var resultado = obtenerLotesDeComercial(verTodos ? null : usuario.email, 1, 9999, '', '');
+    var resultado = obtenerLotesDeComercial(filtroEmail, 1, 9999, '', '');
     var datos = resultado.datos || [];
 
     // CacheWrapper maneja automáticamente:
@@ -120,14 +131,76 @@ function api_obtenerTodosLosLotes() {
 }
 
 /**
- * Retorna la lista de todos los usuarios registrados.
- * Solo accesible por LIDER y ADMIN.
+ * Retorna datos mínimos de usuarios para popular filtros del dashboard.
+ * Filtrado por vista jerárquica del solicitante. No expone campos sensibles (cupo, emailsAlternos).
+ * Accesible por GERENTE, DIRECTOR, ADMIN, ASESOR (y aliases de transición).
+ * @returns {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>}
+ */
+function api_obtenerUsuariosDashboard() {
+  try {
+    var usuario = verificarRol(['GERENTE', 'DIRECTOR', 'ADMIN', 'ASESOR', 'LIDER']);
+    var todos = UsuariosRepo_leerTodos();
+    var emailsVisibles = getEmailsEquipoVisible(usuario.email);
+
+    var usuariosFiltrados = todos;
+
+    // Si emailsVisibles !== null, filtrar por equipo visible
+    if (emailsVisibles !== null) {
+      usuariosFiltrados = [];
+      for (var i = 0; i < todos.length; i++) {
+        if (emailsVisibles.indexOf(todos[i].email) !== -1) {
+          usuariosFiltrados.push(todos[i]);
+        }
+      }
+    }
+
+    // Mapear a campos mínimos (sin cupo, sin emailsAlternos)
+    var resultado = [];
+    for (var j = 0; j < usuariosFiltrados.length; j++) {
+      var u = usuariosFiltrados[j];
+      resultado.push({
+        email: u.email,
+        nombre: _derivarNombreDeEmail(u.email),
+        rol: u.rol,
+        emailDirector: u.emailDirector || '',
+        emailGerente: u.emailGerente || '',
+        activo: u.activo
+      });
+    }
+
+    return resultado;
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerUsuariosDashboard', e.message);
+    return [];
+  }
+}
+
+/**
+ * Retorna la lista de usuarios registrados, filtrada según la vista jerárquica del solicitante.
+ * Accesible por DIRECTOR, GERENTE, ADMIN (y LIDER como alias de transición).
+ * - ADMIN/ASESOR → todos los usuarios (sin filtro)
+ * - DIRECTOR/GERENTE → solo usuarios de su equipo visible
  * @returns {Array} Lista de usuarios
  */
 function api_obtenerUsuarios() {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
-    return _leerPestanaUsuarios();
+    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    var todos = UsuariosRepo_leerTodos();
+    var emailsVisibles = getEmailsEquipoVisible(usuario.email);
+
+    // null = acceso total (ADMIN/ASESOR)
+    if (emailsVisibles === null) {
+      return todos;
+    }
+
+    // Filtrar por emails del equipo visible
+    var resultado = [];
+    for (var i = 0; i < todos.length; i++) {
+      if (emailsVisibles.indexOf(todos[i].email) !== -1) {
+        resultado.push(todos[i]);
+      }
+    }
+    return resultado;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerUsuarios', e.message);
     return [];
@@ -135,62 +208,33 @@ function api_obtenerUsuarios() {
 }
 
 /**
- * Crea o actualiza un usuario en la pestaña USUARIOS.
- * Solo accesible por LIDER y ADMIN.
- * @param {Object} datos - {email, nombre, rol, cupo, director, backup, backupActivo, activo}
+ * Crea o actualiza un usuario en la pestaña USUARIOS (esquema v2 de 7 columnas).
+ * Accesible por DIRECTOR, GERENTE, ADMIN (y LIDER como alias de transición).
+ * Usa UsuariosRepo_guardar que valida ROL contra enum y unicidad de email.
+ * @param {Object} datos - {email, rol, activo, cupo, emailDirector, emailGerente, emailsAlternos}
  * @param {boolean} esNuevo - true = crear, false = actualizar
  * @returns {{ok:boolean, mensaje:string}}
  */
 function api_guardarUsuario(datos, esNuevo) {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
 
-    if (!datos || !datos.email || !datos.nombre || !datos.rol) {
-      return { ok: false, mensaje: 'Email, nombre y rol son obligatorios.' };
+    if (!datos || !datos.email || !datos.rol) {
+      return { ok: false, mensaje: 'Email y rol son obligatorios.' };
     }
 
-    var email = datos.email.toLowerCase().trim();
-    var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('USUARIOS');
-    if (!hoja) return { ok: false, mensaje: 'Pestaña USUARIOS no encontrada.' };
+    // Normalizar email antes de delegar al repositorio
+    datos.email = String(datos.email).toLowerCase().trim();
 
-    var todosLosDatos = hoja.getDataRange().getValues();
+    // Delegar al repositorio que maneja validación de ROL, unicidad y escritura de 7 campos
+    var resultado = UsuariosRepo_guardar(datos, esNuevo);
 
-    // Buscar si ya existe
-    var filaExistente = -1;
-    for (var i = 1; i < todosLosDatos.length; i++) {
-      if (String(todosLosDatos[i][0]).toLowerCase().trim() === email) {
-        filaExistente = i + 1; // fila en Sheets (1-based)
-        break;
-      }
+    // Invalidar cache del usuario después de un guardado exitoso
+    if (resultado.ok) {
+      invalidarCacheUsuario(datos);
     }
 
-    var filaValores = [
-      email,
-      datos.nombre.trim(),
-      datos.rol.toUpperCase().trim(),
-      Number(datos.cupo) || 0,
-      (datos.director || '').trim(),
-      (datos.backup || '').trim(),
-      datos.backupActivo === true,
-      datos.activo !== false
-    ];
-
-    if (esNuevo && filaExistente !== -1) {
-      return { ok: false, mensaje: 'Ya existe un usuario con ese email.' };
-    }
-
-    if (filaExistente !== -1) {
-      // Actualizar
-      hoja.getRange(filaExistente, 1, 1, filaValores.length).setValues([filaValores]);
-    } else {
-      // Crear
-      hoja.appendRow(filaValores);
-    }
-
-    // Invalidar cache
-    invalidarCacheUsuario(email);
-
-    return { ok: true, mensaje: esNuevo ? 'Usuario creado.' : 'Usuario actualizado.' };
+    return resultado;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_guardarUsuario', e.message);
     return { ok: false, mensaje: 'Error: ' + e.message };
@@ -206,7 +250,7 @@ function api_guardarUsuario(datos, esNuevo) {
  */
 function api_obtenerSolicitudes(desde, cantidad) {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return obtenerSolicitudesResumen(desde || 0, cantidad || 300);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerSolicitudes', e.message);
@@ -221,7 +265,7 @@ function api_obtenerSolicitudes(desde, cantidad) {
  */
 function api_obtenerDetalleSolicitud(filaNum) {
   try {
-    verificarRol(['LIDER', 'ADMIN', 'ANALISTA', 'AUXILIAR']);
+    verificarRol(['ANALISTA', 'AUXILIAR', 'DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return obtenerDetalleSolicitud(filaNum);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDetalleSolicitud', e.message);
@@ -236,12 +280,15 @@ function api_obtenerDetalleSolicitud(filaNum) {
 /**
  * Retorna solicitudes en cola para el auxiliar (PENDIENTE RADICAR en Control_General).
  * Solo datos del listado (rápido). Datos completos se cargan al abrir el modal.
+ * Usa vista jerárquica: ADMIN/ASESOR ven todos, otros filtran por equipo visible.
  * @returns {Array}
  */
 function api_obtenerColaAuxiliar() {
   try {
-    verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
-    return obtenerColaAuxiliar();
+    var usuario = verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    // null → sin filtro (ADMIN/ASESOR); array → filtrar por equipo visible
+    return obtenerColaAuxiliar(emailsEquipo);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerColaAuxiliar', e.message);
     return [];
@@ -255,7 +302,7 @@ function api_obtenerColaAuxiliar() {
  */
 function api_obtenerSolicitudAuxiliar(filaNum) {
   try {
-    verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
+    verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return obtenerSolicitudCompletaAuxiliar(filaNum);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerSolicitudAuxiliar', e.message);
@@ -269,7 +316,7 @@ function api_obtenerSolicitudAuxiliar(filaNum) {
  */
 function api_obtenerMisSolicitudesAuxiliar() {
   try {
-    var usuario = verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return obtenerSolicitudesAuxiliar(usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisSolicitudesAuxiliar', e.message);
@@ -285,7 +332,7 @@ function api_obtenerMisSolicitudesAuxiliar() {
  */
 function api_tomarSolicitudAuxiliar(idLote, uuid) {
   try {
-    var usuario = verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return tomarSolicitudAuxiliar(idLote, uuid, usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_tomarSolicitudAuxiliar', e.message);
@@ -301,7 +348,7 @@ function api_tomarSolicitudAuxiliar(idLote, uuid) {
  */
 function api_marcarRadicado(uuid, numeros) {
   try {
-    verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
+    verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return marcarSolicitudRadicada(uuid, numeros);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_marcarRadicado', e.message);
@@ -318,7 +365,7 @@ function api_marcarRadicado(uuid, numeros) {
  */
 function api_marcarErrorTerceros(uuid, participantes, nota) {
   try {
-    var usuario = verificarRol(['AUXILIAR', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return marcarErrorEnTerceros(uuid, participantes, nota, usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_marcarErrorTerceros', e.message);
@@ -336,7 +383,7 @@ function api_marcarErrorTerceros(uuid, participantes, nota) {
  */
 function api_obtenerMisSolicitudesAnalista() {
   try {
-    var usuario = verificarRol(['ANALISTA', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['ANALISTA', 'DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     var resultado = obtenerSolicitudesAnalista(usuario.email, usuario.cupo || 10);
     return resultado;
   } catch (e) {
@@ -351,7 +398,7 @@ function api_obtenerMisSolicitudesAnalista() {
  */
 function api_pedirSolicitudAnalista() {
   try {
-    var usuario = verificarRol(['ANALISTA', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['ANALISTA', 'DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return pedirSolicitudAnalista(usuario.email, usuario.cupo || 10);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_pedirSolicitudAnalista', e.message);
@@ -366,7 +413,7 @@ function api_pedirSolicitudAnalista() {
  */
 function api_obtenerSolicitudParaEvaluar(filaNum) {
   try {
-    verificarRol(['ANALISTA', 'LIDER', 'ADMIN']);
+    verificarRol(['ANALISTA', 'DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return obtenerDetalleSolicitud(filaNum);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerSolicitudParaEvaluar', e.message);
@@ -383,7 +430,7 @@ function api_obtenerSolicitudParaEvaluar(filaNum) {
  */
 function api_guardarEvaluacion(filaNum, datos, finalizar) {
   try {
-    var usuario = verificarRol(['ANALISTA', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['ANALISTA', 'DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return guardarEvaluacionAnalista(filaNum, datos, finalizar, usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_guardarEvaluacion', e.message);
@@ -399,13 +446,15 @@ function api_guardarEvaluacion(filaNum, datos, finalizar) {
 
 /**
  * Retorna los errores pendientes de respuesta del comercial logueado.
+ * Usa vista jerárquica: ADMIN/ASESOR ven todos, otros filtran por equipo visible.
  * @returns {Array}
  */
 function api_obtenerMisErroresPendientes() {
   try {
-    var usuario = verificarRol(['COMERCIAL', 'LIDER', 'ADMIN']);
-    var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
-    return obtenerErroresPendientesComercial(verTodos ? null : usuario.email);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    // null → sin filtro (ADMIN/ASESOR); array → filtrar por equipo visible
+    return obtenerErroresPendientesComercial(emailsEquipo);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisErroresPendientes', e.message);
     return [];
@@ -420,7 +469,7 @@ function api_obtenerMisErroresPendientes() {
  */
 function api_enviarCorreccion(uuid, respuestas) {
   try {
-    var usuario = verificarRol(['COMERCIAL', 'LIDER', 'ADMIN']);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     return guardarCorreccionComercial(uuid, respuestas, usuario.email);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_enviarCorreccion', e.message);
@@ -438,7 +487,7 @@ function api_enviarCorreccion(uuid, respuestas) {
  */
 function api_obtenerAsignaciones() {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return obtenerAsignacionesActivas();
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerAsignaciones', e.message);
@@ -454,7 +503,7 @@ function api_obtenerAsignaciones() {
  */
 function api_reasignarSolicitud(filaNum, nuevoEmail) {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return reasignarSolicitud(filaNum, nuevoEmail);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_reasignarSolicitud', e.message);
@@ -472,7 +521,7 @@ function api_reasignarSolicitud(filaNum, nuevoEmail) {
  */
 function api_enviarReporteGestion() {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     enviarReporteGestionInducciones();
     return { ok: true, mensaje: 'Reporte enviado.' };
   } catch (e) {
@@ -489,7 +538,7 @@ function api_enviarReporteGestion() {
  */
 function api_enviarReportesCierreMes() {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     enviarReportesCierreMes();
     return { ok: true, mensaje: 'Reportes de cierre de mes enviados.' };
   } catch (e) {
@@ -508,7 +557,7 @@ function api_enviarReportesCierreMes() {
  */
 function api_obtenerCatalogoMotivos() {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return _leerCatalogoMotivos();
   } catch (e) {
     return [];
@@ -523,7 +572,7 @@ function api_obtenerCatalogoMotivos() {
  */
 function api_guardarMotivo(motivo, esNuevo) {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return _guardarMotivo(motivo, esNuevo);
   } catch (e) {
     return { ok: false, mensaje: 'Error: ' + e.message };
@@ -537,7 +586,7 @@ function api_guardarMotivo(motivo, esNuevo) {
  */
 function api_eliminarMotivo(id) {
   try {
-    verificarRol(['LIDER', 'ADMIN']);
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
     return _eliminarMotivo(id);
   } catch (e) {
     return { ok: false, mensaje: 'Error: ' + e.message };
@@ -646,4 +695,30 @@ function _eliminarMotivo(id) {
     }
   }
   return { ok: false, mensaje: 'Motivo no encontrado.' };
+}
+
+// ── Funciones internas de Api.js ──
+
+/**
+ * Genera una clave de cache estable para el equipo visible del usuario.
+ * - null → 'GLOBAL' (acceso total, ADMIN/ASESOR)
+ * - string[] → hash simple basado en los emails ordenados
+ * @param {string[]|null} emailsEquipo - Array de emails o null
+ * @returns {string} Clave corta para uso en cacheKey
+ */
+function _hashEquipoVisible(emailsEquipo) {
+  if (emailsEquipo === null) return 'GLOBAL';
+  if (!Array.isArray(emailsEquipo) || emailsEquipo.length === 0) return 'EMPTY';
+  // Para un solo email, usar el email directamente (más legible en cache)
+  if (emailsEquipo.length === 1) return emailsEquipo[0];
+  // Para múltiples emails, generar un hash simple y estable
+  var sorted = emailsEquipo.slice().sort();
+  var hash = 0;
+  var str = sorted.join(',');
+  for (var i = 0; i < str.length; i++) {
+    var ch = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + ch;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return 'EQ_' + (hash >>> 0).toString(36);
 }

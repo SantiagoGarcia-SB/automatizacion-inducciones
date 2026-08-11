@@ -1,0 +1,429 @@
+<script>
+/**
+ * ============================================================
+ * DashboardCharts — Orquestador de datos para gráficos del dashboard
+ * ============================================================
+ *
+ * Conecta los datos filtrados de lotes con el SVGRenderer para
+ * generar los 3 gráficos analíticos (Ranking, Antigüedad, Tendencia).
+ *
+ * Requisitos: 6.x, 7.x, 8.x
+ */
+
+var DashboardCharts = {
+  /**
+   * Estados que cuentan como "RADICADO o posterior" en el flujo del proceso.
+   * @private
+   */
+  _ESTADOS_RADICADO_O_POSTERIOR: [
+    'RADICADO',
+    'EN ANÁLISIS',
+    'PENDIENTE PAZ Y SALVO',
+    'TERMINADO',
+    'PAZ Y SALVO',
+    'DESISTIDO',
+    'REGISTRADO'
+  ],
+
+  /**
+   * Renderiza los 3 gráficos del dashboard con los datos filtrados actuales.
+   * @param {Array<Lote>} lotes - Lotes ya filtrados por DrillDownFilters
+   * @param {Array<UsuarioDash>} usuarios - Lista de usuarios para nombres
+   */
+  renderizar: function(lotes, usuarios) {
+    var datosRanking = this._calcularRanking(lotes, usuarios);
+    var datosAntiguedad = this._calcularAntiguedad(lotes);
+    var datosTendencia = this._calcularTendencia(lotes);
+
+    var mensajeVacio = 'No hay datos para el período seleccionado';
+
+    // Verificar si todos los datos están vacíos o con valores en cero
+    var rankingVacio = this._datosVacios(datosRanking);
+    var antiguedadVacio = this._datosVacios(datosAntiguedad);
+    var tendenciaVacio = this._datosVacios(datosTendencia);
+
+    // Renderizar Chart Ranking
+    if (rankingVacio) {
+      this._mostrarMensajeVacio('chart-ranking', mensajeVacio);
+    } else {
+      SVGRenderer.barrasHorizontales({
+        containerId: 'chart-ranking',
+        titulo: 'Ranking de radicaciones por comercial - Mes actual',
+        datos: datosRanking
+      });
+    }
+
+    // Renderizar Chart Antigüedad
+    if (antiguedadVacio) {
+      this._mostrarMensajeVacio('chart-antiguedad', mensajeVacio);
+    } else {
+      SVGRenderer.barrasHorizontales({
+        containerId: 'chart-antiguedad',
+        titulo: 'Antigüedad promedio por estado (días)',
+        datos: datosAntiguedad,
+        opciones: {
+          umbralAlerta: 5,
+          colorAlerta: '#c0392b',
+          sufijo: ' días'
+        }
+      });
+    }
+
+    // Renderizar Chart Tendencia
+    if (tendenciaVacio) {
+      this._mostrarMensajeVacio('chart-tendencia', mensajeVacio);
+    } else {
+      SVGRenderer.lineaTendencia({
+        containerId: 'chart-tendencia',
+        titulo: 'Tendencia de radicaciones - Últimas 8 semanas',
+        datos: datosTendencia
+      });
+    }
+  },
+
+  /**
+   * Determina si un array de datos de gráfico está vacío o contiene solo valores cero.
+   * @param {Array<{label: string, valor: number}>} datos
+   * @returns {boolean} true si no hay datos o todos los valores son 0
+   * @private
+   */
+  _datosVacios: function(datos) {
+    if (!datos || datos.length === 0) return true;
+    for (var i = 0; i < datos.length; i++) {
+      if (datos[i].valor !== 0) return false;
+    }
+    return true;
+  },
+
+  /**
+   * Muestra un mensaje de datos vacíos dentro de un contenedor de gráfico.
+   * @param {string} containerId - ID del div contenedor
+   * @param {string} mensaje - Texto a mostrar
+   * @private
+   */
+  _mostrarMensajeVacio: function(containerId, mensaje) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    var div = document.createElement('div');
+    div.style.padding = '24px';
+    div.style.textAlign = 'center';
+    div.style.color = '#666';
+    div.style.fontSize = '14px';
+    div.textContent = mensaje;
+    container.appendChild(div);
+  },
+
+  /**
+   * Calcula datos para el Chart_Ranking.
+   * Cuenta lotes radicados (o estado posterior) en el mes calendario actual por comercial.
+   * Incluye comerciales con cero lotes. Retorna array ordenado descendente por valor.
+   *
+   * @param {Array<Lote>} lotes - Lotes ya filtrados por DrillDownFilters
+   * @param {Array<UsuarioDash>} usuarios - Lista de usuarios para nombres de comerciales
+   * @returns {Array<{label: string, valor: number}>} Array ordenado descendente por valor
+   *
+   * Requirements: 6.2, 6.3, 6.4, 6.6
+   */
+  _calcularRanking: function(lotes, usuarios) {
+    var ahora = new Date();
+    var mesActual = ahora.getMonth();
+    var anioActual = ahora.getFullYear();
+
+    // Construir mapa de comerciales desde la lista de usuarios
+    // Clave: nombre en MAYÚSCULAS para comparación case-insensitive
+    var conteo = {};
+    var labelsPorClave = {};
+
+    if (usuarios && usuarios.length > 0) {
+      for (var i = 0; i < usuarios.length; i++) {
+        var u = usuarios[i];
+        if (u && u.nombre) {
+          var clave = u.nombre.toUpperCase();
+          if (!(clave in conteo)) {
+            conteo[clave] = 0;
+            labelsPorClave[clave] = u.nombre;
+          }
+        }
+      }
+    }
+
+    // Contar lotes del mes actual con estado RADICADO o posterior
+    var lotesArr = lotes || [];
+    for (var j = 0; j < lotesArr.length; j++) {
+      var lote = lotesArr[j];
+      if (!lote) continue;
+
+      // Verificar que el estado sea RADICADO o posterior
+      if (!this._esEstadoRadicadoOPosterior(lote.estadoPrincipal)) continue;
+
+      // Verificar que la fecha esté en el mes calendario actual
+      var fechaLote = this._parsearFecha(lote.fecha);
+      if (!fechaLote) continue;
+      if (fechaLote.getMonth() !== mesActual || fechaLote.getFullYear() !== anioActual) continue;
+
+      // Incrementar conteo del comercial (match case-insensitive)
+      var comercialClave = (lote.comercial || '').toUpperCase();
+      if (comercialClave in conteo) {
+        conteo[comercialClave]++;
+      }
+    }
+
+    // Convertir a array de {label, valor}
+    var resultado = [];
+    var claves = Object.keys(conteo);
+    for (var m = 0; m < claves.length; m++) {
+      var cl = claves[m];
+      resultado.push({
+        label: labelsPorClave[cl],
+        valor: conteo[cl]
+      });
+    }
+
+    // Ordenar descendente por valor
+    resultado.sort(function(a, b) {
+      return b.valor - a.valor;
+    });
+
+    return resultado;
+  },
+
+  /**
+   * Calcula datos para el Chart_Antigüedad.
+   * Promedio de días por estado para lotes activos (excluir TERMINADO).
+   *
+   * Antigüedad = Math.floor((Date.now() - parsedDate) / (24*60*60*1000))
+   * Promedio redondeado a 1 decimal por estado.
+   * Excluye lotes con fecha inválida.
+   *
+   * @param {Array<Lote>} lotes
+   * @returns {Array<{label: string, valor: number}>} Una entrada por estado con al menos 1 lote activo
+   *
+   * Requirements: 7.2, 7.3
+   */
+  _calcularAntiguedad: function(lotes) {
+    if (!lotes || !Array.isArray(lotes)) return [];
+
+    var msPerDay = 24 * 60 * 60 * 1000;
+    var now = Date.now();
+
+    // Agrupar lotes activos por estadoPrincipal
+    var grupos = {}; // { estado: [dias, dias, ...] }
+
+    for (var i = 0; i < lotes.length; i++) {
+      var lote = lotes[i];
+
+      // Excluir lotes sin estadoPrincipal válido
+      if (!lote || !lote.estadoPrincipal) continue;
+      var estado = lote.estadoPrincipal.trim();
+      if (!estado) continue;
+
+      // Excluir lotes terminados (case-insensitive)
+      if (estado.toUpperCase() === 'TERMINADO') continue;
+
+      // Parsear fecha — excluir si inválida
+      var fecha = this._parsearFecha(lote.fecha);
+      if (!fecha) continue;
+
+      // Calcular antigüedad en días: floor((now - fecha) / msPerDay)
+      var antiguedadDias = Math.floor((now - fecha.getTime()) / msPerDay);
+
+      // Agrupar por estado
+      if (!grupos[estado]) {
+        grupos[estado] = [];
+      }
+      grupos[estado].push(antiguedadDias);
+    }
+
+    // Calcular promedio por estado, redondeado a 1 decimal
+    var resultado = [];
+    var estados = Object.keys(grupos);
+
+    for (var j = 0; j < estados.length; j++) {
+      var estadoKey = estados[j];
+      var dias = grupos[estadoKey];
+      var suma = 0;
+
+      for (var k = 0; k < dias.length; k++) {
+        suma += dias[k];
+      }
+
+      var promedio = Math.round((suma / dias.length) * 10) / 10;
+
+      resultado.push({
+        label: estadoKey,
+        valor: promedio
+      });
+    }
+
+    return resultado;
+  },
+
+  /**
+   * Parsea una fecha en formato "d/MM/yyyy HH:mm" a un objeto Date.
+   * @param {string} fechaStr - Fecha en formato "d/MM/yyyy HH:mm"
+   * @returns {Date|null} Fecha parseada o null si es inválida
+   * @private
+   */
+  _parsearFecha: function(fechaStr) {
+    if (!fechaStr || typeof fechaStr !== 'string') return null;
+
+    var partes = fechaStr.trim().split(' ');
+    if (partes.length < 2) return null;
+
+    var fechaParts = partes[0].split('/');
+    if (fechaParts.length !== 3) return null;
+
+    var dia = parseInt(fechaParts[0], 10);
+    var mes = parseInt(fechaParts[1], 10) - 1; // Meses 0-indexed
+    var anio = parseInt(fechaParts[2], 10);
+
+    var horaParts = partes[1].split(':');
+    if (horaParts.length < 2) return null;
+
+    var hora = parseInt(horaParts[0], 10);
+    var minuto = parseInt(horaParts[1], 10);
+
+    if (isNaN(dia) || isNaN(mes) || isNaN(anio) || isNaN(hora) || isNaN(minuto)) return null;
+    if (mes < 0 || mes > 11 || dia < 1 || dia > 31) return null;
+    if (hora < 0 || hora > 23 || minuto < 0 || minuto > 59) return null;
+
+    var fecha = new Date(anio, mes, dia, hora, minuto, 0, 0);
+
+    // Validar que la fecha construida coincide con los valores originales
+    if (fecha.getFullYear() !== anio || fecha.getMonth() !== mes || fecha.getDate() !== dia) {
+      return null;
+    }
+
+    return fecha;
+  },
+
+  /**
+   * Calcula datos para el Chart_Tendencia.
+   * Agrupa lotes en las últimas 8 semanas calendario completas (lunes a domingo).
+   * Cuenta lotes cuya fecha caiga en cada semana y cuyo estado sea RADICADO o posterior.
+   *
+   * @param {Array<Lote>} lotes
+   * @returns {Array<{label: string, valor: number}>} Exactamente 8 entradas, semana más antigua primero
+   *
+   * Requirements: 8.2, 8.3
+   */
+  _calcularTendencia: function(lotes) {
+    var ahora = new Date();
+    var semanas = this._obtenerUltimas8Semanas(ahora);
+    var resultados = [];
+
+    for (var i = 0; i < semanas.length; i++) {
+      resultados.push({ label: semanas[i].label, valor: 0 });
+    }
+
+    if (!lotes || !lotes.length) return resultados;
+
+    for (var j = 0; j < lotes.length; j++) {
+      var lote = lotes[j];
+
+      // Verificar que el estado sea RADICADO o posterior
+      if (!this._esEstadoRadicadoOPosterior(lote.estadoPrincipal)) continue;
+
+      // Parsear fecha del lote
+      var fechaLote = this._parsearFecha(lote.fecha);
+      if (!fechaLote) continue;
+
+      // Buscar en qué semana cae el lote
+      var tiempoLote = fechaLote.getTime();
+      for (var k = 0; k < semanas.length; k++) {
+        if (tiempoLote >= semanas[k].inicio.getTime() && tiempoLote <= semanas[k].fin.getTime()) {
+          resultados[k].valor++;
+          break; // Cada lote en máximo una semana
+        }
+      }
+    }
+
+    return resultados;
+  },
+
+  /**
+   * Calcula las últimas 8 semanas calendario completas (lunes a domingo).
+   * La semana más reciente es la última semana COMPLETAMENTE finalizada antes de hoy.
+   *
+   * @param {Date} referencia - Fecha de referencia (normalmente hoy)
+   * @returns {Array<{inicio: Date, fin: Date, label: string}>} 8 semanas, más antigua primero
+   * @private
+   */
+  _obtenerUltimas8Semanas: function(referencia) {
+    // Encontrar el domingo más reciente que ya pasó (fin de la última semana completa)
+    // Si hoy es lunes (1), el domingo pasado fue ayer
+    // Si hoy es domingo (0), la última semana completa terminó el domingo anterior
+    var hoy = new Date(referencia.getFullYear(), referencia.getMonth(), referencia.getDate());
+    var diaSemana = hoy.getDay(); // 0 = domingo, 1 = lunes, ..., 6 = sábado
+
+    // Calcular el domingo que cierra la última semana completa
+    var domingoReciente;
+    if (diaSemana === 0) {
+      // Hoy es domingo → la última semana completa terminó el domingo anterior (hace 7 días)
+      domingoReciente = new Date(hoy.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else {
+      // Cualquier otro día → la última semana completa terminó el domingo pasado
+      domingoReciente = new Date(hoy.getTime() - diaSemana * 24 * 60 * 60 * 1000);
+    }
+
+    var semanas = [];
+    for (var i = 7; i >= 0; i--) {
+      // Calcular inicio (lunes) y fin (domingo) de cada semana
+      var offsetDias = i * 7;
+      var finSemana = new Date(domingoReciente.getTime() - offsetDias * 24 * 60 * 60 * 1000);
+      var inicioSemana = new Date(finSemana.getTime() - 6 * 24 * 60 * 60 * 1000);
+
+      // Fin de la semana es domingo a las 23:59:59.999
+      finSemana.setHours(23, 59, 59, 999);
+      // Inicio de la semana es lunes a las 00:00:00.000
+      inicioSemana.setHours(0, 0, 0, 0);
+
+      var label = this._formatearLabel(inicioSemana, finSemana);
+      semanas.push({ inicio: inicioSemana, fin: finSemana, label: label });
+    }
+
+    return semanas;
+  },
+
+  /**
+   * Formatea el label de una semana como "dd/MM - dd/MM".
+   * @param {Date} inicio - Lunes de la semana
+   * @param {Date} fin - Domingo de la semana
+   * @returns {string} Label formateado
+   * @private
+   */
+  _formatearLabel: function(inicio, fin) {
+    var diaInicio = this._pad2(inicio.getDate());
+    var mesInicio = this._pad2(inicio.getMonth() + 1);
+    var diaFin = this._pad2(fin.getDate());
+    var mesFin = this._pad2(fin.getMonth() + 1);
+    return diaInicio + '/' + mesInicio + ' - ' + diaFin + '/' + mesFin;
+  },
+
+  /**
+   * Verifica si un estado es RADICADO o posterior en el flujo.
+   * @param {string} estado - Estado principal del lote
+   * @returns {boolean}
+   * @private
+   */
+  _esEstadoRadicadoOPosterior: function(estado) {
+    if (!estado) return false;
+    var estadoUpper = estado.toUpperCase().trim();
+    for (var i = 0; i < this._ESTADOS_RADICADO_O_POSTERIOR.length; i++) {
+      if (this._ESTADOS_RADICADO_O_POSTERIOR[i] === estadoUpper) return true;
+    }
+    return false;
+  },
+
+  /**
+   * Formatea un número a 2 dígitos con cero a la izquierda.
+   * @param {number} n
+   * @returns {string}
+   * @private
+   */
+  _pad2: function(n) {
+    return n < 10 ? '0' + n : '' + n;
+  }
+};
+</script>

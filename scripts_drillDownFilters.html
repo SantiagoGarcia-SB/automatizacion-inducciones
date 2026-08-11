@@ -1,0 +1,377 @@
+<script>
+/**
+ * ============================================================
+ * DrillDownFilters — Módulo de filtros drill-down por jerarquía
+ * ============================================================
+ *
+ * Renderiza dropdowns de Director y Comercial según el rol del usuario.
+ * Gestiona la lógica de cascada y filtrado local sobre CacheManager.
+ *
+ * Visibilidad por rol:
+ *   GERENTE / ADMIN / ASESOR → Filtro_Director + Filtro_Comercial
+ *   DIRECTOR → solo Filtro_Comercial
+ *   CONSULTOR / COMERCIAL / AUXILIAR / ANALISTA → oculto (sin render)
+ *
+ * Requisitos: 1.1, 1.2, 1.3, 1.4, 2.3, 3.4
+ */
+
+var DrillDownFilters = {
+  /** Estado actual del filtro */
+  _state: { director: null, comercial: null },
+
+  /** Rol del usuario logueado (almacenado en render para uso posterior en handlers) */
+  _rol: null,
+
+  /** Email del usuario logueado (almacenado en render para uso posterior en handlers) */
+  _emailUsuario: null,
+
+  /** Lista de usuarios cacheada en render para uso en handlers de cambio */
+  _usuarios: null,
+
+  /**
+   * Callback invocado cuando cambia un filtro. La capa de integración (task 7.2) lo asigna.
+   * Recibe el estado actual {director, comercial} como argumento.
+   * @type {function(FiltroState)|null}
+   */
+  _onFiltroChange: null,
+
+  /** Roles que ven ambos filtros (Director + Comercial) */
+  _ROLES_AMBOS_FILTROS: ['GERENTE', 'ADMIN', 'ASESOR'],
+
+  /** Roles que ven solo filtro Comercial */
+  _ROLES_SOLO_COMERCIAL: ['DIRECTOR'],
+
+  /** Roles que no ven ningún filtro */
+  _ROLES_SIN_FILTRO: ['CONSULTOR', 'COMERCIAL', 'AUXILIAR', 'ANALISTA'],
+
+  /**
+   * Determina el nivel de visibilidad de filtros para un rol dado.
+   * @param {string} rol - Rol del usuario
+   * @returns {'ambos'|'solo-comercial'|'oculto'} Nivel de visibilidad
+   */
+  _getVisibilidad: function(rol) {
+    var rolUpper = (rol || '').toUpperCase();
+    if (this._ROLES_AMBOS_FILTROS.indexOf(rolUpper) !== -1) return 'ambos';
+    if (this._ROLES_SOLO_COMERCIAL.indexOf(rolUpper) !== -1) return 'solo-comercial';
+    return 'oculto';
+  },
+
+  /**
+   * Renderiza los dropdowns según el rol del usuario.
+   * @param {string} rol - Rol del usuario logueado (GERENTE, DIRECTOR, ADMIN, ASESOR, etc.)
+   * @param {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>} usuarios - Lista de usuarios cacheados
+   * @param {string} emailUsuario - Email del usuario logueado
+   * @returns {string} HTML de los filtros (vacío si el rol no tiene acceso)
+   */
+  render: function(rol, usuarios, emailUsuario) {
+    var visibilidad = this._getVisibilidad(rol);
+
+    if (visibilidad === 'oculto') {
+      return '';
+    }
+
+    // Almacenar contexto para uso en handlers de cambio (DOM events)
+    this._rol = rol;
+    this._emailUsuario = emailUsuario;
+    this._usuarios = usuarios;
+
+    // Resetear estado al renderizar
+    this._state = { director: null, comercial: null };
+
+    var html = '<div class="drilldown-filters" data-testid="drilldown-filters">';
+
+    if (visibilidad === 'ambos') {
+      // Renderizar Filtro Director
+      var directores = this._getDirectoresVisibles(rol, emailUsuario, usuarios);
+      html += this._renderDropdownDirector(directores);
+    }
+
+    // Renderizar Filtro Comercial (para 'ambos' y 'solo-comercial')
+    var comerciales = this._getComercialesVisibles(
+      this._state.director,
+      rol,
+      emailUsuario,
+      usuarios
+    );
+    html += this._renderDropdownComercial(comerciales);
+
+    html += '</div>';
+    return html;
+  },
+
+  /**
+   * Genera HTML del dropdown de Director.
+   * @param {Array<{email: string, nombre: string}>} directores
+   * @returns {string} HTML del select de directores
+   * @private
+   */
+  _renderDropdownDirector: function(directores) {
+    var html = '<div class="drilldown-filters__group" data-testid="filtro-director-container">';
+    html += '<label class="drilldown-filters__label" for="filtro-director">Director</label>';
+    html += '<select class="drilldown-filters__select" id="filtro-director" data-testid="filtro-director" onchange="DrillDownFilters.onDirectorChange(this.value)">';
+    html += '<option value="" selected>Todos</option>';
+
+    for (var i = 0; i < directores.length; i++) {
+      var dir = directores[i];
+      html += '<option value="' + this._escapeAttr(dir.email) + '">'
+        + this._escapeHtml(dir.nombre) + '</option>';
+    }
+
+    html += '</select>';
+    html += '</div>';
+    return html;
+  },
+
+  /**
+   * Genera HTML del dropdown de Comercial.
+   * @param {Array<{email: string, nombre: string}>} comerciales
+   * @returns {string} HTML del select de comerciales
+   * @private
+   */
+  _renderDropdownComercial: function(comerciales) {
+    var html = '<div class="drilldown-filters__group" data-testid="filtro-comercial-container">';
+    html += '<label class="drilldown-filters__label" for="filtro-comercial">Comercial</label>';
+    html += '<select class="drilldown-filters__select" id="filtro-comercial" data-testid="filtro-comercial" onchange="DrillDownFilters.onComercialChange(this.value)">';
+    html += '<option value="" selected>Todos</option>';
+
+    for (var i = 0; i < comerciales.length; i++) {
+      var com = comerciales[i];
+      html += '<option value="' + this._escapeAttr(com.email) + '">'
+        + this._escapeHtml(com.nombre) + '</option>';
+    }
+
+    html += '</select>';
+    html += '</div>';
+    return html;
+  },
+
+  /**
+   * Handler de cambio en Filtro Director. Refresca el Filtro Comercial.
+   * @param {string} emailDirector - Email seleccionado o '' para "Todos"
+   */
+  onDirectorChange: function(emailDirector) {
+    this._state.director = emailDirector || null;
+    this._state.comercial = null;
+
+    // Re-popular el dropdown de Comercial con los comerciales del director seleccionado
+    var comerciales = this._getComercialesVisibles(
+      this._state.director,
+      this._rol,
+      this._emailUsuario,
+      this._usuarios
+    );
+
+    // Actualizar DOM del Filtro_Comercial si existe
+    var selectComercial = (typeof document !== 'undefined') ? document.getElementById('filtro-comercial') : null;
+    if (selectComercial) {
+      var html = '<option value="" selected>Todos</option>';
+      for (var i = 0; i < comerciales.length; i++) {
+        var com = comerciales[i];
+        html += '<option value="' + this._escapeAttr(com.email) + '">'
+          + this._escapeHtml(com.nombre) + '</option>';
+      }
+      selectComercial.innerHTML = html;
+    }
+
+    // Notificar a la capa de integración del cambio de filtro
+    if (typeof this._onFiltroChange === 'function') {
+      this._onFiltroChange({ director: this._state.director, comercial: this._state.comercial });
+    }
+  },
+
+  /**
+   * Handler de cambio en Filtro Comercial. Trigger de re-render.
+   * @param {string} emailComercial - Email seleccionado o '' para "Todos"
+   */
+  onComercialChange: function(emailComercial) {
+    this._state.comercial = emailComercial || null;
+
+    // Notificar a la capa de integración del cambio de filtro
+    if (typeof this._onFiltroChange === 'function') {
+      this._onFiltroChange({ director: this._state.director, comercial: this._state.comercial });
+    }
+  },
+
+  /**
+   * Retorna los emails de comerciales visibles según la selección actual.
+   * Usado para filtrar lotes localmente.
+   * @param {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>} usuarios
+   * @returns {string[]|null} Array de emails o null (sin filtro)
+   */
+  getEmailsFiltrados: function(usuarios) {
+    // Si un comercial específico está seleccionado, retornar solo su email
+    if (this._state.comercial) {
+      return [this._state.comercial];
+    }
+
+    // Si un director específico está seleccionado (pero comercial = "Todos"),
+    // retornar emails de todos los comerciales de ese director
+    if (this._state.director) {
+      var comerciales = this._getComercialesVisibles(
+        this._state.director,
+        this._rol,
+        this._emailUsuario,
+        usuarios
+      );
+      var emails = [];
+      for (var i = 0; i < comerciales.length; i++) {
+        emails.push(comerciales[i].email);
+      }
+      return emails;
+    }
+
+    // Ambos en "Todos" → sin filtro (null indica que se muestran todos los datos del equipo visible)
+    return null;
+  },
+
+  /**
+   * Obtiene la lista de directores para popular el dropdown según el rol.
+   * - GERENTE → solo directores cuyo emailGerente === email del gerente Y activo === true
+   * - ADMIN/ASESOR → todos los usuarios con rol DIRECTOR Y activo === true
+   * @param {string} rol
+   * @param {string} emailUsuario
+   * @param {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>} usuarios
+   * @returns {Array<{email: string, nombre: string}>}
+   */
+  _getDirectoresVisibles: function(rol, emailUsuario, usuarios) {
+    var resultado = [];
+    if (!usuarios) return resultado;
+
+    var rolUpper = (rol || '').toUpperCase();
+    var emailNorm = (emailUsuario || '').toLowerCase().trim();
+
+    for (var i = 0; i < usuarios.length; i++) {
+      var u = usuarios[i];
+
+      // Solo directores activos
+      if (u.rol !== 'DIRECTOR' || !u.activo) continue;
+
+      if (rolUpper === 'GERENTE') {
+        // GERENTE solo ve directores de su equipo (emailGerente === gerente's email)
+        var emailGerente = (u.emailGerente || '').toLowerCase().trim();
+        if (emailGerente === emailNorm) {
+          resultado.push({ email: u.email, nombre: u.nombre });
+        }
+      } else if (rolUpper === 'ADMIN' || rolUpper === 'ASESOR') {
+        // ADMIN/ASESOR ven todos los directores activos
+        resultado.push({ email: u.email, nombre: u.nombre });
+      }
+    }
+
+    return resultado;
+  },
+
+  /**
+   * Obtiene la lista de comerciales según el director seleccionado y el rol del usuario.
+   * - Director seleccionado → comerciales cuyo emailDirector === director seleccionado Y activo === true
+   * - "Todos" (emailDirector null) para GERENTE → comerciales transitivos (a través de sus directores)
+   * - Usuario es DIRECTOR (no hay filtro director) → comerciales cuyo emailDirector === su email Y activo === true
+   * Roles considerados como "comercial": COMERCIAL, CONSULTOR
+   * @param {string|null} emailDirector
+   * @param {string} rol
+   * @param {string} emailUsuario
+   * @param {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>} usuarios
+   * @returns {Array<{email: string, nombre: string}>}
+   */
+  _getComercialesVisibles: function(emailDirector, rol, emailUsuario, usuarios) {
+    var resultado = [];
+    if (!usuarios) return resultado;
+
+    var rolUpper = (rol || '').toUpperCase();
+    var emailNorm = (emailUsuario || '').toLowerCase().trim();
+
+    // Roles considerados como "comercial"
+    var rolesComercial = ['COMERCIAL', 'CONSULTOR'];
+
+    if (emailDirector) {
+      // Caso 1: Director específico seleccionado → comerciales de ese director
+      var directorNorm = emailDirector.toLowerCase().trim();
+      for (var i = 0; i < usuarios.length; i++) {
+        var u = usuarios[i];
+        if (!u.activo) continue;
+        if (rolesComercial.indexOf(u.rol) === -1) continue;
+        var uDir = (u.emailDirector || '').toLowerCase().trim();
+        if (uDir === directorNorm) {
+          resultado.push({ email: u.email, nombre: u.nombre });
+        }
+      }
+    } else if (rolUpper === 'GERENTE') {
+      // Caso 2: "Todos" seleccionado + GERENTE → comerciales transitivos
+      // Primero obtener emails de directores del gerente
+      var directoresDelGerente = {};
+      for (var j = 0; j < usuarios.length; j++) {
+        var d = usuarios[j];
+        if (d.rol === 'DIRECTOR' && d.activo) {
+          var dGerente = (d.emailGerente || '').toLowerCase().trim();
+          if (dGerente === emailNorm) {
+            directoresDelGerente[d.email.toLowerCase().trim()] = true;
+          }
+        }
+      }
+      // Luego filtrar comerciales cuyo emailDirector esté en los directores del gerente
+      for (var k = 0; k < usuarios.length; k++) {
+        var c = usuarios[k];
+        if (!c.activo) continue;
+        if (rolesComercial.indexOf(c.rol) === -1) continue;
+        var cDir = (c.emailDirector || '').toLowerCase().trim();
+        if (directoresDelGerente[cDir]) {
+          resultado.push({ email: c.email, nombre: c.nombre });
+        }
+      }
+    } else if (rolUpper === 'DIRECTOR') {
+      // Caso 3: Usuario es DIRECTOR → comerciales cuyo emailDirector === su email
+      for (var m = 0; m < usuarios.length; m++) {
+        var u2 = usuarios[m];
+        if (!u2.activo) continue;
+        if (rolesComercial.indexOf(u2.rol) === -1) continue;
+        var u2Dir = (u2.emailDirector || '').toLowerCase().trim();
+        if (u2Dir === emailNorm) {
+          resultado.push({ email: u2.email, nombre: u2.nombre });
+        }
+      }
+    } else if (rolUpper === 'ADMIN' || rolUpper === 'ASESOR') {
+      // Caso 4: ADMIN/ASESOR con "Todos" → todos los comerciales activos
+      for (var n = 0; n < usuarios.length; n++) {
+        var u3 = usuarios[n];
+        if (!u3.activo) continue;
+        if (rolesComercial.indexOf(u3.rol) === -1) continue;
+        resultado.push({ email: u3.email, nombre: u3.nombre });
+      }
+    }
+
+    return resultado;
+  },
+
+  /**
+   * Escapa caracteres HTML para prevenir XSS en contenido dinámico.
+   * @param {string} str
+   * @returns {string}
+   * @private
+   */
+  _escapeHtml: function(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  /**
+   * Escapa caracteres para uso seguro en atributos HTML.
+   * @param {string} str
+   * @returns {string}
+   * @private
+   */
+  _escapeAttr: function(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+};
+</script>

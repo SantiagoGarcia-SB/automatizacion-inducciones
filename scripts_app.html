@@ -23,6 +23,7 @@ var CacheManager = {
     'lotes': 0,
     'solicitudes': 0,
     'usuarios': 0,
+    'usuarios-dash': 0,
     'config-motivos': 0
   },
 
@@ -316,6 +317,24 @@ var MENUS_POR_ROL = {
     { id: 'lotes', icon: '📋', label: 'Mis lotes' },
     { id: 'errores', icon: '⚠️', label: 'Pendientes' }
   ],
+  CONSULTOR: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Mis lotes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+  ],
+  DIRECTOR: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Lotes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+  ],
+  GERENTE: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Lotes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+  ],
   AUXILIAR: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola' },
@@ -531,6 +550,34 @@ function navegarA(seccion) {
   }
 }
 
+/**
+ * Obtiene los usuarios para filtros del dashboard.
+ * Si están en cache, invoca el callback inmediatamente.
+ * Si no, los solicita al servidor y los cachea antes de invocar el callback.
+ * Usa _navId para descartar respuestas tardías si el usuario cambió de sección.
+ * @param {function} callback - fn(usuarios) invocado con el array de UsuarioDash
+ */
+function _cargarUsuariosDash(callback) {
+  var cached = CacheManager.get('usuarios-dash');
+  if (cached) {
+    callback(cached);
+    return;
+  }
+
+  var navIdLocal = _navId;
+  callServer('api_obtenerUsuariosDashboard')
+    .then(function(datos) {
+      if (!_sigueVigente(navIdLocal)) return;
+      CacheManager.set('usuarios-dash', datos || []);
+      callback(datos || []);
+    })
+    .catch(function(err) {
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error('Error cargando usuarios-dash:', err);
+      callback([]);
+    });
+}
+
 function cargarDashboard() {
   var navIdLocal = _navId;
 
@@ -573,7 +620,7 @@ function _renderizarDashboardConDatos(r) {
       var hora = new Date().getHours();
       var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
       var nombre = APP_USUARIO ? APP_USUARIO.nombre : '';
-      var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN');
+      var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN' || APP_USUARIO.rol === 'DIRECTOR' || APP_USUARIO.rol === 'GERENTE' || APP_USUARIO.rol === 'ASESOR');
 
       var html = '<div class="stack">'
         // Hero compacto
@@ -603,6 +650,25 @@ function _renderizarDashboardConDatos(r) {
           + '<div class="flex flex--between" style="margin-bottom:var(--space-3);"><h4 style="margin:0;">Distribución del pipeline</h4>'
           + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);">' + _fmtNum(r.inducciones) + ' inducciones · ' + _fmtNum(r.totalLotes) + ' lotes</span></div>'
           + _barraDistribucion(r, total)
+          + '</div>';
+
+        // Contenedor de filtros drill-down (se renderiza post-DOM por _inicializarFiltrosYGraficos)
+        html += '<div id="drilldown-filters-container"></div>';
+
+        // Contenedores de gráficos analíticos
+        html += '<div class="grid grid--2" style="gap:var(--space-4);">'
+          + '<div class="card" style="padding:var(--space-5);">'
+          + '<h4 style="margin:0 0 var(--space-3);">Ranking radicaciones (mes)</h4>'
+          + '<div id="chart-ranking"></div>'
+          + '</div>'
+          + '<div class="card" style="padding:var(--space-5);">'
+          + '<h4 style="margin:0 0 var(--space-3);">Antigüedad promedio por estado</h4>'
+          + '<div id="chart-antiguedad"></div>'
+          + '</div>'
+          + '</div>'
+          + '<div class="card" style="padding:var(--space-5);">'
+          + '<h4 style="margin:0 0 var(--space-3);">Tendencia semanal de radicaciones</h4>'
+          + '<div id="chart-tendencia"></div>'
           + '</div>';
 
       } else {
@@ -652,6 +718,163 @@ function _renderizarDashboardConDatos(r) {
       html += '</div>';
       document.getElementById('viewDashboard').innerHTML = html;
       mostrarVista('viewDashboard');
+
+      // Inicializar filtros drill-down y gráficos para roles de supervisión
+      if (esAdmin) {
+        _inicializarFiltrosYGraficos();
+      }
+}
+
+/**
+ * Inicializa los filtros drill-down y los gráficos analíticos del dashboard.
+ * Carga datos de usuarios-dash (si no están en cache), renderiza filtros,
+ * conecta handlers de cambio de filtro al re-render de gráficos.
+ * Usa patrón _navId para descartar respuestas tardías si el usuario navega fuera.
+ */
+function _inicializarFiltrosYGraficos() {
+  var navIdLocal = _navId;
+  var filtersContainer = document.getElementById('drilldown-filters-container');
+
+  // Mostrar skeleton en gráficos mientras se cargan datos
+  var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
+  for (var i = 0; i < chartContainers.length; i++) {
+    var el = document.getElementById(chartContainers[i]);
+    if (el) {
+      el.innerHTML = '<div class="skeleton-line" style="height:120px;width:100%;border-radius:var(--radius-sm);"></div>';
+    }
+  }
+
+  // Cargar usuarios-dash y luego renderizar filtros + gráficos
+  _cargarUsuariosDash(function(usuarios) {
+    if (!_sigueVigente(navIdLocal)) return;
+
+    // Verificar que los containers aún existen en el DOM (fail-safe)
+    filtersContainer = document.getElementById('drilldown-filters-container');
+    if (!filtersContainer) return;
+
+    var rol = APP_USUARIO ? APP_USUARIO.rol : '';
+    var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
+
+    // Renderizar filtros en el contenedor
+    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
+    filtersContainer.innerHTML = filtrosHtml;
+
+    // Conectar handler de cambio de filtro al re-render de gráficos
+    DrillDownFilters._onFiltroChange = function() {
+      if (!_sigueVigente(navIdLocal)) return;
+      _renderizarGraficosConFiltro(usuarios, navIdLocal);
+    };
+
+    // Render inicial de gráficos con datos actuales
+    _renderizarGraficosConFiltro(usuarios, navIdLocal);
+  });
+}
+
+/**
+ * Filtra lotes según el estado actual de DrillDownFilters y renderiza los 3 gráficos.
+ * Si los lotes no están en cache, los solicita al servidor.
+ * @param {Array} usuarios - Lista de UsuarioDash
+ * @param {number} navIdLocal - ID de navegación para descartar respuestas tardías
+ */
+function _renderizarGraficosConFiltro(usuarios, navIdLocal) {
+  // Verificar que los containers de gráficos existen (fail-safe por race condition)
+  if (!document.getElementById('chart-ranking') &&
+      !document.getElementById('chart-antiguedad') &&
+      !document.getElementById('chart-tendencia')) {
+    return;
+  }
+
+  var lotes = CacheManager.get('lotes');
+
+  if (lotes) {
+    _aplicarFiltroYRenderizarCharts(lotes, usuarios);
+  } else {
+    // Cache miss: solicitar lotes al servidor
+    callServer('api_obtenerTodosLosLotes')
+      .then(function(datos) {
+        if (!_sigueVigente(navIdLocal)) return;
+        CacheManager.set('lotes', datos || []);
+        _aplicarFiltroYRenderizarCharts(datos || [], usuarios);
+      })
+      .catch(function(err) {
+        if (!_sigueVigente(navIdLocal)) return;
+        console.error('Error cargando lotes para gráficos:', err);
+        // Mostrar error con opción de reintentar
+        var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
+        for (var i = 0; i < chartContainers.length; i++) {
+          var el = document.getElementById(chartContainers[i]);
+          if (el) {
+            el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--color-mono-500);font-size:var(--text-sm);">'
+              + 'Error al cargar datos. <a href="#" onclick="_inicializarFiltrosYGraficos();return false;" style="color:var(--color-primary-navy);text-decoration:underline;">Reintentar</a>'
+              + '</div>';
+          }
+        }
+        _toast('No se pudieron cargar los datos de lotes para los gráficos.', 'error');
+      });
+  }
+}
+
+/**
+ * Aplica el filtrado de lotes según los emails filtrados por DrillDownFilters
+ * y renderiza los gráficos con DashboardCharts.
+ * @param {Array} lotes - Todos los lotes del equipo visible
+ * @param {Array} usuarios - Lista de UsuarioDash
+ */
+function _aplicarFiltroYRenderizarCharts(lotes, usuarios) {
+  // Verificar que los containers existen antes de renderizar (fail-safe)
+  if (!document.getElementById('chart-ranking')) return;
+
+  var emailsFiltrados = DrillDownFilters.getEmailsFiltrados(usuarios);
+  var lotesFiltrados;
+  var usuariosFiltrados;
+
+  if (emailsFiltrados === null) {
+    // Sin filtro: usar todos los lotes y usuarios
+    lotesFiltrados = lotes;
+    usuariosFiltrados = usuarios;
+  } else {
+    // Filtrar lotes por nombre de comercial (case-insensitive)
+    // Construir mapa de nombres desde emails filtrados
+    var nombresPorEmail = {};
+    for (var i = 0; i < usuarios.length; i++) {
+      var u = usuarios[i];
+      if (u && u.email) {
+        nombresPorEmail[u.email.toLowerCase()] = (u.nombre || '').toUpperCase();
+      }
+    }
+
+    // Set de nombres de comerciales a incluir
+    var nombresPermitidos = {};
+    for (var j = 0; j < emailsFiltrados.length; j++) {
+      var emailNorm = emailsFiltrados[j].toLowerCase();
+      if (nombresPorEmail[emailNorm]) {
+        nombresPermitidos[nombresPorEmail[emailNorm]] = true;
+      }
+    }
+
+    // Filtrar lotes cuyo campo 'comercial' (MAYÚSCULAS) coincida
+    lotesFiltrados = [];
+    for (var k = 0; k < lotes.length; k++) {
+      var lote = lotes[k];
+      if (!lote) continue;
+      var comercialLote = (lote.comercial || '').toUpperCase();
+      if (nombresPermitidos[comercialLote]) {
+        lotesFiltrados.push(lote);
+      }
+    }
+
+    // Filtrar usuarios para pasar solo los del equipo seleccionado
+    usuariosFiltrados = [];
+    for (var m = 0; m < usuarios.length; m++) {
+      var usr = usuarios[m];
+      if (usr && usr.email && emailsFiltrados.indexOf(usr.email) !== -1) {
+        usuariosFiltrados.push(usr);
+      }
+    }
+  }
+
+  // Renderizar gráficos con los datos filtrados
+  DashboardCharts.renderizar(lotesFiltrados, usuariosFiltrados);
 }
 
 function _kpiCompacto(titulo, valor, tema, filtroEstado) {

@@ -96,6 +96,9 @@
   </div>
 
   <?!= include('scripts_apiClient'); ?>
+  <?!= include('scripts_drillDownFilters'); ?>
+  <?!= include('scripts_svgRenderer'); ?>
+  <?!= include('scripts_dashboardCharts'); ?>
   <script>
     // Datos pre-cargados en server-side (cero latencia para menú + usuario)
     var __INIT__ = <?!= datosIniciales ?>;
