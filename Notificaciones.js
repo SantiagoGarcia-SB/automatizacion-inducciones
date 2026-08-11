@@ -499,9 +499,10 @@ if (10 < colStart || 10 > colEnd) return;
   if (!emailFinal || !emailFinal.includes("@")) return;
 
   const correoDirector  = obtenerCorreoDeDirector(emailFinal);
-  const correoBackup    = obtenerCorreoDeBackup(emailFinal);
   const nombreComercial = obtenerNombreDeComercial(emailFinal);
-  const correosCC       = obtenerCorreosLideres().join(",") + (correoDirector ? "," + correoDirector : "") + (correoBackup ? "," + correoBackup : "");
+  const correoSuperiores = obtenerCorreosSuperiores().join(',');
+  const ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
+  const correosCC = ccParts.join(',');
 
   const htmlBody = _envolver_([
 
@@ -662,11 +663,11 @@ function enviarRecordatoriosPazYSalvoDiario() {
 
       const nombreComercial = _correoANombre(emailReal);
       const correoDirector = obtenerCorreoDeDirector(emailReal);
-      const correoBackup   = obtenerCorreoDeBackup(emailReal);
+      const correoSuperiores = obtenerCorreosSuperiores().join(',');
       
-      // A3: CCs escalan según nivel
-      const ccsBase = [...new Set([...obtenerCorreosLideres(), correoDirector, correoBackup])].filter(e => e && e.includes("@"));
-      const ccs = ccsBase.join(",");
+      // A3: CCs escalan según nivel — Director + roles superiores activos
+      const ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
+      const ccs = ccParts.join(",");
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
 
@@ -819,11 +820,10 @@ function enviarRecordatoriosErrorTercerosDiario() {
       }
 
       const nombreComercial = _correoANombre(emailReal);
-      const correoDirector = obtenerCorreoDeDirector(emailReal);
-      const correoBackup   = obtenerCorreoDeBackup(emailReal);
-
-      const ccsBase = [...new Set([...obtenerCorreosLideres(), correoDirector, correoBackup])].filter(e => e && e.includes("@"));
-      const ccs = ccsBase.join(",");
+      var correoDirector = obtenerCorreoDeDirector(emailReal);
+      var correoSuperiores = obtenerCorreosSuperiores().join(',');
+      var ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
+      var ccs = ccParts.join(',');
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
 
@@ -911,39 +911,8 @@ function obtenerNombreCompletoDeComercial(email) {
   return _correoANombreCompleto(email);
 }
 
-function obtenerCorreoDeDirector(emailComercial) {
-  const data = _obtenerDatosCorreos_();
-  if (!data || data.length === 0) return "";
-  const email = emailComercial.toLowerCase().trim();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][1] || "").toLowerCase().trim() === email) return String(data[i][0] || "").trim();
-  }
-  return "";
-}
-
-/**
- * Obtiene el correo de backup de un ejecutivo comercial.
- * Busca en la hoja CORREOS por columna B (Correo Ejecutivo),
- * verifica si columna D (Activar BackUp) es TRUE,
- * y retorna el correo de columna C (BackUp).
- * @param {string} emailComercial  Correo del ejecutivo.
- * @returns {string} Correo del backup o vacío si no aplica.
- */
-function obtenerCorreoDeBackup(emailComercial) {
-  const data = _obtenerDatosCorreos_();
-  if (!data || data.length === 0) return "";
-  const email = emailComercial.toLowerCase().trim();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][1] || "").toLowerCase().trim() === email) {
-      const backupActivo = data[i][3]; // Columna D — checkbox (TRUE/FALSE)
-      if (backupActivo === true) {
-        return String(data[i][2] || "").trim(); // Columna C — correo backup
-      }
-      return "";
-    }
-  }
-  return "";
-}
+// obtenerCorreoDeDirector — migrado a Servicios_AuthService.js (lee de USUARIOS, no de CORREOS)
+// obtenerCorreoDeBackup — ELIMINADA (reemplazada por CC al Director automático via obtenerCorreoDeDirector)
 
 
 // ============================================================
@@ -966,11 +935,10 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
   const nombreComercial = obtenerNombreDeComercial(emailComercial);
   const correoDirector  = obtenerCorreoDeDirector(emailComercial);
-  const correoBackup    = obtenerCorreoDeBackup(emailComercial);
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
-  // ── Unificar destinatarios CC (director + líderes + backup si activo), filtrando vacíos ──
-  const correosCC = [...obtenerCorreosLideres(), correoDirector, correoBackup]
+  // ── Unificar destinatarios CC (director + superiores), filtrando vacíos ──
+  const correosCC = [...obtenerCorreosLideres(), correoDirector]
     .filter(e => e && e.includes("@"))
     .join(",");
 

@@ -12,9 +12,10 @@
  * OPTIMIZADO: Lee solo las últimas 2000 filas (ventana de lectura) en 1 sola
  * Lectura_Batch de rango contiguo (cols 1-62). Si la hoja tiene < 2000 filas,
  * lee todas las disponibles. Retorna máximo 100 resultados.
+ * @param {string[]|null} emailsEquipo - null = sin filtro (ADMIN/ASESOR), array = filtrar por comerciales del equipo visible
  * @returns {Array}
  */
-function obtenerColaAuxiliar() {
+function obtenerColaAuxiliar(emailsEquipo) {
   var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) return [];
 
@@ -25,10 +26,30 @@ function obtenerColaAuxiliar() {
   // 1 SOLA llamada a Sheets — ventana de últimas 2000 filas
   var bloque = hoja.getRange(filaInicio, 1, filasData, 62).getValues();
 
+  // Preparar filtro de nombres comerciales del equipo visible
+  var nombres = null;
+  if (emailsEquipo !== null && emailsEquipo !== undefined) {
+    if (typeof emailsEquipo === 'string') {
+      nombres = [_nombreComercialParaBusqueda(emailsEquipo)];
+    } else {
+      nombres = [];
+      for (var ne = 0; ne < emailsEquipo.length; ne++) {
+        var n = _nombreComercialParaBusqueda(emailsEquipo[ne]);
+        if (n) nombres.push(n);
+      }
+    }
+  }
+
   var resultado = [];
   for (var i = filasData - 1; i >= 0; i--) {
     var estado = String(bloque[i][9] || '').trim().toUpperCase(); // col J = index 9
     if (estado !== 'PENDIENTE RADICAR') continue;
+
+    // Filtrar por equipo visible si aplica
+    if (nombres) {
+      var comercialFila = String(bloque[i][10] || '').toUpperCase().trim(); // col K = index 10
+      if (nombres.indexOf(comercialFila) === -1) continue;
+    }
 
     resultado.push({
       fila: filaInicio + i,
@@ -357,13 +378,13 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
 // ============================================================
 
 /**
- * Obtiene errores pendientes de respuesta para un comercial.
+ * Obtiene errores pendientes de respuesta para un comercial o equipo.
  * Busca en Errores_Terceros por UUID de solicitudes del comercial
  * que tengan ESTADO_ERROR = 'PENDIENTE'.
- * @param {string} emailComercial
+ * @param {string[]|null} emailsEquipo - null = sin filtro (ADMIN/ASESOR), array = filtrar por comerciales del equipo visible
  * @returns {Array}
  */
-function obtenerErroresPendientesComercial(emailComercial) {
+function obtenerErroresPendientesComercial(emailsEquipo) {
   var ss = SpreadsheetApp.openById(getHojaControlId());
   var hojaErrores = ss.getSheetByName('Errores_Terceros');
   if (!hojaErrores || hojaErrores.getLastRow() < 2) return [];
@@ -424,7 +445,20 @@ function obtenerErroresPendientesComercial(emailComercial) {
   // Defensive: si Control_General no existe o solo tiene encabezado → retornar []
   if (!hojaControl || hojaControl.getLastRow() < 2) return [];
 
-  var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
+  var nombres = null;
+  if (emailsEquipo !== null && emailsEquipo !== undefined) {
+    // Convertir array de emails a array de nombres comerciales para búsqueda
+    if (typeof emailsEquipo === 'string') {
+      // Backward compatible: si recibe un solo email string, tratarlo como array de 1
+      nombres = [_nombreComercialParaBusqueda(emailsEquipo)];
+    } else {
+      nombres = [];
+      for (var ne = 0; ne < emailsEquipo.length; ne++) {
+        var n = _nombreComercialParaBusqueda(emailsEquipo[ne]);
+        if (n) nombres.push(n);
+      }
+    }
+  }
   var resultado = [];
 
   // Leer toda la data de Control_General en 1 llamada y armar mapa UUID→fila
@@ -443,7 +477,7 @@ function obtenerErroresPendientesComercial(emailComercial) {
     if (!filaControl) continue;
 
     var comercial = String(filaControl[10] || '').toUpperCase().trim();
-    if (nombre && comercial !== nombre) continue;
+    if (nombres && nombres.indexOf(comercial) === -1) continue;
 
     var arrendatario = String(filaControl[23] || '');
     var idLote = String(filaControl[0] || '');

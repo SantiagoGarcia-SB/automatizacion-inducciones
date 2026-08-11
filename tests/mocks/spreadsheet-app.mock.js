@@ -65,9 +65,15 @@ export class MockRange {
       for (let c = 0; c < values[r].length; c++) {
         const rowIdx = this._startRow - 1 + r;
         const colIdx = this._startCol - 1 + c;
-        if (this._sheet._fullData[rowIdx]) {
-          this._sheet._fullData[rowIdx][colIdx] = values[r][c];
+        // Auto-expand _fullData if the row doesn't exist yet
+        while (this._sheet._fullData.length <= rowIdx) {
+          this._sheet._fullData.push([]);
         }
+        // Auto-expand the row if the column doesn't exist yet
+        while (this._sheet._fullData[rowIdx].length <= colIdx) {
+          this._sheet._fullData[rowIdx].push('');
+        }
+        this._sheet._fullData[rowIdx][colIdx] = values[r][c];
         if (this._data[r]) {
           this._data[r][c] = values[r][c];
         }
@@ -99,6 +105,42 @@ export class MockRange {
   /** Limpia las validaciones de datos del rango (no-op en mock) */
   clearDataValidations() {
     this._sheet._callLog.push({ method: 'clearDataValidations', range: this._describe() });
+    return this;
+  }
+
+  /** Aplica negrita al rango (no-op en mock, chainable) */
+  setFontWeight(weight) {
+    this._sheet._callLog.push({ method: 'setFontWeight', range: this._describe(), weight });
+    return this;
+  }
+
+  /** Aplica color de fondo al rango (no-op en mock, chainable) */
+  setBackground(color) {
+    this._sheet._callLog.push({ method: 'setBackground', range: this._describe(), color });
+    return this;
+  }
+
+  /** Aplica color de fuente al rango (no-op en mock, chainable) */
+  setFontColor(color) {
+    this._sheet._callLog.push({ method: 'setFontColor', range: this._describe(), color });
+    return this;
+  }
+
+  /** Mock de setFontWeight — registra la llamada y retorna this para encadenamiento */
+  setFontWeight(weight) {
+    this._sheet._callLog.push({ method: 'setFontWeight', range: this._describe(), weight });
+    return this;
+  }
+
+  /** Mock de setBackground — registra la llamada y retorna this para encadenamiento */
+  setBackground(color) {
+    this._sheet._callLog.push({ method: 'setBackground', range: this._describe(), color });
+    return this;
+  }
+
+  /** Mock de setFontColor — registra la llamada y retorna this para encadenamiento */
+  setFontColor(color) {
+    this._sheet._callLog.push({ method: 'setFontColor', range: this._describe(), color });
     return this;
   }
 
@@ -182,11 +224,13 @@ export class MockSheet {
   /**
    * @param {string} name - Nombre de la hoja
    * @param {any[][]} data - Array 2D con todos los datos (fila 0 = headers si aplica)
+   * @param {MockSpreadsheet} [parentSS] - Referencia al spreadsheet padre (para setName)
    */
-  constructor(name, data = []) {
+  constructor(name, data = [], parentSS = null) {
     this._name = name;
     this._fullData = data.map(row => [...row]);
     this._callLog = [];
+    this._parentSS = parentSS;
   }
 
   getName() {
@@ -267,10 +311,43 @@ export class MockSheet {
     return new MockTextFinder(this, searchText);
   }
 
+  /** Congela las primeras N filas (no-op en mock) */
+  setFrozenRows(numRows) {
+    this._callLog.push({ method: 'setFrozenRows', numRows });
+    this._frozenRows = numRows;
+    return this;
+  }
+
+  /** Auto-redimensiona columnas (no-op en mock) */
+  autoResizeColumns(startCol, numCols) {
+    this._callLog.push({ method: 'autoResizeColumns', startCol, numCols });
+    return this;
+  }
+
+  /** Renombra la hoja */
+  setName(newName) {
+    this._callLog.push({ method: 'setName', newName });
+    var oldName = this._name;
+    this._name = newName;
+    // Update parent spreadsheet's key reference
+    if (this._parentSS && this._parentSS._sheets) {
+      delete this._parentSS._sheets[oldName];
+      this._parentSS._sheets[newName] = this;
+    }
+    return this;
+  }
+
   /** Agrega una fila al final de la hoja */
   appendRow(values) {
     this._callLog.push({ method: 'appendRow', values });
     this._fullData.push([...values]);
+    return this;
+  }
+
+  /** Congela las primeras N filas */
+  setFrozenRows(numRows) {
+    this._callLog.push({ method: 'setFrozenRows', numRows });
+    this._frozenRows = numRows;
     return this;
   }
 
@@ -327,7 +404,7 @@ export class MockSpreadsheet {
   constructor(sheetsConfig = {}) {
     this._sheets = {};
     for (const [name, data] of Object.entries(sheetsConfig)) {
-      this._sheets[name] = new MockSheet(name, data);
+      this._sheets[name] = new MockSheet(name, data, this);
     }
   }
 
@@ -341,8 +418,14 @@ export class MockSpreadsheet {
 
   /** Agrega una hoja en runtime (para tests de setup) */
   insertSheet(name) {
-    this._sheets[name] = new MockSheet(name, []);
+    this._sheets[name] = new MockSheet(name, [], this);
     return this._sheets[name];
+  }
+
+  /** Elimina una hoja del spreadsheet */
+  deleteSheet(sheet) {
+    const name = sheet.getName();
+    delete this._sheets[name];
   }
 }
 

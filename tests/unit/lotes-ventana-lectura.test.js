@@ -25,7 +25,7 @@ const sourceCode = readFileSync(SOURCE_PATH, 'utf-8');
  * This simulates the GAS runtime where all functions share global scope.
  */
 function loadSource() {
-  const wrapped = `(function() { ${sourceCode}\n; globalThis.obtenerLotesDeComercial = obtenerLotesDeComercial; globalThis._nombreComercialParaBusqueda = _nombreComercialParaBusqueda; })()`;
+  const wrapped = `(function() { ${sourceCode}\n; globalThis.obtenerLotesDeComercial = obtenerLotesDeComercial; globalThis._nombreComercialParaBusqueda = _nombreComercialParaBusqueda; globalThis._resolverNombresFiltro = _resolverNombresFiltro; })()`;
   eval(wrapped);
 }
 
@@ -99,6 +99,7 @@ describe('obtenerLotesDeComercial() — ventana de lectura', () => {
     delete globalThis.Utilities;
     delete globalThis.obtenerLotesDeComercial;
     delete globalThis._nombreComercialParaBusqueda;
+    delete globalThis._resolverNombresFiltro;
   });
 
   afterEach(() => {
@@ -107,6 +108,7 @@ describe('obtenerLotesDeComercial() — ventana de lectura', () => {
     delete globalThis.Utilities;
     delete globalThis.obtenerLotesDeComercial;
     delete globalThis._nombreComercialParaBusqueda;
+    delete globalThis._resolverNombresFiltro;
   });
 
   it('con > 2000 filas, solo lee las últimas 2000', () => {

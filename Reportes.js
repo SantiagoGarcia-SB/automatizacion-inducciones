@@ -769,8 +769,8 @@ function _construirCorreoCierreMes_(datos) {
  * o desde el trigger mensual (configurarTriggerReporteCierreMes).
  */
 function enviarReportesCierreMes() {
-  var comerciales = _leerPestanaUsuarios().filter(function(u) {
-    return u.rol === 'COMERCIAL' && u.activo;
+  var comerciales = UsuariosRepo_leerTodos().filter(function(u) {
+    return (u.rol === 'CONSULTOR' || u.rol === 'COMERCIAL') && u.activo;
   });
 
   if (comerciales.length === 0) {

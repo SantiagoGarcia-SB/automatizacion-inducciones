@@ -8,22 +8,20 @@
 var ID_HOJA_CONTROL      = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
 var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
 var ID_CARPETA_RAIZ      = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
-var CORREOS_LIDERES   = null; // Se resuelve dinámicamente desde la hoja USUARIOS
+var CORREOS_LIDERES   = null; // Se resuelve dinámicamente via obtenerCorreosSuperiores()
 
 /**
- * Retorna los correos de líderes activos desde la hoja USUARIOS.
+ * Retorna los correos de líderes activos (DIRECTOR, GERENTE, ADMIN).
+ * Alias de transición: delega a obtenerCorreosSuperiores() definida en AuthService.
  * Usa cache en memoria para evitar lecturas repetidas en la misma ejecución.
  * @returns {string[]}
  */
 function obtenerCorreosLideres() {
   if (CORREOS_LIDERES !== null) return CORREOS_LIDERES;
   try {
-    var usuarios = _leerPestanaUsuarios();
-    CORREOS_LIDERES = usuarios
-      .filter(function(u) { return u.rol === 'LIDER' && u.activo; })
-      .map(function(u) { return u.email; });
+    CORREOS_LIDERES = obtenerCorreosSuperiores();
   } catch (e) {
-    Logger.log("WARN: No se pudo leer líderes de USUARIOS, usando fallback vacío. " + e.message);
+    Logger.log("WARN: No se pudo leer superiores de USUARIOS, usando fallback vacío. " + e.message);
     CORREOS_LIDERES = [];
   }
   return CORREOS_LIDERES;

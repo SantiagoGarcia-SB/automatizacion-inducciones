@@ -27,7 +27,8 @@ function obtenerResumenComercial(emailComercial) {
   _registrarEvento_("INFO", "Repositorios_ControlGeneralRepo.js", "Lectura obtenerResumenComercial",
     "Filas: " + (ultimaFila - 1) + " | Duración: " + (Date.now() - _t0Resumen) + "ms");
 
-  var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
+  // Soporta: null (sin filtro), string (un email), string[] (múltiples emails)
+  var nombres = _resolverNombresFiltro(emailComercial);
 
   var resumen = {
     inducciones: 0, pendienteRadicar: 0, radicado: 0, pendienteAsignar: 0,
@@ -40,9 +41,9 @@ function obtenerResumenComercial(emailComercial) {
   var lotesRecientes = {};
 
   for (var i = 0; i < datos.length; i++) {
-    if (nombre) {
+    if (nombres) {
       var comercial = String(datos[i][10] || '').trim().toUpperCase();
-      if (comercial !== nombre) continue;
+      if (nombres.indexOf(comercial) === -1) continue;
     }
 
     resumen.inducciones++;
@@ -92,6 +93,29 @@ function _nombreComercialParaBusqueda(email) {
     }
   }
   return resultado.join(' ').toUpperCase();
+}
+
+/**
+ * Resuelve el parámetro de filtro de emails a un array de nombres para comparación.
+ * Soporta: null (sin filtro), string (un email), string[] (múltiples emails).
+ * @param {string|string[]|null} emailComercial - Email(s) del comercial o null
+ * @returns {string[]|null} Array de nombres en MAYÚSCULAS para filtrar, o null si sin filtro
+ */
+function _resolverNombresFiltro(emailComercial) {
+  if (emailComercial === null || emailComercial === undefined) return null;
+  if (typeof emailComercial === 'string') {
+    var nombre = _nombreComercialParaBusqueda(emailComercial);
+    return nombre ? [nombre] : null;
+  }
+  if (Array.isArray(emailComercial)) {
+    var nombres = [];
+    for (var i = 0; i < emailComercial.length; i++) {
+      var n = _nombreComercialParaBusqueda(emailComercial[i]);
+      if (n && nombres.indexOf(n) === -1) nombres.push(n);
+    }
+    return nombres.length > 0 ? nombres : null;
+  }
+  return null;
 }
 
 function _resumenVacio() {
@@ -152,7 +176,8 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
 
   // Leer columnas relevantes: A-K (1-11) + col 24 (arrendatario)
   var datos = hoja.getRange(filaInicio, 1, filasALeer, 24).getValues();
-  var nombre = emailComercial ? _nombreComercialParaBusqueda(emailComercial) : null;
+  // Soporta: null (sin filtro), string (un email), string[] (múltiples emails)
+  var nombres = _resolverNombresFiltro(emailComercial);
 
   // Agrupar por lote (más recientes primero)
   var lotesMap = {};
@@ -160,9 +185,9 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
 
   for (var i = datos.length - 1; i >= 0; i--) {
     // Si hay filtro por comercial, aplicar
-    if (nombre) {
+    if (nombres) {
       var comercial = String(datos[i][10] || '').trim().toUpperCase();
-      if (comercial !== nombre) continue;
+      if (nombres.indexOf(comercial) === -1) continue;
     }
 
     var idLote = String(datos[i][0] || '').trim();
