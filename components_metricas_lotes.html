@@ -84,6 +84,19 @@
   color: var(--color-mono-0);
 }
 
+.metricas-lotes__chip--disabled,
+.metricas-lotes__chip--disabled:hover {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.metricas-lotes__input-date:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--color-mono-100, #f0f0f0);
+}
+
 .metricas-lotes__kpis-group {
   margin-bottom: var(--space-3);
 }
@@ -712,6 +725,7 @@ var MetricasLotesView = (function() {
     if (!rango) return;
 
     _cargando = true;
+    _deshabilitarFiltros();
 
     // Feedback visual en botón
     var btn = document.getElementById('metricasLotesBtn');
@@ -729,11 +743,13 @@ var MetricasLotesView = (function() {
       .then(function(datos) {
         _cargando = false;
         _restaurarBoton();
+        _habilitarFiltros();
         _renderizarResultados(datos);
       })
       .catch(function(err) {
         _cargando = false;
         _restaurarBoton();
+        _habilitarFiltros();
         console.error('Error cargando métricas de lotes:', err);
         _renderizarResultados(null);
       });
@@ -747,6 +763,43 @@ var MetricasLotesView = (function() {
     if (btn) {
       btn.textContent = 'Consultar';
       btn.classList.remove('btn--loading');
+    }
+  }
+
+  /**
+   * Deshabilita los controles de filtro (fechas, botón, chips de segmento)
+   * para evitar interacciones mientras la vista está cargando datos.
+   */
+  function _deshabilitarFiltros() {
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+    var btn = document.getElementById('metricasLotesBtn');
+    var chips = document.querySelectorAll('.metricas-lotes__chip[data-segmento]');
+
+    if (inputDesde) inputDesde.disabled = true;
+    if (inputHasta) inputHasta.disabled = true;
+    if (btn) btn.disabled = true;
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].disabled = true;
+      chips[i].classList.add('metricas-lotes__chip--disabled');
+    }
+  }
+
+  /**
+   * Habilita los controles de filtro una vez finalizada la carga.
+   */
+  function _habilitarFiltros() {
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+    var btn = document.getElementById('metricasLotesBtn');
+    var chips = document.querySelectorAll('.metricas-lotes__chip[data-segmento]');
+
+    if (inputDesde) inputDesde.disabled = false;
+    if (inputHasta) inputHasta.disabled = false;
+    if (btn) btn.disabled = false;
+    for (var i = 0; i < chips.length; i++) {
+      chips[i].disabled = false;
+      chips[i].classList.remove('metricas-lotes__chip--disabled');
     }
   }
 
