@@ -550,6 +550,25 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     // 3f. Calcular detalle por lote
     var detalle = _agruparPorLoteYCalcularMetricas(filasFiltradas);
 
+    // 3f2. Recalcular solicitudesAprobadas y solicitudesNegadas desde detalle
+    // para coherencia con la tabla (incluye aprobaciones individuales de lotes negados)
+    var aprobDesdeDetalle = 0;
+    var negDesdeDetalle = 0;
+    var reconsDesdeDetalle = 0;
+    var enProcesoDesdeDetalle = 0;
+    for (var d = 0; d < detalle.length; d++) {
+      aprobDesdeDetalle += (detalle[d].solicitudesAprobadasEnLote || 0)
+                         + (detalle[d].solicitudesAprobadasIndividualNegadaPorLote || 0);
+      negDesdeDetalle += (detalle[d].solicitudesNegadas || 0)
+                       + (detalle[d].aprobadaPorLoteNegadaPorAnalista || 0);
+      reconsDesdeDetalle += (detalle[d].negadaPorLoteReconsideradaPorGerencia || 0);
+      enProcesoDesdeDetalle += (detalle[d].solicitudesEnProcesoEnLote || 0);
+    }
+    solicitudesCount.solicitudesAprobadas = aprobDesdeDetalle;
+    solicitudesCount.solicitudesNegadas = negDesdeDetalle;
+    solicitudesCount.solicitudesReconsideradas = reconsDesdeDetalle;
+    solicitudesCount.solicitudesEnProceso = enProcesoDesdeDetalle;
+
     // 3g. Formatear fechas en detalle para serialización
     for (var i = 0; i < detalle.length; i++) {
       if (detalle[i].fechaLote instanceof Date) {

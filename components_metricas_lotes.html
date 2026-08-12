@@ -828,23 +828,21 @@ var MetricasLotesView = (function() {
       return _datosActuales ? _datosActuales.resumen : {};
     }
 
-    // Si no hay segmento activo, usar el resumen original del backend
-    if (!_segmentoActivo || _segmentoActivo === 'todos') {
-      return _datosActuales.resumen;
+    // Filtrar detalle por segmento (si aplica)
+    var detalleSegmentado = _datosActuales.detallePorLote;
+    if (_segmentoActivo && _segmentoActivo !== 'todos') {
+      detalleSegmentado = _datosActuales.detallePorLote.filter(function(d) {
+        var cant = d.cantidadSolicitudes || 0;
+        switch (_segmentoActivo) {
+          case '1-50': return cant >= 1 && cant <= 50;
+          case '51-100': return cant >= 51 && cant <= 100;
+          case '101-200': return cant >= 101 && cant <= 200;
+          case '201-300': return cant >= 201 && cant <= 300;
+          case '301+': return cant >= 301;
+          default: return true;
+        }
+      });
     }
-
-    // Filtrar detalle solo por segmento (sin filtro de card)
-    var detalleSegmentado = _datosActuales.detallePorLote.filter(function(d) {
-      var cant = d.cantidadSolicitudes || 0;
-      switch (_segmentoActivo) {
-        case '1-50': return cant >= 1 && cant <= 50;
-        case '51-100': return cant >= 51 && cant <= 100;
-        case '101-200': return cant >= 101 && cant <= 200;
-        case '201-300': return cant >= 201 && cant <= 300;
-        case '301+': return cant >= 301;
-        default: return true;
-      }
-    });
 
     // Recalcular métricas de lotes
     var lotesAprobados = 0;
@@ -865,8 +863,10 @@ var MetricasLotesView = (function() {
       else lotesEnProceso++;
 
       totalSolicitudes += d.cantidadSolicitudes || 0;
-      solicitudesAprobadas += d.solicitudesAprobadasEnLote || 0;
-      solicitudesNegadas += d.solicitudesNegadas || 0;
+      solicitudesAprobadas += (d.solicitudesAprobadasEnLote || 0)
+                            + (d.solicitudesAprobadasIndividualNegadaPorLote || 0);
+      solicitudesNegadas += (d.solicitudesNegadas || 0)
+                          + (d.aprobadaPorLoteNegadaPorAnalista || 0);
       solicitudesReconsideradas += d.negadaPorLoteReconsideradaPorGerencia || 0;
       solicitudesEnProceso += d.solicitudesEnProcesoEnLote || 0;
     }
