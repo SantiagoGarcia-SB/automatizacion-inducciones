@@ -473,7 +473,10 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
       solicitudesNegadas: solicitudesNegadas,
       aprobadaPorLoteNegadaPorAnalista: aprobadaPorLoteNegadaPorAnalista,
       negadaPorLoteReconsideradaPorGerencia: negadaPorLoteReconsideradaPorGerencia,
-      solicitudesEnProcesoEnLote: solicitudesEnProcesoEnLote
+      solicitudesEnProcesoEnLote: solicitudesEnProcesoEnLote,
+      solicitudes: filasGrupo.map(function(f) {
+        return { numero: f.solicitudInquilino, estadoSAI: f.registroAnalistaSai };
+      })
     });
   }
 
