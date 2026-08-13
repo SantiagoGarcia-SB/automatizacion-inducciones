@@ -4,6 +4,58 @@
  * Métricas Operativas de Lotes — Estilos del componente
  * ============================================================
  */
+
+/* ═══ BARRA DE FILTROS UNIFICADA ═══ */
+.drilldown-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.drilldown-filters__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.drilldown-filters__label {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--color-mono-600);
+  text-transform: none;
+  letter-spacing: normal;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.drilldown-filters__select {
+  padding: var(--space-2) var(--space-4);
+  padding-right: var(--space-8);
+  border: 1.5px solid var(--color-mono-300);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  background: var(--color-mono-0);
+  color: var(--color-mono-900);
+  cursor: pointer;
+  appearance: auto;
+  transition: border-color var(--duration-fast) var(--ease-in-out);
+}
+
+.drilldown-filters__select:focus {
+  border-color: var(--color-primary-navy);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 49, 80, 0.08);
+}
+
+/* Cuando drilldown-filters está dentro de la barra de filtros, 
+   se integra en el flujo flex del padre */
+.metricas-lotes__filtros .drilldown-filters {
+  display: contents;
+}
+
+/* ═══ FILTROS DE MÉTRICAS ═══ */
 .metricas-lotes__filtros {
   display: flex;
   align-items: center;
@@ -98,22 +150,24 @@
 }
 
 .metricas-lotes__kpis-group {
-  margin-bottom: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .metricas-lotes__kpis-group-title {
-  font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
-  color: var(--color-mono-400);
-  margin-bottom: var(--space-2);
-  padding-left: var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  color: var(--color-primary-navy);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(37, 49, 80, 0.03);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--color-primary-navy);
 }
 
+/* Layout de KPIs: 3 columnas por sección */
 .metricas-lotes__kpis--4 {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-3);
 }
 
@@ -125,35 +179,37 @@
 
 .metricas-lotes__kpi {
   background: var(--color-mono-0);
-  border-radius: var(--radius-md);
-  padding: var(--space-4) var(--space-3);
-  text-align: center;
+  border-radius: var(--radius-sm);
+  padding: var(--space-4);
+  text-align: left;
   box-shadow: var(--shadow-1);
   cursor: pointer;
   transition: transform var(--duration-fast) var(--ease-out),
               box-shadow var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
-  border: 2px solid transparent;
+  border: 1.5px solid var(--color-mono-100);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .metricas-lotes__kpi:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-2);
+  border-color: var(--color-mono-300);
 }
 
 .metricas-lotes__kpi--active {
   border-color: var(--color-primary-navy);
   box-shadow: var(--shadow-2);
-  transform: translateY(-2px);
+  background: rgba(37, 49, 80, 0.02);
 }
 
 .metricas-lotes__kpi-label {
   font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
-  text-transform: uppercase;
-  letter-spacing: var(--tracking-caps);
+  font-weight: var(--font-medium);
   color: var(--color-mono-500);
-  margin-bottom: var(--space-2);
+  line-height: 1.3;
 }
 
 .metricas-lotes__kpi-value {
@@ -170,9 +226,8 @@
 
 .metricas-lotes__kpi-pct {
   font-size: var(--text-xs);
-  font-weight: var(--font-medium);
+  font-weight: var(--font-semibold);
   color: var(--color-mono-400);
-  margin-top: var(--space-1);
 }
 
 .metricas-lotes__tabla-wrap {
@@ -186,7 +241,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
-  min-width: 950px;
+  min-width: 820px;
 }
 
 .metricas-lotes__tabla thead {
@@ -199,13 +254,13 @@
 .metricas-lotes__tabla th {
   padding: var(--space-3) var(--space-3);
   text-align: center;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: var(--font-semibold);
   text-transform: uppercase;
   letter-spacing: 0.02em;
   color: var(--color-mono-0);
   border-bottom: 2px solid rgba(255,255,255,0.1);
-  border-right: 1px solid rgba(255,255,255,0.1);
+  border-right: 1px solid rgba(255,255,255,0.08);
   white-space: normal;
   line-height: 1.4;
   vertical-align: middle;
@@ -217,9 +272,9 @@
 
 .metricas-lotes__tabla th small {
   display: block;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: var(--font-medium);
-  color: rgba(255,255,255,0.65);
+  color: rgba(255,255,255,0.6);
   text-transform: none;
   letter-spacing: normal;
   margin-top: 2px;
@@ -426,16 +481,18 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: var(--space-4);
-  margin-bottom: var(--space-2);
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 2px solid var(--color-mono-100);
 }
 
 .metricas-lotes__tabla-title {
   font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-bold);
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
-  color: var(--color-mono-400);
+  color: var(--color-primary-navy);
 }
 
 .metricas-lotes__csv-btn {
@@ -466,30 +523,42 @@
 .metricas-lotes__charts {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
+  gap: var(--space-5);
+  margin-top: var(--space-6);
 }
 
 .metricas-lotes__chart-card {
   background: var(--color-mono-0);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-1);
-  padding: var(--space-4);
-  min-height: 280px;
+  padding: var(--space-5);
+  min-height: 320px;
+}
+
+/* Gráficas de tendencia ocupan full-width para mejor lectura gerencial */
+.metricas-lotes__chart-card:nth-child(3),
+.metricas-lotes__chart-card:nth-child(4) {
+  grid-column: span 1;
 }
 
 .metricas-lotes__chart-title {
   font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-bold);
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
-  color: var(--color-mono-500);
-  margin-bottom: var(--space-3);
+  color: var(--color-primary-navy);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-mono-100);
 }
 
 @media (max-width: 768px) {
   .metricas-lotes__charts {
     grid-template-columns: 1fr;
+  }
+  .metricas-lotes__chart-card:nth-child(3),
+  .metricas-lotes__chart-card:nth-child(4) {
+    grid-column: span 1;
   }
 }
 
@@ -510,14 +579,14 @@
 @media (max-width: 480px) {
   .metricas-lotes__kpis--4,
   .metricas-lotes__kpis--5 {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 }
 
 /* Desglose de solicitudes En Proceso — estilo pipeline */
 .metricas-lotes__desglose {
-  margin-top: var(--space-3);
-  padding: var(--space-4);
+  margin-top: var(--space-5);
+  padding: var(--space-5);
   background: var(--color-mono-0);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-1);
@@ -526,89 +595,84 @@
 
 .metricas-lotes__desglose-title {
   font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
+  font-weight: var(--font-bold);
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
-  color: var(--color-mono-500);
-  margin-bottom: var(--space-3);
+  color: var(--color-primary-navy);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-mono-100);
 }
 
 .metricas-lotes__desglose-grid {
   display: flex;
-  align-items: stretch;
-  gap: 0;
-  overflow-x: auto;
-  position: relative;
+  flex-direction: column;
+  gap: var(--space-2);
 }
 
 .metricas-lotes__desglose-item {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 140px 1fr 50px 40px;
   align-items: center;
-  justify-content: center;
-  padding: var(--space-4) var(--space-5);
-  position: relative;
-  min-width: 130px;
-  text-align: center;
-  clip-path: polygon(0% 0%, calc(100% - 16px) 0%, 100% 50%, calc(100% - 16px) 100%, 0% 100%, 16px 50%);
-  margin-left: -8px;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-mono-0);
+  border: 1px solid var(--color-mono-100);
 }
 
 .metricas-lotes__desglose-item:first-child {
-  clip-path: polygon(0% 0%, calc(100% - 16px) 0%, 100% 50%, calc(100% - 16px) 100%, 0% 100%);
-  margin-left: 0;
-  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
+  border-radius: var(--radius-sm);
 }
 
 .metricas-lotes__desglose-item:last-child {
-  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 16px 50%);
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  border-radius: var(--radius-sm);
 }
 
-/* Colores de pipeline por posición */
-.metricas-lotes__desglose-item:nth-child(1) { background: #253150; }
-.metricas-lotes__desglose-item:nth-child(2) { background: #344163; }
-.metricas-lotes__desglose-item:nth-child(3) { background: #4a5a7a; }
-.metricas-lotes__desglose-item:nth-child(4) { background: #607291; }
-.metricas-lotes__desglose-item:nth-child(5) { background: #7a8da8; }
-.metricas-lotes__desglose-item:nth-child(6) { background: #94a7bf; }
-.metricas-lotes__desglose-item:nth-child(7) { background: #aec0d5; }
-.metricas-lotes__desglose-item:nth-child(8) { background: #c8d8e8; }
+/* Colores de pipeline por posición — fondo sutil */
+.metricas-lotes__desglose-item:nth-child(1) { border-left: 4px solid #253150; }
+.metricas-lotes__desglose-item:nth-child(2) { border-left: 4px solid #344163; }
+.metricas-lotes__desglose-item:nth-child(3) { border-left: 4px solid #4a5a7a; }
+.metricas-lotes__desglose-item:nth-child(4) { border-left: 4px solid #607291; }
+.metricas-lotes__desglose-item:nth-child(5) { border-left: 4px solid #7a8da8; }
+.metricas-lotes__desglose-item:nth-child(6) { border-left: 4px solid #94a7bf; }
+.metricas-lotes__desglose-item:nth-child(7) { border-left: 4px solid #aec0d5; }
+.metricas-lotes__desglose-item:nth-child(8) { border-left: 4px solid #c8d8e8; }
+.metricas-lotes__desglose-item:nth-child(9) { border-left: 4px solid #d5d3d4; }
 
 .metricas-lotes__desglose-label {
-  font-size: 9px;
+  font-size: var(--text-xs);
   font-weight: var(--font-semibold);
-  color: rgba(255, 255, 255, 0.85);
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin-bottom: var(--space-1);
-  white-space: nowrap;
-}
-
-.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-label {
-  color: var(--color-mono-700);
+  color: var(--color-mono-800);
 }
 
 .metricas-lotes__desglose-value {
-  font-size: var(--text-h2);
-  font-weight: var(--font-extrabold);
-  color: var(--color-mono-0);
+  font-size: var(--text-sm);
+  font-weight: var(--font-bold);
+  color: var(--color-primary-navy);
   font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-
-.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-value {
-  color: var(--color-mono-800);
+  text-align: right;
 }
 
 .metricas-lotes__desglose-pct {
   font-size: var(--text-xs);
-  color: rgba(255, 255, 255, 0.6);
-  margin-top: 2px;
+  color: var(--color-mono-500);
+  text-align: right;
 }
 
-.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-pct {
-  color: var(--color-mono-500);
+/* Barra visual proporcional (se usa el segundo slot del grid) */
+.metricas-lotes__desglose-bar {
+  height: 8px;
+  background: var(--color-mono-100);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.metricas-lotes__desglose-bar-fill {
+  height: 100%;
+  background: var(--color-primary-navy);
+  border-radius: var(--radius-full);
+  transition: width 0.4s ease-out;
 }
 
 .metricas-lotes__desglose-loading {
@@ -620,58 +684,34 @@
 
 @media (max-width: 768px) {
   .metricas-lotes__desglose-grid {
-    flex-wrap: wrap;
     gap: var(--space-2);
   }
   .metricas-lotes__desglose-item {
-    clip-path: none;
-    border-radius: var(--radius-xs);
-    margin-left: 0;
-    min-width: calc(50% - var(--space-1));
-    padding: var(--space-3);
+    grid-template-columns: 100px 1fr 40px 35px;
+    gap: var(--space-2);
+    padding: var(--space-2);
   }
-  .metricas-lotes__desglose-item:first-child {
-    clip-path: none;
-    border-radius: var(--radius-xs);
-  }
-  .metricas-lotes__desglose-item:last-child {
-    clip-path: none;
-    border-radius: var(--radius-xs);
+  .metricas-lotes__desglose-label {
+    font-size: 11px;
   }
 }
 </style>
 
 <div id="viewMetricasLotes" style="display:none;">
-  <div class="stack">
+  <div class="stack" style="gap:var(--space-4)">
     <!-- Header de sección -->
     <div class="section-header">
-      <h2>Métricas</h2>
+      <h2>Métricas Operativas</h2>
+      <span class="section-header__meta" id="metricasFechaActual"></span>
     </div>
 
-    <!-- Gráficos analíticos (antes en el dashboard) -->
-    <div id="drilldown-filters-container"></div>
-
-    <div class="grid grid--2" style="gap:var(--space-4);">
-      <div class="card" style="padding:var(--space-5);">
-        <h4 style="margin:0 0 var(--space-3);">Ranking radicaciones (mes)</h4>
-        <div id="chart-ranking"></div>
-      </div>
-      <div class="card" style="padding:var(--space-5);">
-        <h4 style="margin:0 0 var(--space-3);">Antigüedad promedio por estado</h4>
-        <div id="chart-antiguedad"></div>
-      </div>
-    </div>
-    <div class="card" style="padding:var(--space-5);">
-      <h4 style="margin:0 0 var(--space-3);">Tendencia semanal de radicaciones</h4>
-      <div id="chart-tendencia"></div>
-    </div>
-
-    <!-- Filtros de periodo (Métricas de Lotes) -->
-    <div class="section-header" style="margin-top:var(--space-6);">
-      <h3>Métricas de Lotes</h3>
-    </div>
-    <div class="card card--flat">
+    <!-- ═══ TODOS LOS FILTROS AL INICIO ═══ -->
+    <div class="card card--flat" style="padding:var(--space-4);">
+      <!-- Fila 1: Director + Comercial + Fechas + Consultar -->
       <div class="metricas-lotes__filtros">
+        <!-- Drill-down filters se insertan aquí inline -->
+        <div id="drilldown-filters-container" style="display:contents;"></div>
+
         <label style="margin-bottom:0; white-space:nowrap; font-size:var(--text-sm); font-weight:var(--font-semibold); color:var(--color-mono-600);">Desde:</label>
         <input type="date" id="metricasLotesFechaDesde"
                class="metricas-lotes__input-date"
@@ -688,9 +728,10 @@
         </button>
       </div>
       <div id="metricasLotesFiltroError" class="metricas-lotes__filtro-error" style="display:none;"></div>
-      <!-- Chips de segmentación por solicitudes -->
+
+      <!-- Fila 2: Chips de segmento + Sucursal -->
       <div class="metricas-lotes__chips">
-        <span class="metricas-lotes__chips-label">Solicitudes/Lote:</span>
+        <span class="metricas-lotes__chips-label">Segmento:</span>
         <button class="metricas-lotes__chip metricas-lotes__chip--active" data-segmento="todos" type="button">Todos</button>
         <button class="metricas-lotes__chip" data-segmento="1-50" type="button">1 – 50</button>
         <button class="metricas-lotes__chip" data-segmento="51-100" type="button">51 – 100</button>
@@ -698,17 +739,33 @@
         <button class="metricas-lotes__chip" data-segmento="201-300" type="button">201 – 300</button>
         <button class="metricas-lotes__chip" data-segmento="301+" type="button">≥ 301</button>
       </div>
-      <!-- Chips de sucursal (se llenan dinámicamente) -->
       <div class="metricas-lotes__chips" id="metricasLotesChipsSucursal" style="display:none;">
         <span class="metricas-lotes__chips-label">Sucursal:</span>
         <button class="metricas-lotes__chip metricas-lotes__chip--active" data-sucursal="todas" type="button">Todas</button>
       </div>
     </div>
 
-    <!-- Contenedor de resultados -->
-    <div id="metricasLotesContenido">
-      <!-- Se renderiza dinámicamente: KPIs + Tabla o estado vacío -->
+    <!-- ═══ GRÁFICOS ═══ -->
+    <!-- Ranking + Antigüedad lado a lado -->
+    <div class="grid grid--2" style="gap:var(--space-3);">
+      <div class="card card--flat" style="padding:var(--space-3) var(--space-4);">
+        <h4 style="margin:0 0 var(--space-2); color:var(--color-primary-navy); font-size:var(--text-sm);">Ranking radicaciones (mes)</h4>
+        <div id="chart-ranking" style="overflow:hidden;"></div>
+      </div>
+      <div class="card card--flat" style="padding:var(--space-3) var(--space-4);">
+        <h4 style="margin:0 0 var(--space-2); color:var(--color-primary-navy); font-size:var(--text-sm);">Antigüedad promedio por estado</h4>
+        <div id="chart-antiguedad" style="overflow:hidden;"></div>
+      </div>
     </div>
+
+    <!-- Tendencia diaria -->
+    <div class="card card--flat" style="padding:var(--space-3) var(--space-4);">
+      <h4 style="margin:0 0 var(--space-2); color:var(--color-primary-navy); font-size:var(--text-sm);">Tendencia diaria de radicaciones (30 días)</h4>
+      <div id="chart-tendencia" style="height:120px;"></div>
+    </div>
+
+    <!-- ═══ RESULTADOS DINÁMICOS (KPIs + Pipeline + Gráficas + Tabla) ═══ -->
+    <div id="metricasLotesContenido"></div>
   </div>
 </div>
 
@@ -1029,7 +1086,7 @@ var MetricasLotesView = (function() {
       + '<div id="metricasLotesDesglose"></div>'
       + _htmlCharts()
       + '<div class="metricas-lotes__tabla-header">'
-      + '<span class="metricas-lotes__tabla-title">Detalle por Lote</span>'
+      + '<span class="metricas-lotes__tabla-title">Detalle por Lote (' + detalleFiltrado.length + ' registros)</span>'
       + '<button class="metricas-lotes__csv-btn" id="metricasLotesCsvBtn" type="button" title="Descargar CSV">⬇ CSV</button>'
       + '</div>'
       + _htmlTablaDetalle(detallePagina)
@@ -1376,19 +1433,19 @@ var MetricasLotesView = (function() {
     return '<div class="metricas-lotes__charts">'
       + '<div class="metricas-lotes__chart-card">'
       + '<div class="metricas-lotes__chart-title">Distribución de Lotes</div>'
-      + '<div id="metricasLotesChartDona" style="width:100%;height:240px;"></div>'
+      + '<div id="metricasLotesChartDona" style="width:100%;height:280px;"></div>'
       + '</div>'
       + '<div class="metricas-lotes__chart-card">'
       + '<div class="metricas-lotes__chart-title">Distribución de Solicitudes</div>'
-      + '<div id="metricasLotesChartBarras" style="width:100%;height:240px;"></div>'
+      + '<div id="metricasLotesChartBarras" style="width:100%;height:280px;"></div>'
       + '</div>'
       + '<div class="metricas-lotes__chart-card">'
       + '<div class="metricas-lotes__chart-title">Tendencia Lotes (últimos 6 meses)</div>'
-      + '<div id="metricasLotesChartTendLotes" style="width:100%;height:240px;"></div>'
+      + '<div id="metricasLotesChartTendLotes" style="width:100%;height:280px;"></div>'
       + '</div>'
       + '<div class="metricas-lotes__chart-card">'
       + '<div class="metricas-lotes__chart-title">Tendencia Solicitudes (últimos 6 meses)</div>'
-      + '<div id="metricasLotesChartTendSol" style="width:100%;height:240px;"></div>'
+      + '<div id="metricasLotesChartTendSol" style="width:100%;height:280px;"></div>'
       + '</div>'
       + '</div>';
   }
@@ -1545,7 +1602,7 @@ var MetricasLotesView = (function() {
 
     // ═══ Sección 1: Lotes Ingresados ═══
     var htmlLotesIngresados = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Lotes Ingresados</div>'
+      + '<div class="metricas-lotes__kpis-group-title">📦 Lotes Ingresados</div>'
       + '<div class="metricas-lotes__kpis--4">'
       + _kpi('Total Lotes', _num(r.totalLotes), '', 'totalLotes', '')
       + _kpi('Total Evaluados', _num(lotesEvaluados), '', '', _pct(lotesEvaluados, tl))
@@ -1554,7 +1611,7 @@ var MetricasLotesView = (function() {
 
     // ═══ Sección 2: Lotes Evaluados ═══
     var htmlLotesEvaluados = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Lotes Evaluados</div>'
+      + '<div class="metricas-lotes__kpis-group-title">✅ Lotes Evaluados</div>'
       + '<div class="metricas-lotes__kpis--4">'
       + _kpi('Total Evaluados', _num(lotesEvaluados), '', '', '')
       + _kpi('Aprobados', _num(r.lotesAprobados), 'success', 'lotesAprobados', _pct(r.lotesAprobados, lotesEvaluados))
@@ -1563,7 +1620,7 @@ var MetricasLotesView = (function() {
 
     // ═══ Sección 3: Solicitudes Ingresadas ═══
     var htmlSolIngresadas = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Solicitudes Ingresadas</div>'
+      + '<div class="metricas-lotes__kpis-group-title">📋 Solicitudes Ingresadas</div>'
       + '<div class="metricas-lotes__kpis--4">'
       + _kpi('Total Solicitudes', _num(r.totalSolicitudes), '', 'totalSolicitudes', '')
       + _kpi('Total Evaluadas', _num(solicitudesEvaluadas), '', '', _pct(solicitudesEvaluadas, ts))
@@ -1572,7 +1629,7 @@ var MetricasLotesView = (function() {
 
     // ═══ Sección 4: Solicitudes Evaluadas ═══
     var htmlSolEvaluadas = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Solicitudes Evaluadas</div>'
+      + '<div class="metricas-lotes__kpis-group-title">📊 Solicitudes Evaluadas</div>'
       + '<div class="metricas-lotes__kpis--4">'
       + _kpi('Total Aprobadas', _num(r.solicitudesAprobadas), 'success', 'solicitudesAprobadas', _pct(r.solicitudesAprobadas, solicitudesEvaluadas))
       + _kpi('Total Negadas', _num(r.solicitudesNegadas), 'danger', 'solicitudesNegadas', _pct(r.solicitudesNegadas, solicitudesEvaluadas))
@@ -1735,6 +1792,14 @@ var MetricasLotesView = (function() {
         this.classList.add('metricas-lotes__chip--active');
         _paginaActual = 1;
         _renderizarVista();
+        // Notificar a los gráficos SVG para que se refresquen con el filtro de sucursal
+        if (typeof _aplicarFiltroYRenderizarCharts === 'function') {
+          var lotesCached = (typeof CacheManager !== 'undefined') ? CacheManager.get('lotes') : null;
+          var usuariosCached = (typeof CacheManager !== 'undefined') ? CacheManager.get('usuarios-dash') : null;
+          if (lotesCached && usuariosCached) {
+            _aplicarFiltroYRenderizarCharts(lotesCached, usuariosCached);
+          }
+        }
       });
     }
   }
@@ -1917,8 +1982,12 @@ var MetricasLotesView = (function() {
 
     for (var i = 0; i < itemsConValor.length; i++) {
       var pct = totalItems > 0 ? Math.round((itemsConValor[i].value / totalItems) * 100) : 0;
+      // El mayor item determina el 100% de la barra
+      var maxVal = itemsConValor[0].value;
+      var barPct = maxVal > 0 ? Math.round((itemsConValor[i].value / maxVal) * 100) : 0;
       html += '<div class="metricas-lotes__desglose-item">'
         + '<span class="metricas-lotes__desglose-label">' + _escapeHtml(itemsConValor[i].label) + '</span>'
+        + '<div class="metricas-lotes__desglose-bar"><div class="metricas-lotes__desglose-bar-fill" style="width:' + barPct + '%;"></div></div>'
         + '<span class="metricas-lotes__desglose-value">' + itemsConValor[i].value + '</span>'
         + '<span class="metricas-lotes__desglose-pct">' + pct + '%</span>'
         + '</div>';

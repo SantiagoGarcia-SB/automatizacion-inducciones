@@ -990,3 +990,239 @@ function _calcularLotesAprobadosNegados(filasFiltradas) {
     lotesEnProceso: lotesEnProceso
   };
 }
+
+
+// ============================================================
+//  FUNCIONES OPTIMIZADAS — Reciben datos pre-leídos (cero lecturas adicionales a Sheets)
+//  Usadas por api_obtenerDatosMetricas para evitar lecturas redundantes.
+// ============================================================
+
+/**
+ * Calcula métricas de lotes usando datos ya leídos de "registro analisis".
+ * Evita la lectura adicional a Sheets que haría calcularMetricasLotes().
+ *
+ * @param {string} fechaDesde - YYYY-MM-DD
+ * @param {string} fechaHasta - YYYY-MM-DD
+ * @param {any[][]} datosPreLeidos - Array 2D con header en posición 0
+ * @param {Object} mapa - Mapa de columnas (salida de _mapearColumnasMetricasLotes)
+ * @returns {{resumen: Object, detallePorLote: Array, sucursales: string[]}}
+ * @sheets_read 0
+ */
+function calcularMetricasLotesConDatos(fechaDesde, fechaHasta, datosPreLeidos, mapa) {
+  var rango = _validarParametrosRango(fechaDesde, fechaHasta);
+  if (!rango) return _metricasLotesVacias();
+  if (!datosPreLeidos || datosPreLeidos.length < 2 || !mapa) return _metricasLotesVacias();
+
+  try {
+    var filasFiltradas = _filtrarFilasPorPeriodo(datosPreLeidos, mapa, rango.desde, rango.hasta);
+    var lotesCount = _calcularLotesAprobadosNegados(filasFiltradas);
+    var solicitudesCount = _calcularSolicitudesAprobNegReconsideradas(filasFiltradas);
+    var totalSolicitudes = filasFiltradas.length;
+    var detalle = _agruparPorLoteYCalcularMetricas(filasFiltradas);
+
+    // Recalcular desde detalle para coherencia
+    var aprobDesdeDetalle = 0, negDesdeDetalle = 0, reconsDesdeDetalle = 0, enProcesoDesdeDetalle = 0;
+    for (var d = 0; d < detalle.length; d++) {
+      aprobDesdeDetalle += (detalle[d].solicitudesAprobadasEnLote || 0) + (detalle[d].solicitudesAprobadasIndividualNegadaPorLote || 0);
+      negDesdeDetalle += (detalle[d].solicitudesNegadas || 0) + (detalle[d].aprobadaPorLoteNegadaPorAnalista || 0);
+      reconsDesdeDetalle += (detalle[d].negadaPorLoteReconsideradaPorGerencia || 0);
+      enProcesoDesdeDetalle += (detalle[d].solicitudesEnProcesoEnLote || 0);
+    }
+
+    // Formatear fechas
+    for (var i = 0; i < detalle.length; i++) {
+      if (detalle[i].fechaLote instanceof Date) {
+        detalle[i].fechaLote = Utilities.formatDate(detalle[i].fechaLote, 'GMT-5', 'd/MM/yyyy');
+      } else {
+        detalle[i].fechaLote = '';
+      }
+    }
+
+    // Sucursales únicas
+    var sucursalesMap = {};
+    for (var s = 0; s < detalle.length; s++) {
+      var suc = detalle[s].sucursal || '';
+      if (suc) sucursalesMap[suc] = true;
+    }
+
+    return {
+      resumen: {
+        totalLotes: lotesCount.totalLotes,
+        lotesAprobados: lotesCount.lotesAprobados,
+        lotesNegados: lotesCount.lotesNegados,
+        lotesEnProceso: lotesCount.lotesEnProceso,
+        totalSolicitudes: totalSolicitudes,
+        solicitudesAprobadas: aprobDesdeDetalle,
+        solicitudesNegadas: negDesdeDetalle,
+        solicitudesReconsideradas: reconsDesdeDetalle,
+        solicitudesEnProceso: enProcesoDesdeDetalle
+      },
+      sucursales: Object.keys(sucursalesMap).sort(),
+      detallePorLote: detalle
+    };
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', 'calcularMetricasLotesConDatos', e.message);
+    return _metricasLotesVacias();
+  }
+}
+
+/**
+ * Calcula histórico de métricas usando datos ya leídos de "registro analisis".
+ * Evita la lectura adicional a Sheets que haría calcularMetricasLotesHistorico().
+ *
+ * @param {number} cantidadMeses - Meses hacia atrás (1-12)
+ * @param {any[][]} datosPreLeidos - Array 2D con header en posición 0
+ * @param {Object} mapa - Mapa de columnas
+ * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number}>}
+ * @sheets_read 0
+ */
+function calcularMetricasLotesHistoricoConDatos(cantidadMeses, datosPreLeidos, mapa) {
+  var n = parseInt(cantidadMeses, 10);
+  if (isNaN(n) || n < 1 || n > 12) return [];
+  if (!datosPreLeidos || datosPreLeidos.length < 2 || !mapa) return [];
+
+  // Intentar cache hit
+  var cacheKey = 'METRICAS_HIST_' + n;
+  try {
+    var cached = CacheWrapper_getJSON(cacheKey);
+    if (cached) return cached;
+  } catch (e) { /* degradación elegante */ }
+
+  try {
+    var hoy = new Date();
+    var nombresMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    var meses = [];
+
+    for (var i = 1; i <= n; i++) {
+      var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      var primerDia = new Date(d.getFullYear(), d.getMonth(), 1);
+      var ultimoDia = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      primerDia.setHours(0, 0, 0, 0);
+      ultimoDia.setHours(0, 0, 0, 0);
+      meses.push({ mes: d.getMonth() + 1, anio: d.getFullYear(), etiqueta: nombresMeses[d.getMonth()] + ' ' + d.getFullYear(), desde: primerDia, hasta: ultimoDia });
+    }
+    meses.reverse();
+
+    var resultado = [];
+    for (var m = 0; m < meses.length; m++) {
+      var mesDatos = meses[m];
+      var filasFiltradas = _filtrarFilasPorPeriodo(datosPreLeidos, mapa, mesDatos.desde, mesDatos.hasta);
+      var lotesCount = _calcularLotesAprobadosNegados(filasFiltradas);
+      var solCount = _calcularSolicitudesAprobNegReconsideradas(filasFiltradas);
+      resultado.push({
+        mes: mesDatos.mes, anio: mesDatos.anio, etiqueta: mesDatos.etiqueta,
+        lotesAprobados: lotesCount.lotesAprobados, lotesNegados: lotesCount.lotesNegados,
+        solicitudesAprobadas: solCount.solicitudesAprobadas + solCount.solicitudesReconsideradas,
+        solicitudesNegadas: solCount.solicitudesNegadas
+      });
+    }
+
+    // Cachear (TTL 300s)
+    try { CacheWrapper_putJSON(cacheKey, resultado, 300); } catch (e) { /* ok */ }
+    return resultado;
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', 'calcularMetricasLotesHistoricoConDatos', e.message);
+    return [];
+  }
+}
+
+/**
+ * Obtiene distribución de estados en proceso usando datos pre-leídos de "registro analisis".
+ * Solo lee Control_General (optimizado a 2 columnas: Estado + UUID).
+ *
+ * @param {string} fechaDesde - YYYY-MM-DD
+ * @param {string} fechaHasta - YYYY-MM-DD
+ * @param {any[][]} datosPreLeidos - Array 2D de registro analisis
+ * @param {string[]} headers - Headers de registro analisis
+ * @param {Object} mapa - Mapa de columnas
+ * @returns {{desglose: Object}}
+ * @sheets_read 1 (solo Control_General, optimizado a 2 columnas)
+ */
+function _obtenerEstadosOperativosEnProcesoConDatos(fechaDesde, fechaHasta, datosPreLeidos, headers, mapa) {
+  var resultado = {
+    desglose: { pendienteRadicar: 0, radicado: 0, pendienteAsignar: 0, enAnalisis: 0, errorTerceros: 0, envioFormatoLMI: 0, envioCartaLMI: 0, pendientePS: 0, otros: 0, total: 0 },
+    detalle: []
+  };
+
+  if (!fechaDesde || !fechaHasta || !datosPreLeidos || !mapa) return resultado;
+
+  var desde = new Date(fechaDesde + 'T00:00:00');
+  var hasta = new Date(fechaHasta + 'T00:00:00');
+  if (isNaN(desde.getTime()) || isNaN(hasta.getTime())) return resultado;
+
+  // ── Paso 1: Leer Control_General SOLO col J (Estado) y col BJ (UUID) ──
+  var mapaEstados = {};
+  try {
+    var ssControl = SpreadsheetApp.openById(getHojaControlId());
+    var hojaControl = ssControl.getSheetByName('Control_General');
+    if (hojaControl && hojaControl.getLastRow() >= 2) {
+      var ultimaFila = hojaControl.getLastRow();
+      // Leer solo col J (10) = Estado
+      var colEstados = hojaControl.getRange(2, 10, ultimaFila - 1, 1).getValues();
+      // Leer solo col BJ (62) = UUID_SISTEMA
+      var colUuids = hojaControl.getRange(2, 62, ultimaFila - 1, 1).getValues();
+      for (var c = 0; c < colUuids.length; c++) {
+        var uuid = String(colUuids[c][0] || '').trim();
+        if (!uuid) continue;
+        mapaEstados[uuid] = String(colEstados[c][0] || '').trim().toUpperCase();
+      }
+    }
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', '_obtenerEstadosOperativosEnProcesoConDatos', 'Error leyendo Control_General: ' + e.message);
+    return resultado;
+  }
+
+  if (Object.keys(mapaEstados).length === 0) return resultado;
+
+  // ── Paso 2: Usar datosPreLeidos (ya disponible, 0 lecturas adicionales) ──
+  var headersLower = headers.map(function(h) { return String(h || '').toLowerCase(); });
+  var colUuid = headersLower.indexOf('uuid_sistema');
+  if (colUuid === -1) return resultado;
+
+  var desdeTime = desde.getTime();
+  var hastaTime = hasta.getTime();
+  var solicitudesContadas = {};
+
+  for (var i = 1; i < datosPreLeidos.length; i++) {
+    var fila = datosPreLeidos[i];
+
+    // Filtrar por Fecha Lote
+    var fechaRaw = fila[mapa.fechaLote];
+    if (!fechaRaw) continue;
+    var fechaLote = (fechaRaw instanceof Date) ? new Date(fechaRaw.getTime()) : new Date(fechaRaw);
+    if (isNaN(fechaLote.getTime())) continue;
+    fechaLote.setHours(0, 0, 0, 0);
+    if (fechaLote.getTime() < desdeTime || fechaLote.getTime() > hastaTime) continue;
+
+    // Solo en proceso
+    var registroSai = String(fila[mapa.registroAnalistaSai] || '').trim();
+    if (registroSai) continue;
+
+    // De-duplicar
+    var solInq = String(fila[mapa.solicitudInquilino] || '').trim().toUpperCase();
+    var codigoLote = String(fila[mapa.codigoLote] || '').trim().toUpperCase();
+    var claveUnica = codigoLote + '|' + solInq;
+    if (solicitudesContadas[claveUnica]) continue;
+    solicitudesContadas[claveUnica] = true;
+
+    // Cruzar UUID
+    var uuidFila = String(fila[colUuid] || '').trim();
+    if (!uuidFila) continue;
+    var estadoControl = mapaEstados[uuidFila];
+    if (estadoControl === undefined) continue;
+
+    resultado.desglose.total++;
+
+    if (estadoControl === 'PENDIENTE RADICAR') resultado.desglose.pendienteRadicar++;
+    else if (estadoControl === 'RADICADO') resultado.desglose.radicado++;
+    else if (estadoControl === 'PENDIENTE ASIGNAR') resultado.desglose.pendienteAsignar++;
+    else if (estadoControl.indexOf('ANÁLISIS') !== -1 || estadoControl.indexOf('ANALISIS') !== -1) resultado.desglose.enAnalisis++;
+    else if (estadoControl.indexOf('ERROR') !== -1) resultado.desglose.errorTerceros++;
+    else if (estadoControl.indexOf('FORMATO LMI') !== -1) resultado.desglose.envioFormatoLMI++;
+    else if (estadoControl.indexOf('CARTA LMI') !== -1) resultado.desglose.envioCartaLMI++;
+    else if (estadoControl.indexOf('PAZ Y SALVO') !== -1) resultado.desglose.pendientePS++;
+    else resultado.desglose.otros++;
+  }
+
+  return resultado;
+}

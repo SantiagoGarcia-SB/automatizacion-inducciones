@@ -22,8 +22,12 @@
   /* Escala monocromática */
   --color-mono-900: #231f20;
   --color-mono-800: #403f3f;
-  --color-mono-500: #807e7e;
+  --color-mono-700: #524f4f;
+  --color-mono-600: #5c5a5a;
+  --color-mono-500: #6b6969; /* Ajustado: ratio ≥5.0:1 sobre blanco — WCAG AA */
+  --color-mono-400: #918f8f;
   --color-mono-300: #bfbebe;
+  --color-mono-200: #d5d3d4;
   --color-mono-100: #ebe7e8;
   --color-mono-0: #ffffff;
 
@@ -40,18 +44,18 @@
 
   /* ══ TIPOGRAFÍA ═══════════════════════════════════════════ */
 
-  --font-body: 'Ciencuadras', 'Inter', system-ui, sans-serif;
-  --font-heading: 'Ciencuadras', 'Inter', system-ui, sans-serif;
+  --font-body: 'Ciencuadras', 'Inter', 'Poppins', system-ui, sans-serif;
+  --font-heading: 'Ciencuadras', 'Inter', 'Poppins', system-ui, sans-serif;
   --font-mono: 'Roboto Mono', 'SF Mono', monospace;
 
-  /* Escala tipográfica */
-  --text-display: 2.5rem;
-  --text-h1: 1.75rem;
-  --text-h2: 1.375rem;
-  --text-h3: 1.125rem;
-  --text-body: 0.9375rem;
-  --text-sm: 0.8125rem;
-  --text-xs: 0.6875rem;
+  /* Escala tipográfica (alineada con Brand Book El Libertador) */
+  --text-display: 2rem;      /* 32px — hero / dashboard KPIs */
+  --text-h1: 1.5rem;         /* 24px — títulos principales */
+  --text-h2: 1.25rem;        /* 20px — títulos de sección */
+  --text-h3: 1.125rem;       /* 18px — subtítulos */
+  --text-body: 1rem;         /* 16px — cuerpo principal */
+  --text-sm: 0.875rem;       /* 14px — texto secundario */
+  --text-xs: 0.75rem;        /* 12px — captions, labels */
 
   /* Pesos */
   --font-light: 300;
@@ -85,21 +89,21 @@
   --space-12: 48px;
   --space-16: 64px;
 
-  /* ══ RADIOS ═══════════════════════════════════════════════ */
+  /* ══ RADIOS (Brand Book El Libertador) ═════════════════════ */
 
   --radius-xs: 6px;
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-xl: 28px;
   --radius-full: 9999px;
 
-  /* ══ SOMBRAS (5 niveles de elevación) ═════════════════════ */
+  /* ══ SOMBRAS (Brand Book — 3 niveles + elevaciones extra) ══ */
 
   --shadow-0: none;
-  --shadow-1: 0 1px 2px rgba(35, 31, 32, 0.04);
-  --shadow-2: 0 4px 12px rgba(35, 31, 32, 0.06);
-  --shadow-3: 0 8px 24px rgba(35, 31, 32, 0.10);
+  --shadow-1: 0 1px 3px rgba(35, 31, 32, 0.08);
+  --shadow-2: 0 4px 6px -1px rgba(35, 31, 32, 0.06), 0 2px 4px -2px rgba(35, 31, 32, 0.04);
+  --shadow-3: 0 10px 20px -4px rgba(35, 31, 32, 0.10);
   --shadow-4: 0 16px 48px rgba(35, 31, 32, 0.14);
 
   /* ══ TRANSICIONES ═════════════════════════════════════════ */
@@ -115,12 +119,13 @@
   --sidebar-width: 232px;
   --header-height: 56px;
   --lifeline-height: 3px;
-  --max-width-content: 1080px;
+  --max-width-content: 960px;
   --max-width-narrow: 720px;
+  --max-width-wide: 1200px;
 }
 
 /* ══ FUENTES ══════════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap');
 
 /* ══ REDUCED MOTION ═══════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {

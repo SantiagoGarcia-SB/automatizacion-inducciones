@@ -952,6 +952,51 @@ function _aplicarFiltroYRenderizarCharts(lotes, usuarios) {
     }
   }
 
+  // Filtrar por sucursal si hay un chip activo (distinto de "todas")
+  var chipSucursalActivo = document.querySelector('#metricasLotesChipsSucursal .metricas-lotes__chip--active');
+  if (chipSucursalActivo) {
+    var sucursalSeleccionada = (chipSucursalActivo.getAttribute('data-sucursal') || '').toUpperCase().trim();
+    if (sucursalSeleccionada && sucursalSeleccionada !== 'TODAS') {
+      // Estrategia 1: filtrar por lote.sucursal si existe (backend nuevo)
+      // Estrategia 2: cruzar con detallePorLote de métricas (fallback)
+      var mapaSucursalPorLote = {};
+      var metricasCache = (typeof CacheManager !== 'undefined')
+        ? (CacheManager.get('metricas-lotes-ref') || CacheManager.get('metricas-lotes'))
+        : null;
+      if (metricasCache && metricasCache.detallePorLote) {
+        for (var dp = 0; dp < metricasCache.detallePorLote.length; dp++) {
+          var det = metricasCache.detallePorLote[dp];
+          if (det.codigoLote && det.sucursal) {
+            mapaSucursalPorLote[det.codigoLote.toUpperCase()] = det.sucursal.toUpperCase()
+              .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          }
+        }
+      }
+
+      var sucFiltroNorm = sucursalSeleccionada.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      var lotesPorSucursal = [];
+      for (var s = 0; s < lotesFiltrados.length; s++) {
+        var loteSuc = lotesFiltrados[s];
+        if (!loteSuc) continue;
+
+        // Intentar con campo directo del lote
+        var sucDirecta = (loteSuc.sucursal || '').toUpperCase().trim()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (sucDirecta && sucDirecta === sucFiltroNorm) {
+          lotesPorSucursal.push(loteSuc);
+          continue;
+        }
+
+        // Fallback: cruzar por idLote con mapa de métricas
+        var idLoteNorm = (loteSuc.idLote || '').toUpperCase().trim();
+        if (mapaSucursalPorLote[idLoteNorm] === sucFiltroNorm) {
+          lotesPorSucursal.push(loteSuc);
+        }
+      }
+      lotesFiltrados = lotesPorSucursal;
+    }
+  }
+
   // Renderizar gráficos con los datos filtrados
   DashboardCharts.renderizar(lotesFiltrados, usuariosFiltrados);
 }
@@ -3036,6 +3081,7 @@ function cargarVistaMetricasLotes() {
       // Poblar caches para uso futuro (drill-down filter changes, etc.)
       if (datos.usuarios) CacheManager.set('usuarios-dash', datos.usuarios);
       if (datos.lotes) CacheManager.set('lotes', datos.lotes);
+      if (datos.metricasLotes) CacheManager.set('metricas-lotes-ref', datos.metricasLotes);
 
       _renderizarMetricasCompleta(
         datos.usuarios || [],
@@ -3077,6 +3123,8 @@ function _renderizarMetricasCompleta(usuarios, lotes, metricasLotes, historico, 
     filtersContainer.innerHTML = filtrosHtml;
 
     // Conectar handler de cambio de filtro
+    // Director/Comercial → re-renderizan gráficos (ranking, antigüedad, tendencia)
+    // Fecha/Segmento/Sucursal → controlan métricas de lotes (KPIs, pipeline, tabla)
     DrillDownFilters._onFiltroChange = function() {
       if (!_sigueVigente(navIdLocal)) return;
       _aplicarFiltroYRenderizarCharts(CacheManager.get('lotes') || lotes, usuarios);

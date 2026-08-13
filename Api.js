@@ -824,7 +824,32 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
       _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.lotes', e.message);
     }
 
-    // ── 3. Métricas de lotes (tabla + KPIs) ──
+    // ══════════════════════════════════════════════════════════════════
+    // OPTIMIZACIÓN: Lectura ÚNICA de "registro analisis"
+    // Antes se leía 3 veces (métricas + histórico + desglose).
+    // Ahora se lee 1 vez y se pasa a todas las funciones.
+    // ══════════════════════════════════════════════════════════════════
+    var datosRegistroAnalisis = null;
+    var headersRegistroAnalisis = null;
+    var mapaColumnasRegistro = null;
+
+    try {
+      headersRegistroAnalisis = _obtenerHeadersMetricasLotes();
+      if (headersRegistroAnalisis) {
+        mapaColumnasRegistro = _mapearColumnasMetricasLotes(headersRegistroAnalisis);
+        if (mapaColumnasRegistro) {
+          var ssAnalisis = SpreadsheetRegistry_get(getArchivoAnalisisId());
+          var hojaAnalisis = ssAnalisis.getSheetByName('registro analisis');
+          if (hojaAnalisis && hojaAnalisis.getLastRow() >= 2) {
+            datosRegistroAnalisis = hojaAnalisis.getDataRange().getValues();
+          }
+        }
+      }
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.lecturaUnica', e.message);
+    }
+
+    // ── 3. Métricas de lotes (tabla + KPIs) — usa datos pre-leídos ──
     var metricasLotes = _metricasLotesVacias();
     try {
       if (typeof fechaDesde === 'string' && typeof fechaHasta === 'string' &&
@@ -841,11 +866,17 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
               var cachedMetricas = CacheWrapper_getJSON(cacheKeyMetricas);
               if (cachedMetricas) {
                 metricasLotes = cachedMetricas;
-              } else {
-                metricasLotes = calcularMetricasLotes(fechaDesde, fechaHasta);
+              } else if (datosRegistroAnalisis && mapaColumnasRegistro) {
+                metricasLotes = calcularMetricasLotesConDatos(fechaDesde, fechaHasta, datosRegistroAnalisis, mapaColumnasRegistro);
                 var payloadStr = JSON.stringify(metricasLotes);
                 if (payloadStr.length <= 512000) {
-                  CacheWrapper_putJSON(cacheKeyMetricas, metricasLotes, 120);
+                  CacheWrapper_putJSON(cacheKeyMetricas, metricasLotes, 300);
+                }
+              } else {
+                metricasLotes = calcularMetricasLotes(fechaDesde, fechaHasta);
+                var payloadStr2 = JSON.stringify(metricasLotes);
+                if (payloadStr2.length <= 512000) {
+                  CacheWrapper_putJSON(cacheKeyMetricas, metricasLotes, 300);
                 }
               }
             }
@@ -856,20 +887,28 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
       _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.metricasLotes', e.message);
     }
 
-    // ── 4. Histórico de lotes (tendencia mensual) ──
+    // ── 4. Histórico de lotes — usa datos pre-leídos ──
     var historico = [];
     try {
-      historico = calcularMetricasLotesHistorico(6);
+      if (datosRegistroAnalisis && mapaColumnasRegistro) {
+        historico = calcularMetricasLotesHistoricoConDatos(6, datosRegistroAnalisis, mapaColumnasRegistro);
+      } else {
+        historico = calcularMetricasLotesHistorico(6);
+      }
     } catch (e) {
       _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.historico', e.message);
     }
 
-    // ── 5. Desglose de estados en proceso (pipeline distribución) ──
+    // ── 5. Desglose pipeline — usa datos pre-leídos, optimiza Control_General ──
     var desglose = { desglose: {}, detalle: [] };
     try {
       if (typeof fechaDesde === 'string' && typeof fechaHasta === 'string' &&
           fechaDesde && fechaHasta) {
-        desglose = _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta);
+        if (datosRegistroAnalisis && mapaColumnasRegistro) {
+          desglose = _obtenerEstadosOperativosEnProcesoConDatos(fechaDesde, fechaHasta, datosRegistroAnalisis, headersRegistroAnalisis, mapaColumnasRegistro);
+        } else {
+          desglose = _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta);
+        }
       }
     } catch (e) {
       _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.desglose', e.message);
@@ -954,7 +993,7 @@ function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
     try {
       var payloadStr = JSON.stringify(resultado);
       if (payloadStr.length <= 512000) {
-        CacheWrapper_putJSON(cacheKey, resultado, 120);
+        CacheWrapper_putJSON(cacheKey, resultado, 300);
       }
     } catch (e) {
       // CacheService no disponible al escribir — degradación elegante, no interrumpir

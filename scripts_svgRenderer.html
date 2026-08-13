@@ -187,12 +187,12 @@ var SVGRenderer = {
     if (!container) return;
 
     var datos = config.datos || [];
-    var margenIzq = 40;
-    var margenDer = 20;
-    var margenTop = 20;
-    var margenBottom = 40;
-    var ancho = 500;
-    var alto = 200;
+    var margenIzq = 35;
+    var margenDer = 15;
+    var margenTop = 18;
+    var margenBottom = 20;
+    var ancho = 800;
+    var alto = 120;
 
     var root = this._crearSvgRaiz({
       titulo: config.titulo,
@@ -200,6 +200,10 @@ var SVGRenderer = {
       alto: alto
     });
     var svg = root.svg;
+    // Forzar que el SVG respete el contenedor
+    svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    svg.style.display = 'block';
+    svg.style.maxHeight = '100%';
 
     var areaAncho = ancho - margenIzq - margenDer;
     var areaAlto = alto - margenTop - margenBottom;
@@ -210,6 +214,14 @@ var SVGRenderer = {
     }
     if (maxValor === 0) maxValor = 1;
 
+    // Línea de referencia base (eje X)
+    var lineaBase = this._crearElemento('line', {
+      'x1': margenIzq, 'y1': margenTop + areaAlto,
+      'x2': ancho - margenDer, 'y2': margenTop + areaAlto,
+      'stroke': '#e0e0e0', 'stroke-width': '1'
+    });
+    svg.appendChild(lineaBase);
+
     // Calcular puntos
     var puntos = [];
     var numPuntos = datos.length;
@@ -217,6 +229,23 @@ var SVGRenderer = {
       var x = margenIzq + (numPuntos > 1 ? (j / (numPuntos - 1)) * areaAncho : areaAncho / 2);
       var y = margenTop + areaAlto - (datos[j].valor / maxValor) * areaAlto;
       puntos.push({ x: x, y: y });
+    }
+
+    // Área rellena bajo la línea (gradiente sutil)
+    if (puntos.length > 1) {
+      var areaPath = 'M' + puntos[0].x + ',' + puntos[0].y;
+      for (var a = 1; a < puntos.length; a++) {
+        areaPath += ' L' + puntos[a].x + ',' + puntos[a].y;
+      }
+      areaPath += ' L' + puntos[puntos.length - 1].x + ',' + (margenTop + areaAlto);
+      areaPath += ' L' + puntos[0].x + ',' + (margenTop + areaAlto) + ' Z';
+
+      var areaFill = this._crearElemento('path', {
+        'd': areaPath,
+        'fill': 'rgba(37, 49, 80, 0.05)',
+        'stroke': 'none'
+      });
+      svg.appendChild(areaFill);
     }
 
     // Línea (polyline)
@@ -229,51 +258,64 @@ var SVGRenderer = {
       var polyline = this._crearElemento('polyline', {
         'points': puntosStr,
         'fill': 'none',
-        'stroke': '#1a3a5c',
-        'stroke-width': '2',
-        'stroke-linejoin': 'round'
+        'stroke': '#253150',
+        'stroke-width': '2.5',
+        'stroke-linejoin': 'round',
+        'stroke-linecap': 'round'
       });
       svg.appendChild(polyline);
     }
 
-    // Marcadores circulares en cada punto
+    // Marcadores circulares + valor solo en picos significativos
     for (var m = 0; m < puntos.length; m++) {
       var circle = this._crearElemento('circle', {
         'cx': puntos[m].x,
         'cy': puntos[m].y,
-        'r': '4',
-        'fill': '#1a3a5c',
+        'r': numPuntos > 15 ? '2.5' : '4',
+        'fill': '#253150',
         'stroke': '#fff',
-        'stroke-width': '2'
+        'stroke-width': numPuntos > 15 ? '1.5' : '2'
       });
       svg.appendChild(circle);
+
+      // Mostrar valor solo en picos locales o último punto (evitar ruido visual)
+      var esPico = datos[m].valor > 0 && (
+        m === puntos.length - 1 ||
+        (m > 0 && m < puntos.length - 1 && datos[m].valor > datos[m-1].valor && datos[m].valor >= datos[m+1].valor) ||
+        (m === 0 && datos[m].valor > 0 && puntos.length > 1 && datos[m].valor >= datos[1].valor)
+      );
+      if (esPico && datos[m].valor > 0) {
+        var valorLabel = this._crearElemento('text', {
+          'x': puntos[m].x,
+          'y': puntos[m].y - 8,
+          'text-anchor': 'middle',
+          'font-size': '9',
+          'font-weight': '600',
+          'fill': '#253150'
+        });
+        valorLabel.textContent = datos[m].valor;
+        svg.appendChild(valorLabel);
+      }
     }
 
-    // Etiquetas del eje X
+    // Etiquetas del eje X (mostrar cada N días para evitar solapamiento)
+    var intervaloLabels = numPuntos > 15 ? 5 : (numPuntos > 8 ? 3 : 1);
     for (var n = 0; n < datos.length; n++) {
+      if (n % intervaloLabels !== 0 && n !== datos.length - 1) continue;
       var xLabel = margenIzq + (numPuntos > 1 ? (n / (numPuntos - 1)) * areaAncho : areaAncho / 2);
+      var labelText = datos[n].label || '';
       var etiqueta = this._crearElemento('text', {
         'x': xLabel,
-        'y': alto - 10,
+        'y': alto - 8,
         'text-anchor': 'middle',
-        'font-size': '10',
+        'font-size': '9',
         'fill': '#666'
       });
-      etiqueta.textContent = datos[n].label;
+      etiqueta.textContent = labelText;
       svg.appendChild(etiqueta);
     }
 
-    // Etiquetas del eje Y (min y max)
-    var yMin = this._crearElemento('text', {
-      'x': margenIzq - 8,
-      'y': margenTop + areaAlto + 4,
-      'text-anchor': 'end',
-      'font-size': '10',
-      'fill': '#666'
-    });
-    yMin.textContent = '0';
-    svg.appendChild(yMin);
-
+    // Solo mostrar valor max en eje Y
     var yMax = this._crearElemento('text', {
       'x': margenIzq - 8,
       'y': margenTop + 4,

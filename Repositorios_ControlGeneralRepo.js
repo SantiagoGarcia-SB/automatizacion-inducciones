@@ -165,8 +165,16 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
     filaInicio = ultimaFila - filasALeer + 1; // fila de inicio (1-based, después del header)
   }
 
-  // Leer columnas relevantes: A-K (1-11) + col 24 (arrendatario)
+  // Leer columnas relevantes: A-X (1-24)
   var datos = hoja.getRange(filaInicio, 1, filasALeer, 24).getValues();
+
+  // Col 57 (BA) = SUCURSAL — leer aparte porque está fuera de las primeras 24 cols
+  var colSucursal = 56; // 0-indexed
+  var datosSucursal = null;
+  try {
+    datosSucursal = hoja.getRange(filaInicio, 57, filasALeer, 1).getValues();
+  } catch (e) { /* si falla, continuar sin sucursal */ }
+
   // Soporta: null (sin filtro), string (un email), string[] (múltiples emails)
   var nombres = _resolverNombresFiltro(emailComercial);
 
@@ -185,10 +193,17 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
     if (!idLote) continue;
 
     if (!lotesMap[idLote]) {
+      // Obtener sucursal de la columna leída aparte
+      var sucursalVal = '';
+      if (datosSucursal) {
+        sucursalVal = String(datosSucursal[i][0] || '').trim();
+      }
+
       lotesMap[idLote] = {
         idLote: idLote,
         fecha: datos[i][2],
         comercial: String(datos[i][10] || '').trim(),
+        sucursal: sucursalVal,
         contratos: 0,
         estados: {}
       };
@@ -266,6 +281,7 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
       idLote: lote.idLote,
       fecha: fechaStr,
       comercial: lote.comercial,
+      sucursal: lote.sucursal || '',
       contratos: lote.contratos,
       estados: lote.estados,
       estadoPrincipal: _obtenerEstadoPrincipal(lote.estados)

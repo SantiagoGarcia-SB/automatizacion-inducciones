@@ -75,7 +75,7 @@ var DashboardCharts = {
     } else {
       SVGRenderer.lineaTendencia({
         containerId: 'chart-tendencia',
-        titulo: 'Tendencia de radicaciones - Últimas 8 semanas',
+        titulo: 'Tendencia diaria de radicaciones - Últimos 30 días',
         datos: datosTendencia
       });
     }
@@ -131,14 +131,20 @@ var DashboardCharts = {
     var anioActual = ahora.getFullYear();
 
     // Construir mapa de comerciales desde la lista de usuarios
+    // Solo roles que radican: CONSULTOR y DIRECTOR
     // Clave: nombre en MAYÚSCULAS para comparación case-insensitive
     var conteo = {};
     var labelsPorClave = {};
+    var ROLES_RADICAN = ['CONSULTOR', 'DIRECTOR'];
 
     if (usuarios && usuarios.length > 0) {
       for (var i = 0; i < usuarios.length; i++) {
         var u = usuarios[i];
         if (u && u.nombre) {
+          // Solo incluir usuarios con rol que radica
+          var rolUpper = (u.rol || '').toUpperCase();
+          if (ROLES_RADICAN.indexOf(rolUpper) === -1) continue;
+
           var clave = u.nombre.toUpperCase();
           if (!(clave in conteo)) {
             conteo[clave] = 0;
@@ -184,6 +190,12 @@ var DashboardCharts = {
     resultado.sort(function(a, b) {
       return b.valor - a.valor;
     });
+
+    // Limitar a top 8 para legibilidad (evita lista infinita con ceros)
+    var MAX_RANKING = 8;
+    if (resultado.length > MAX_RANKING) {
+      resultado = resultado.slice(0, MAX_RANKING);
+    }
 
     return resultado;
   },
@@ -309,12 +321,11 @@ var DashboardCharts = {
    * Requirements: 8.2, 8.3
    */
   _calcularTendencia: function(lotes) {
-    var ahora = new Date();
-    var semanas = this._obtenerUltimas8Semanas(ahora);
+    var dias = this._obtenerUltimos30Dias();
     var resultados = [];
 
-    for (var i = 0; i < semanas.length; i++) {
-      resultados.push({ label: semanas[i].label, valor: 0 });
+    for (var i = 0; i < dias.length; i++) {
+      resultados.push({ label: dias[i].label, valor: 0 });
     }
 
     if (!lotes || !lotes.length) return resultados;
@@ -329,12 +340,12 @@ var DashboardCharts = {
       var fechaLote = this._parsearFecha(lote.fecha);
       if (!fechaLote) continue;
 
-      // Buscar en qué semana cae el lote
+      // Buscar en qué día cae el lote
       var tiempoLote = fechaLote.getTime();
-      for (var k = 0; k < semanas.length; k++) {
-        if (tiempoLote >= semanas[k].inicio.getTime() && tiempoLote <= semanas[k].fin.getTime()) {
+      for (var k = 0; k < dias.length; k++) {
+        if (tiempoLote >= dias[k].inicio.getTime() && tiempoLote <= dias[k].fin.getTime()) {
           resultados[k].valor++;
-          break; // Cada lote en máximo una semana
+          break;
         }
       }
     }
@@ -343,62 +354,29 @@ var DashboardCharts = {
   },
 
   /**
-   * Calcula las últimas 8 semanas calendario completas (lunes a domingo).
-   * La semana más reciente es la última semana COMPLETAMENTE finalizada antes de hoy.
-   *
-   * @param {Date} referencia - Fecha de referencia (normalmente hoy)
-   * @returns {Array<{inicio: Date, fin: Date, label: string}>} 8 semanas, más antigua primero
+   * Calcula los últimos 30 días calendario (excluyendo hoy si es temprano).
+   * @returns {Array<{inicio: Date, fin: Date, label: string}>} 30 días, más antiguo primero
    * @private
    */
-  _obtenerUltimas8Semanas: function(referencia) {
-    // Encontrar el domingo más reciente que ya pasó (fin de la última semana completa)
-    // Si hoy es lunes (1), el domingo pasado fue ayer
-    // Si hoy es domingo (0), la última semana completa terminó el domingo anterior
-    var hoy = new Date(referencia.getFullYear(), referencia.getMonth(), referencia.getDate());
-    var diaSemana = hoy.getDay(); // 0 = domingo, 1 = lunes, ..., 6 = sábado
+  _obtenerUltimos30Dias: function() {
+    var hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    var dias = [];
 
-    // Calcular el domingo que cierra la última semana completa
-    var domingoReciente;
-    if (diaSemana === 0) {
-      // Hoy es domingo → la última semana completa terminó el domingo anterior (hace 7 días)
-      domingoReciente = new Date(hoy.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else {
-      // Cualquier otro día → la última semana completa terminó el domingo pasado
-      domingoReciente = new Date(hoy.getTime() - diaSemana * 24 * 60 * 60 * 1000);
+    for (var i = 29; i >= 0; i--) {
+      var dia = new Date(hoy.getTime() - i * 24 * 60 * 60 * 1000);
+      var inicio = new Date(dia.getTime());
+      inicio.setHours(0, 0, 0, 0);
+      var fin = new Date(dia.getTime());
+      fin.setHours(23, 59, 59, 999);
+
+      // Label: "dd/MM" (compacto)
+      var label = this._pad2(dia.getDate()) + '/' + this._pad2(dia.getMonth() + 1);
+
+      dias.push({ inicio: inicio, fin: fin, label: label });
     }
 
-    var semanas = [];
-    for (var i = 7; i >= 0; i--) {
-      // Calcular inicio (lunes) y fin (domingo) de cada semana
-      var offsetDias = i * 7;
-      var finSemana = new Date(domingoReciente.getTime() - offsetDias * 24 * 60 * 60 * 1000);
-      var inicioSemana = new Date(finSemana.getTime() - 6 * 24 * 60 * 60 * 1000);
-
-      // Fin de la semana es domingo a las 23:59:59.999
-      finSemana.setHours(23, 59, 59, 999);
-      // Inicio de la semana es lunes a las 00:00:00.000
-      inicioSemana.setHours(0, 0, 0, 0);
-
-      var label = this._formatearLabel(inicioSemana, finSemana);
-      semanas.push({ inicio: inicioSemana, fin: finSemana, label: label });
-    }
-
-    return semanas;
-  },
-
-  /**
-   * Formatea el label de una semana como "dd/MM - dd/MM".
-   * @param {Date} inicio - Lunes de la semana
-   * @param {Date} fin - Domingo de la semana
-   * @returns {string} Label formateado
-   * @private
-   */
-  _formatearLabel: function(inicio, fin) {
-    var diaInicio = this._pad2(inicio.getDate());
-    var mesInicio = this._pad2(inicio.getMonth() + 1);
-    var diaFin = this._pad2(fin.getDate());
-    var mesFin = this._pad2(fin.getMonth() + 1);
-    return diaInicio + '/' + mesInicio + ' - ' + diaFin + '/' + mesFin;
+    return dias;
   },
 
   /**

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, shrink-to-fit=no">
   <title>Ingreso de Inducciones</title>
   <link rel="icon" href="https://www.ellibertador.co/assets/img/logo.svg" type="image/x-icon">
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
@@ -76,15 +76,15 @@
         <div class="section-title">
           <i class="fas fa-list-check"></i>
           <span>Información del Lote</span>
-          <span id="borradorIndicator" style="margin-left:auto; font-size:11px; color:#16A34A; font-weight:500; opacity:0.6; transition:opacity 0.3s;"></span>
+          <span id="borradorIndicator" style="margin-left:auto; font-size:11px; color:var(--success); font-weight:500; opacity:0.6; transition:opacity 0.3s;"></span>
         </div>
         <div class="form-grid">
           <div class="input-container">
-            <label>Número de Póliza <span style="color:red">*</span></label>
+            <label>Número de Póliza <span style="color:var(--danger)">*</span></label>
             <input type="number" id="poliza" class="guardar-local" placeholder="Ej: 483" required oninput="guardarBorrador()">
           </div>
           <div class="input-container">
-            <label>Tasa de Inducción IVA incluido (%) <span style="color:red">*</span></label>
+            <label>Tasa de Inducción IVA incluido (%) <span style="color:var(--danger)">*</span></label>
             <input type="text" id="tasaNegociacion" class="guardar-local" placeholder="Ej: 2,3" required oninput="validarComa(this); guardarBorrador();">
           </div>
         </div>
@@ -94,53 +94,45 @@
         </div>
       </section>
 
-      <section class="glass-section" style="border: 2px solid #BD0F14; background: #FFF8F8;">
+      <section class="glass-section" style="border: 2px solid var(--danger); background: rgba(189, 15, 20, 0.03);">
         <div class="section-title" style="margin-bottom: 14px;">
-          <i class="fas fa-file-signature" style="color: #BD0F14;"></i>
-          <span style="color: #BD0F14;">Certificación de Paz y Salvo</span>
+          <i class="fas fa-file-signature" style="color: var(--danger);"></i>
+          <span style="color: var(--danger);">Certificación de Paz y Salvo</span>
         </div>
-        <p style="font-size:13px; color:#64748B; margin:0 0 16px; line-height:1.6; text-transform:none;">
+        <p style="font-size:13px; color:var(--text-muted); margin:0 0 16px; line-height:1.6;">
           Selecciona cómo deseas certificar el estado de cartera de los contratos:
         </p>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;" id="opcionesPS">
 
-          <label id="labelOpcionA" onclick="seleccionarOpcion('A')" style="
-            cursor:pointer; padding:18px; border-radius:12px;
-            border:2px solid #e2e8f0; background:white; transition:.2s;
-            display:flex; align-items:flex-start; gap:12px;
-          ">
+          <label id="labelOpcionA" class="opcion-card" onclick="seleccionarOpcion('A')">
             <input type="radio" name="tipoPS" id="radioA" value="checkbox"
-              style="margin-top:3px; accent-color:#BD0F14; flex-shrink:0; width:18px; height:18px;"
+              class="opcion-card__radio"
               onchange="seleccionarOpcion('A')">
             <div>
-              <b style="display:block; color:#253150; font-size:14px; margin-bottom:4px; text-transform:none;">
-                <i class="fas fa-check-circle" style="color:#BD0F14; margin-right:6px; font-size:13px;"></i>
+              <b class="opcion-card__title">
+                <i class="fas fa-check-circle"></i>
                 Certificación manual
               </b>
-              <span style="font-size:12px; color:#64748B; line-height:1.5; text-transform:none;">
+              <span class="opcion-card__desc">
                 Como comercial, certifico que los contratos de este lote se encuentran al día sin obligaciones pendientes.
-                <strong style="color:#BD0F14; display:block; margin-top:4px;">El soporte emitido por la inmobiliaria será solicitado en caso de aprobación.</strong>
+                <strong class="opcion-card__highlight">El soporte emitido por la inmobiliaria será solicitado en caso de aprobación.</strong>
               </span>
             </div>
           </label>
 
-          <label id="labelOpcionB" onclick="seleccionarOpcion('B')" style="
-            cursor:pointer; padding:18px; border-radius:12px;
-            border:2px solid #e2e8f0; background:white; transition:.2s;
-            display:flex; align-items:flex-start; gap:12px;
-          ">
+          <label id="labelOpcionB" class="opcion-card" onclick="seleccionarOpcion('B')">
             <input type="radio" name="tipoPS" id="radioB" value="adjunto"
-              style="margin-top:3px; accent-color:#BD0F14; flex-shrink:0; width:18px; height:18px;"
+              class="opcion-card__radio"
               onchange="seleccionarOpcion('B')">
             <div>
-              <b style="display:block; color:#253150; font-size:14px; margin-bottom:4px; text-transform:none;">
-                <i class="fas fa-file-pdf" style="color:#BD0F14; margin-right:6px; font-size:13px;"></i>
+              <b class="opcion-card__title">
+                <i class="fas fa-file-pdf"></i>
                 Adjuntar paz y salvo (no mayor a 30 días)
               </b>
-              <span style="font-size:12px; color:#64748B; line-height:1.5; text-transform:none;">
+              <span class="opcion-card__desc">
                 Adjunta el documento de paz y salvo emitido por la inmobiliaria en formato PDF.
-                <strong style="color:#16A34A; display:block; margin-top:4px;">Agiliza la gestión al incluir el soporte desde el inicio.</strong>
+                <strong class="opcion-card__highlight opcion-card__highlight--success">Agiliza la gestión al incluir el soporte desde el inicio.</strong>
               </span>
             </div>
           </label>
@@ -175,7 +167,7 @@
           <i class="fas fa-circle-check drop-check"></i>
         </div>
         <input type="file" id="fileExcel" accept=".xlsx, .xls" style="display:none">
-        <p style="text-align:center; font-size:12px; color:#92400E; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; padding:8px 14px; margin-top:14px; text-transform:none;">
+        <p style="text-align:center; font-size:12px; color:#92400e; background:rgba(255, 163, 0, 0.06); border:1px solid rgba(255, 163, 0, 0.2); border-radius:var(--radius-sm); padding:8px 14px; margin-top:14px;">
           Recuerda usar la <strong>planilla actualizada (formato rojo)</strong> disponible en la barra de descargas
         </p>
       </section>
@@ -187,7 +179,7 @@
             <h3 style="margin: 0; color: #991B1B; font-size: 16px;">Ajustes necesarios antes de radicar</h3>
           </div>
 
-          <button type="button" id="btnDescargarMarcado" style="display: none; background: #BD0F14; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 700; cursor: pointer; align-items: center; gap: 8px; font-size: 13px; box-shadow: 0 4px 6px rgba(189, 15, 20, 0.2); transition: transform 0.2s;">
+          <button type="button" id="btnDescargarMarcado" style="display: none; background: var(--danger); color: white; border: none; padding: 10px 18px; border-radius: var(--radius-sm); font-weight: 700; cursor: pointer; align-items: center; gap: 8px; font-size: 13px; box-shadow: var(--shadow-sm); transition: transform 0.2s;">
             <i class="fas fa-file-download"></i> Descargar planilla con observaciones
           </button>
         </div>
@@ -207,8 +199,8 @@
           <i class="fas fa-bolt"></i> Revisar y enviar a radicación
         </button>
         <button type="button" onclick="limpiarFormulario()" style="
-          width:100%; margin-top:10px; padding:12px; border-radius:12px; border:1.5px solid #e2e8f0;
-          background:white; color:#64748B; font-weight:600; font-size:13px; cursor:pointer;
+          width:100%; margin-top:10px; padding:12px; border-radius:var(--radius-md); border:1.5px solid var(--border);
+          background:white; color:var(--text-muted); font-weight:600; font-size:13px; cursor:pointer;
           transition:0.2s;">
           <i class="fas fa-eraser"></i> Limpiar formulario
         </button>
