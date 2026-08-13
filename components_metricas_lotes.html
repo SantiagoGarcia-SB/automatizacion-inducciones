@@ -645,10 +645,31 @@
   <div class="stack">
     <!-- Header de sección -->
     <div class="section-header">
-      <h2>Métricas Operativas de Lotes</h2>
+      <h2>Métricas</h2>
     </div>
 
-    <!-- Filtros de periodo -->
+    <!-- Gráficos analíticos (antes en el dashboard) -->
+    <div id="drilldown-filters-container"></div>
+
+    <div class="grid grid--2" style="gap:var(--space-4);">
+      <div class="card" style="padding:var(--space-5);">
+        <h4 style="margin:0 0 var(--space-3);">Ranking radicaciones (mes)</h4>
+        <div id="chart-ranking"></div>
+      </div>
+      <div class="card" style="padding:var(--space-5);">
+        <h4 style="margin:0 0 var(--space-3);">Antigüedad promedio por estado</h4>
+        <div id="chart-antiguedad"></div>
+      </div>
+    </div>
+    <div class="card" style="padding:var(--space-5);">
+      <h4 style="margin:0 0 var(--space-3);">Tendencia semanal de radicaciones</h4>
+      <div id="chart-tendencia"></div>
+    </div>
+
+    <!-- Filtros de periodo (Métricas de Lotes) -->
+    <div class="section-header" style="margin-top:var(--space-6);">
+      <h3>Métricas de Lotes</h3>
+    </div>
     <div class="card card--flat">
       <div class="metricas-lotes__filtros">
         <label style="margin-bottom:0; white-space:nowrap; font-size:var(--text-sm); font-weight:var(--font-semibold); color:var(--color-mono-600);">Desde:</label>
@@ -715,6 +736,7 @@ var MetricasLotesView = (function() {
   var _segmentoActivo = 'todos';
   var _sucursalActiva = 'todas';
   var _datosHistorico = null;
+  var _desglosePrecargado = null;
   var _MAX_RANGO_DIAS = 183;
 
   /**
@@ -1817,6 +1839,13 @@ var MetricasLotesView = (function() {
   function _cargarDesgloseEnProceso() {
     if (!_datosActuales || !_datosActuales.detallePorLote) return;
 
+    // Si ya tenemos el desglose pre-cargado (del call unificado), usarlo directamente
+    if (_desglosePrecargado) {
+      _renderizarDesglose(_desglosePrecargado);
+      _desglosePrecargado = null; // Consumido — siguiente vez hará el call normal
+      return;
+    }
+
     var inputDesde = document.getElementById('metricasLotesFechaDesde');
     var inputHasta = document.getElementById('metricasLotesFechaHasta');
     var fechaDesde = inputDesde ? inputDesde.value : '';
@@ -1899,9 +1928,36 @@ var MetricasLotesView = (function() {
     contenedorDesglose.innerHTML = html;
   }
 
+  /**
+   * Inicializa el componente con datos ya pre-cargados (sin round-trip adicional).
+   * Usado cuando cargarVistaMetricasLotes ya obtuvo todo del backend unificado.
+   * @param {Object} metricasLotes - Datos de api_obtenerMetricasLotes
+   * @param {Array|null} historico - Datos de api_obtenerMetricasLotesHistorico
+   * @param {Object|null} desglose - Datos de api_obtenerDetalleEnProceso
+   */
+  function initConDatos(metricasLotes, historico, desglose) {
+    _inicializarFechas();
+    _conectarEventos();
+
+    // Asignar histórico antes de renderizar (para que _renderizarVista lo dibuje)
+    if (historico && historico.length > 0) {
+      _datosHistorico = historico;
+    }
+
+    // Asignar desglose pre-cargado antes de renderizar
+    // (_renderizarVista → _cargarDesgloseEnProceso lo usará directamente)
+    if (desglose) {
+      _desglosePrecargado = desglose;
+    }
+
+    // Renderizar resultados directamente sin llamar al server
+    _renderizarResultados(metricasLotes);
+  }
+
   // API pública del módulo
   return {
     init: init,
+    initConDatos: initConDatos,
     tieneAcceso: tieneAcceso
   };
 })();

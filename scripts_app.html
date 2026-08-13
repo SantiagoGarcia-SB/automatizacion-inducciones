@@ -327,14 +327,14 @@ var MENUS_POR_ROL = {
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas Lotes' },
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
     { id: 'errores', icon: '⚠️', label: 'Pendientes' }
   ],
   GERENTE: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas Lotes' },
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
     { id: 'errores', icon: '⚠️', label: 'Pendientes' }
   ],
   AUXILIAR: [
@@ -350,7 +350,7 @@ var MENUS_POR_ROL = {
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas Lotes' },
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
     { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
     { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
@@ -365,7 +365,7 @@ var MENUS_POR_ROL = {
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas Lotes' },
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
     { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
     { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
@@ -444,7 +444,7 @@ function inicializarApp() {
       cargarDashboard();
     });
 
-  // ── 2. Métricas lotes: background (no bloquea splash) ──
+  // ── 2. Métricas: background pre-fetch unificado (no bloquea splash) ──
   var ROLES_METRICAS = ['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER'];
   if (usuario.rol && ROLES_METRICAS.indexOf(usuario.rol.toUpperCase()) !== -1) {
     var hoy = new Date();
@@ -452,17 +452,24 @@ function inicializarApp() {
     var fechaDesde = _formatearFechaISOUtil(primerDia);
     var fechaHasta = _formatearFechaISOUtil(hoy);
 
-    callServer('api_obtenerMetricasLotes', fechaDesde, fechaHasta)
+    callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta)
       .then(function(datos) {
-        CacheManager.set('metricas-lotes', datos);
-        CacheManager.set('metricas-lotes-rango', { fechaDesde: fechaDesde, fechaHasta: fechaHasta });
+        if (datos.usuarios) CacheManager.set('usuarios-dash', datos.usuarios);
+        if (datos.lotes) CacheManager.set('lotes', datos.lotes);
+        if (datos.metricasLotes) {
+          CacheManager.set('metricas-lotes', datos.metricasLotes);
+          CacheManager.set('metricas-lotes-rango', { fechaDesde: fechaDesde, fechaHasta: fechaHasta });
+        }
       })
       .catch(function() { /* silencioso — se cargará al navegar */ });
   }
 
-  // ── 3. Lotes: background (no bloquea splash) ──
+  // ── 3. Lotes: background (no bloquea splash, solo si no vino del pre-fetch) ──
   if (!initData.lotes) {
-    _prefetchLotesEnBackground();
+    // Si el rol no tiene métricas (no usó api_obtenerDatosMetricas), hacer prefetch aparte
+    if (!usuario.rol || ROLES_METRICAS.indexOf(usuario.rol.toUpperCase()) === -1) {
+      _prefetchLotesEnBackground();
+    }
   }
 }
 
@@ -731,25 +738,6 @@ function _renderizarDashboardConDatos(r) {
           + _barraDistribucion(r, total)
           + '</div>';
 
-        // Contenedor de filtros drill-down (se renderiza post-DOM por _inicializarFiltrosYGraficos)
-        html += '<div id="drilldown-filters-container"></div>';
-
-        // Contenedores de gráficos analíticos
-        html += '<div class="grid grid--2" style="gap:var(--space-4);">'
-          + '<div class="card" style="padding:var(--space-5);">'
-          + '<h4 style="margin:0 0 var(--space-3);">Ranking radicaciones (mes)</h4>'
-          + '<div id="chart-ranking"></div>'
-          + '</div>'
-          + '<div class="card" style="padding:var(--space-5);">'
-          + '<h4 style="margin:0 0 var(--space-3);">Antigüedad promedio por estado</h4>'
-          + '<div id="chart-antiguedad"></div>'
-          + '</div>'
-          + '</div>'
-          + '<div class="card" style="padding:var(--space-5);">'
-          + '<h4 style="margin:0 0 var(--space-3);">Tendencia semanal de radicaciones</h4>'
-          + '<div id="chart-tendencia"></div>'
-          + '</div>';
-
       } else {
         // Comercial: KPIs compactos
         html += '<div class="grid grid--3" style="gap:var(--space-3);">'
@@ -797,15 +785,10 @@ function _renderizarDashboardConDatos(r) {
       html += '</div>';
       document.getElementById('viewDashboard').innerHTML = html;
       mostrarVista('viewDashboard');
-
-      // Inicializar filtros drill-down y gráficos para roles de supervisión
-      if (esAdmin) {
-        _inicializarFiltrosYGraficos();
-      }
 }
 
 /**
- * Inicializa los filtros drill-down y los gráficos analíticos del dashboard.
+ * Inicializa los filtros drill-down y los gráficos analíticos de la vista Métricas.
  * Carga datos de usuarios-dash (si no están en cache), renderiza filtros,
  * conecta handlers de cambio de filtro al re-render de gráficos.
  * Usa patrón _navId para descartar respuestas tardías si el usuario navega fuera.
@@ -2983,8 +2966,10 @@ function _renderizarDetalleLote(data) {
 // ============================================================
 
 /**
- * Carga la vista de Métricas Operativas de Lotes.
- * Verifica acceso por rol y delega la inicialización al módulo MetricasLotesView.
+ * Carga la vista de Métricas.
+ * Usa una función unificada del backend que trae todos los datos en un solo round-trip:
+ * usuarios-dash, lotes, métricas de lotes e histórico.
+ * Reduce la latencia de 3-4 llamadas secuenciales a una sola.
  */
 function cargarVistaMetricasLotes() {
   if (!MetricasLotesView.tieneAcceso()) {
@@ -2992,7 +2977,106 @@ function cargarVistaMetricasLotes() {
     return;
   }
   mostrarVista('viewMetricasLotes');
-  MetricasLotesView.init();
+
+  // Mostrar skeletons mientras carga
+  var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
+  for (var i = 0; i < chartContainers.length; i++) {
+    var el = document.getElementById(chartContainers[i]);
+    if (el) {
+      el.innerHTML = '<div class="skeleton-line" style="height:120px;width:100%;border-radius:var(--radius-sm);"></div>';
+    }
+  }
+
+  var navIdLocal = _navId;
+
+  // Calcular rango de fechas para métricas de lotes (mismo que MetricasLotesView)
+  var hoy = new Date();
+  var primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+  var fechaDesde = _formatearFechaISOUtil(primerDia);
+  var fechaHasta = _formatearFechaISOUtil(hoy);
+
+  // Verificar si ya tenemos TODOS los datos en cache (evitar call innecesario)
+  var cachedUsuarios = CacheManager.get('usuarios-dash');
+  var cachedLotes = CacheManager.get('lotes');
+  var cachedMetricas = CacheManager.get('metricas-lotes');
+  var cachedRango = CacheManager.get('metricas-lotes-rango');
+  var metricasCoinciden = cachedMetricas && cachedRango &&
+    cachedRango.fechaDesde === fechaDesde && cachedRango.fechaHasta === fechaHasta;
+
+  if (cachedUsuarios && cachedLotes && metricasCoinciden) {
+    // Todo en cache → renderizar inmediatamente sin round-trip
+    _renderizarMetricasCompleta(cachedUsuarios, cachedLotes, cachedMetricas, null, null, navIdLocal);
+    // Limpiar métricas pre-cargadas para que la siguiente consulta manual vaya al server
+    CacheManager.invalidar(['metricas-lotes', 'metricas-lotes-rango']);
+    return;
+  }
+
+  // Llamada unificada al backend (1 solo round-trip)
+  callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta)
+    .then(function(datos) {
+      if (!_sigueVigente(navIdLocal)) return;
+
+      // Poblar caches para uso futuro (drill-down filter changes, etc.)
+      if (datos.usuarios) CacheManager.set('usuarios-dash', datos.usuarios);
+      if (datos.lotes) CacheManager.set('lotes', datos.lotes);
+
+      _renderizarMetricasCompleta(
+        datos.usuarios || [],
+        datos.lotes || [],
+        datos.metricasLotes || null,
+        datos.historico || null,
+        datos.desglose || null,
+        navIdLocal
+      );
+    })
+    .catch(function(err) {
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error('Error cargando datos de métricas:', err);
+      // Fallback: intentar cargar por separado con la lógica anterior
+      _inicializarFiltrosYGraficos();
+      MetricasLotesView.init();
+    });
+}
+
+/**
+ * Renderiza la vista Métricas completa con todos los datos ya disponibles.
+ * Evita llamadas adicionales al servidor — todo se procesa localmente.
+ * @param {Array} usuarios - Datos de usuarios para drill-down
+ * @param {Array} lotes - Datos de lotes para gráficos
+ * @param {Object|null} metricasLotes - Métricas de lotes para KPIs + tabla
+ * @param {Array|null} historico - Histórico para gráficas de tendencia
+ * @param {Object|null} desglose - Desglose de estados en proceso (pipeline distribución)
+ * @param {number} navIdLocal - ID de navegación para descartar respuestas tardías
+ */
+function _renderizarMetricasCompleta(usuarios, lotes, metricasLotes, historico, desglose, navIdLocal) {
+  if (!_sigueVigente(navIdLocal)) return;
+
+  // ── 1. Filtros drill-down ──
+  var filtersContainer = document.getElementById('drilldown-filters-container');
+  if (filtersContainer) {
+    var rol = APP_USUARIO ? APP_USUARIO.rol : '';
+    var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
+    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
+    filtersContainer.innerHTML = filtrosHtml;
+
+    // Conectar handler de cambio de filtro
+    DrillDownFilters._onFiltroChange = function() {
+      if (!_sigueVigente(navIdLocal)) return;
+      _aplicarFiltroYRenderizarCharts(CacheManager.get('lotes') || lotes, usuarios);
+    };
+  }
+
+  // ── 2. Gráficos analíticos (ranking, antigüedad, tendencia) ──
+  _aplicarFiltroYRenderizarCharts(lotes, usuarios);
+
+  // ── 3. Métricas de lotes (tabla + KPIs) — delegar a MetricasLotesView ──
+  if (metricasLotes && metricasLotes.detallePorLote && metricasLotes.detallePorLote.length > 0) {
+    // Inyectar datos directamente sin llamar al server
+    MetricasLotesView.initConDatos(metricasLotes, historico, desglose);
+  } else {
+    // Sin datos pre-cargados: init normal (usará sus propios defaults)
+    MetricasLotesView.init();
+  }
 }
 
 function cargarVistaConfiguracion() {

@@ -757,6 +757,138 @@ function _eliminarMotivo(id) {
 }
 
 // ============================================================
+//  API — MÉTRICAS (vista unificada)
+// ============================================================
+
+/**
+ * API: Carga todos los datos necesarios para la vista Métricas en una sola invocación.
+ * Combina: usuarios-dash, lotes, métricas de lotes y métricas históricas.
+ * Reduce la latencia al eliminar 3-4 round-trips secuenciales entre cliente y servidor.
+ *
+ * Cada sub-dataset usa su propia estrategia de cache-first internamente.
+ *
+ * @param {string} fechaDesde - Fecha inicio YYYY-MM-DD (para métricas de lotes)
+ * @param {string} fechaHasta - Fecha fin YYYY-MM-DD (para métricas de lotes)
+ * @returns {{usuarios: Array, lotes: Array, metricasLotes: Object, historico: Array}}
+ * @sheets_read 0-4 (dependiendo de hits de cache)
+ * @sheets_write 0
+ */
+function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
+  try {
+    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+
+    // ── 1. Usuarios para drill-down filters ──
+    var usuarios = [];
+    try {
+      var todos = UsuariosRepo_leerTodos();
+      var emailsVisibles = getEmailsEquipoVisible(usuario.email);
+      var usuariosFiltrados = todos;
+      if (emailsVisibles !== null) {
+        usuariosFiltrados = [];
+        for (var i = 0; i < todos.length; i++) {
+          if (emailsVisibles.indexOf(todos[i].email) !== -1) {
+            usuariosFiltrados.push(todos[i]);
+          }
+        }
+      }
+      for (var j = 0; j < usuariosFiltrados.length; j++) {
+        var u = usuariosFiltrados[j];
+        usuarios.push({
+          email: u.email,
+          nombre: emailANombre(u.email, 'COMPLETO'),
+          rol: u.rol,
+          emailDirector: u.emailDirector || '',
+          emailGerente: u.emailGerente || '',
+          activo: u.activo
+        });
+      }
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.usuarios', e.message);
+    }
+
+    // ── 2. Lotes para gráficos de ranking/antigüedad/tendencia ──
+    var lotes = [];
+    try {
+      var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+      var filtroEmail = emailsEquipo === null ? null : emailsEquipo;
+      var cacheKeyLotes = 'LOTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+      var cachedLotes = CacheWrapper_getJSON(cacheKeyLotes);
+      if (cachedLotes) {
+        lotes = cachedLotes;
+      } else {
+        var resultado = obtenerLotesDeComercial(filtroEmail, 1, 9999, '', '');
+        lotes = resultado.datos || [];
+        CacheWrapper_putJSON(cacheKeyLotes, lotes, 60);
+      }
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.lotes', e.message);
+    }
+
+    // ── 3. Métricas de lotes (tabla + KPIs) ──
+    var metricasLotes = _metricasLotesVacias();
+    try {
+      if (typeof fechaDesde === 'string' && typeof fechaHasta === 'string' &&
+          fechaDesde && fechaHasta) {
+        var regexFecha = /^\d{4}-\d{2}-\d{2}$/;
+        if (regexFecha.test(fechaDesde) && regexFecha.test(fechaHasta)) {
+          var desde = new Date(fechaDesde + 'T00:00:00');
+          var hasta = new Date(fechaHasta + 'T00:00:00');
+          if (!isNaN(desde.getTime()) && !isNaN(hasta.getTime()) &&
+              desde.getTime() <= hasta.getTime()) {
+            var diffDias = Math.ceil((hasta.getTime() - desde.getTime()) / (1000 * 60 * 60 * 24));
+            if (diffDias <= 183) {
+              var cacheKeyMetricas = 'METRICAS_LOTES_' + fechaDesde + '_' + fechaHasta;
+              var cachedMetricas = CacheWrapper_getJSON(cacheKeyMetricas);
+              if (cachedMetricas) {
+                metricasLotes = cachedMetricas;
+              } else {
+                metricasLotes = calcularMetricasLotes(fechaDesde, fechaHasta);
+                var payloadStr = JSON.stringify(metricasLotes);
+                if (payloadStr.length <= 512000) {
+                  CacheWrapper_putJSON(cacheKeyMetricas, metricasLotes, 120);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.metricasLotes', e.message);
+    }
+
+    // ── 4. Histórico de lotes (tendencia mensual) ──
+    var historico = [];
+    try {
+      historico = calcularMetricasLotesHistorico(6);
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.historico', e.message);
+    }
+
+    // ── 5. Desglose de estados en proceso (pipeline distribución) ──
+    var desglose = { desglose: {}, detalle: [] };
+    try {
+      if (typeof fechaDesde === 'string' && typeof fechaHasta === 'string' &&
+          fechaDesde && fechaHasta) {
+        desglose = _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta);
+      }
+    } catch (e) {
+      _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.desglose', e.message);
+    }
+
+    return {
+      usuarios: usuarios,
+      lotes: lotes,
+      metricasLotes: metricasLotes,
+      historico: historico,
+      desglose: desglose
+    };
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDatosMetricas', e.message);
+    return { usuarios: [], lotes: [], metricasLotes: _metricasLotesVacias(), historico: [], desglose: { desglose: {}, detalle: [] } };
+  }
+}
+
+// ============================================================
 //  API — MÉTRICAS OPERATIVAS DE LOTES
 // ============================================================
 
