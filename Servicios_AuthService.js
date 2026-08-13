@@ -5,24 +5,122 @@
  * Lee la pestaña USUARIOS del Libro de Control para determinar
  * rol y permisos del usuario logueado. Usa CacheService para
  * evitar lecturas repetidas a Sheets.
+ *
+ * Punto único de entrada: resolverSesion()
+ * - Usa MemoCache_getSessionEmail() para obtener email (1 vez por ejecución)
+ * - Consulta CacheService (TTL 120s) con clave 'USR_' + email
+ * - En cache-miss, busca en MemoCache_getUsuarios() (lectura memoizada)
+ * - Resultado memoizado en _sesionResuelta para reutilización intra-ejecución
+ *
+ * @see Requirement 9: Consolidar lógica de verificación de roles y sesión
  * ============================================================
  */
 
-/**
- * Obtiene los datos del usuario actual (sesión Google Workspace).
- * Retorna campos de jerarquía (emailDirector, emailGerente) para el frontend.
- * @returns {{autorizado:boolean, email:string, rol?:string, cupo?:number,
- *            emailDirector?:string, emailGerente?:string}}
- */
-function obtenerUsuarioActual_v2() {
-  var email = Session.getActiveUser().getEmail().toLowerCase().trim();
-  var usuario = _obtenerUsuarioPorEmail(email);
+/** @type {SesionResuelta|null} Resultado memoizado de resolverSesion() para la ejecución actual */
+// eslint-disable-next-line no-var
+var _sesionResuelta = null;
 
-  if (!usuario || !usuario.activo) {
-    return { autorizado: false, email: email };
+/**
+ * Punto único de entrada de autenticación. Resuelve toda la información
+ * del usuario en una sola operación:
+ *   1. MemoCache_getSessionEmail() para obtener email (máximo 1 vez por ejecución)
+ *   2. CacheService con clave 'USR_' + email (TTL 120s)
+ *   3. Si cache-miss: MemoCache_getUsuarios() para buscar usuario en memoria
+ *
+ * El resultado se memoiza en _sesionResuelta para reutilización dentro de la
+ * misma ejecución (verificarRol, obtenerUsuarioActual_v2, etc.).
+ *
+ * @returns {{autorizado: boolean, email: string, rol?: string, cupo?: number,
+ *            emailDirector?: string, emailGerente?: string}}
+ * @sheets_read 0-1 (0 en cache-hit de CacheService, 1 en cache-miss si MemoCache no tiene datos)
+ */
+function resolverSesion() {
+  // Memoización: si ya se resolvió en esta ejecución, retornar resultado previo
+  if (_sesionResuelta !== null) {
+    return _sesionResuelta;
   }
 
-  return {
+  // 1. Obtener email de la sesión (máximo 1 llamada a Session.getActiveUser().getEmail())
+  var email = MemoCache_getSessionEmail();
+
+  if (!email) {
+    _sesionResuelta = { autorizado: false, email: '' };
+    return _sesionResuelta;
+  }
+
+  // 2. Intentar CacheService primero (TTL 120s)
+  var usuario = null;
+  var key = 'USR_' + email;
+
+  try {
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get(key);
+    if (cached) {
+      usuario = JSON.parse(cached);
+    }
+  } catch (e) {
+    // CacheService no disponible — continuar sin cache (degradación elegante)
+  }
+
+  // 3. Cache-miss: buscar en MemoCache_getUsuarios() (búsqueda en memoria, sin lectura extra a Sheets)
+  if (!usuario) {
+    var usuarios = MemoCache_getUsuarios();
+    var emailNorm = email.toLowerCase().trim();
+
+    // Buscar por email primario
+    for (var i = 0; i < usuarios.length; i++) {
+      if (usuarios[i].email === emailNorm) {
+        usuario = usuarios[i];
+        break;
+      }
+    }
+
+    // Si no se encuentra por primario, buscar en emails alternos
+    if (!usuario) {
+      for (var j = 0; j < usuarios.length; j++) {
+        var alternos = usuarios[j].emailsAlternos || [];
+        for (var k = 0; k < alternos.length; k++) {
+          if (alternos[k] === emailNorm) {
+            usuario = usuarios[j];
+            break;
+          }
+        }
+        if (usuario) break;
+      }
+    }
+
+    // Si se encontró, cachear en CacheService para próximas ejecuciones
+    if (usuario) {
+      try {
+        var cacheEscribir = CacheService.getScriptCache();
+        var json = JSON.stringify(usuario);
+        cacheEscribir.put(key, json, 120);
+
+        // Cachear también bajo email primario si buscamos por alterno
+        if (usuario.email !== emailNorm) {
+          cacheEscribir.put('USR_' + usuario.email, json, 120);
+        }
+
+        // Cachear bajo cada email alterno
+        var alts = usuario.emailsAlternos || [];
+        for (var m = 0; m < alts.length; m++) {
+          if (alts[m] && alts[m] !== emailNorm) {
+            cacheEscribir.put('USR_' + alts[m], json, 120);
+          }
+        }
+      } catch (e) {
+        // CacheService no disponible — se retorna el resultado sin cachear
+      }
+    }
+  }
+
+  // 4. Construir resultado
+  if (!usuario || !usuario.activo) {
+    _sesionResuelta = { autorizado: false, email: email };
+    return _sesionResuelta;
+  }
+
+  _sesionResuelta = {
     autorizado: true,
     email: usuario.email,
     rol: usuario.rol,
@@ -30,23 +128,42 @@ function obtenerUsuarioActual_v2() {
     emailDirector: usuario.emailDirector || '',
     emailGerente: usuario.emailGerente || ''
   };
+
+  return _sesionResuelta;
+}
+
+/**
+ * Obtiene los datos del usuario actual (sesión Google Workspace).
+ * Delega a resolverSesion() para backward compatibility.
+ * Retorna campos de jerarquía (emailDirector, emailGerente) para el frontend.
+ *
+ * @returns {{autorizado:boolean, email:string, rol?:string, cupo?:number,
+ *            emailDirector?:string, emailGerente?:string}}
+ * @sheets_read 0-1 (delega a resolverSesion)
+ */
+function obtenerUsuarioActual_v2() {
+  return resolverSesion();
 }
 
 /**
  * Verifica que el usuario actual tenga uno de los roles permitidos.
+ * Reutiliza resultado de resolverSesion() (memoizado en _sesionResuelta).
  * Lanza excepción si no tiene acceso.
+ *
  * @param {string[]} rolesPermitidos - Array de roles válidos
- * @returns {{email:string, nombre:string, rol:string, cupo:number}}
+ * @returns {{email:string, rol:string, cupo:number, emailDirector:string, emailGerente:string}}
+ * @throws {Error} NO_AUTORIZADO | SIN_PERMISOS
+ * @sheets_read 0 (reutiliza sesión ya resuelta)
  */
 function verificarRol(rolesPermitidos) {
-  var usuario = obtenerUsuarioActual_v2();
-  if (!usuario.autorizado) {
+  var sesion = resolverSesion();
+  if (!sesion.autorizado) {
     throw new Error('NO_AUTORIZADO');
   }
-  if (!_rolCoincide(usuario.rol, rolesPermitidos)) {
+  if (!_rolCoincide(sesion.rol, rolesPermitidos)) {
     throw new Error('SIN_PERMISOS');
   }
-  return usuario;
+  return sesion;
 }
 
 /**
@@ -193,27 +310,33 @@ function obtenerCorreoDeDirector(emailUsuario) {
 }
 
 /**
- * Obtiene correos de roles superiores activos (DIRECTOR, GERENTE, ADMIN).
- * Cachea en memoria de ejecución para evitar múltiples lecturas en la misma invocación.
+ * Función canónica: retorna emails de usuarios activos con rol DIRECTOR, GERENTE o ADMIN.
+ * Usa MemoCache_getUsuarios() para memoización (no requiere variable de cache propia).
+ * Reemplaza: obtenerCorreosLideres (Codigo.js), UsuariosRepo_getCorreosSuperiores.
+ *
  * @returns {string[]}
+ * @sheets_read 0 (usa MemoCache_getUsuarios)
  */
-var _cacheCorreosSuperiores = null;
 function obtenerCorreosSuperiores() {
-  if (_cacheCorreosSuperiores !== null) {
-    return _cacheCorreosSuperiores;
+  var ROLES_SUPERIORES = ['DIRECTOR', 'GERENTE', 'ADMIN'];
+  var usuarios = MemoCache_getUsuarios();
+  var emailsSet = {};
+  var resultado = [];
+
+  for (var i = 0; i < usuarios.length; i++) {
+    var usuario = usuarios[i];
+    if (usuario.activo === true && ROLES_SUPERIORES.indexOf(usuario.rol) !== -1) {
+      if (!emailsSet[usuario.email]) {
+        emailsSet[usuario.email] = true;
+        resultado.push(usuario.email);
+      }
+    }
   }
-  _cacheCorreosSuperiores = UsuariosRepo_getCorreosSuperiores();
-  return _cacheCorreosSuperiores;
+
+  return resultado;
 }
 
-/**
- * Alias de transición. Llama a obtenerCorreosSuperiores().
- * Mantiene compatibilidad con código existente que usa el nombre viejo.
- * @returns {string[]}
- */
-function obtenerCorreosLideres() {
-  return obtenerCorreosSuperiores();
-}
+
 
 /**
  * Obtiene la cadena jerárquica directa de un usuario de la jerarquía comercial
@@ -262,11 +385,16 @@ function obtenerCadenaJerarquica(emailUsuario) {
  * Retorna la lista de emails visible para el usuario autenticado.
  * Wrapper cacheado sobre UsuariosRepo_getEmailsEquipoVisible.
  *
- * Clave de cache: 'EQUIPO_' + email, TTL 60s.
+ * Estrategia de resolución del rol:
+ *   1. CacheService con clave 'EQUIPO_' + email (TTL 60s) — cache across-execution
+ *   2. Si _sesionResuelta ya contiene el usuario (verificarRol/resolverSesion previo), reutiliza el rol directamente
+ *   3. Fallback: _obtenerUsuarioPorEmail() para resolver el rol (Req 9.5)
+ *
  * Si la función retorna null (ADMIN/ASESOR = sin filtro), cachea 'NULL' como sentinel.
  *
  * @param {string} email - Email del usuario
  * @returns {string[]|null} Lista de emails visibles, o null para acceso total
+ * @sheets_read 0-1 (0 si cache-hit o sesión ya resuelta, 1 en fallback)
  */
 function getEmailsEquipoVisible(email) {
   var emailNorm = String(email || '').toLowerCase().trim();
@@ -274,7 +402,7 @@ function getEmailsEquipoVisible(email) {
 
   var key = 'EQUIPO_' + emailNorm;
 
-  // Intentar leer del cache
+  // 1. Intentar leer del cache (across-execution)
   try {
     var cache = CacheService.getScriptCache();
     var cached = cache.get(key);
@@ -286,13 +414,22 @@ function getEmailsEquipoVisible(email) {
     // CacheService no disponible
   }
 
-  // Necesitamos el rol del usuario para la resolución
-  var usuario = _obtenerUsuarioPorEmail(emailNorm);
-  if (!usuario) return [emailNorm];
+  // 2. Resolver el rol del usuario
+  var rolUsuario = null;
 
-  var resultado = UsuariosRepo_getEmailsEquipoVisible(emailNorm, usuario.rol);
+  // Si resolverSesion/verificarRol ya fue llamado y el email coincide, reutilizar (Req 9.1)
+  if (_sesionResuelta !== null && _sesionResuelta.autorizado && _sesionResuelta.email === emailNorm) {
+    rolUsuario = _sesionResuelta.rol;
+  } else {
+    // Fallback: resolver vía _obtenerUsuarioPorEmail (Req 9.5)
+    var usuario = _obtenerUsuarioPorEmail(emailNorm);
+    if (!usuario) return [emailNorm];
+    rolUsuario = usuario.rol;
+  }
 
-  // Cachear resultado (60s)
+  var resultado = UsuariosRepo_getEmailsEquipoVisible(emailNorm, rolUsuario);
+
+  // 3. Cachear resultado (60s)
   try {
     var cacheEscribir = CacheService.getScriptCache();
     if (resultado === null) {

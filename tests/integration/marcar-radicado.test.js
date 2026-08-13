@@ -1,12 +1,15 @@
 /**
  * Integration test: marcarSolicitudRadicada()
  *
- * Antes de la optimización esta función hacía hasta ~16 llamadas a Sheets
- * (TextFinder + getValue de estado + hasta 8 setValue individuales + hasta
- * 6 getValue individuales para armar la fila de COLA_ANALISIS). Ahora debe
- * quedar en: 1 TextFinder + 1 lectura de fila completa + 1 escritura de fila
- * completa + 1 appendRow en COLA_ANALISIS = 4 llamadas, sin ningún
- * getValue/setValue de celda individual.
+ * Refactorizado para usar MemoCache_getIndiceUuid() en vez de TextFinder.
+ * Ahora la función:
+ *   1. Busca el UUID en el índice en memoria (mapa UUID → fila)
+ *   2. Lee la fila completa
+ *   3. Verifica que el UUID en la fila coincida (detección de edición concurrente)
+ *   4. Escribe la fila completa
+ *   5. Inserta en COLA_ANALISIS
+ *
+ * Llamadas Sheets: 0-1 getDataRange (si índice no cacheado) + 1 getValues + 1 setValues + 1 appendRow
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -17,9 +20,23 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
 const SOURCE_PATH = resolve(__dirname, '../../Repositorios_ColaAuxiliarRepo.js');
+const MEMO_CACHE_PATH = resolve(__dirname, '../../Infraestructura_MemoCache.js');
+const REGISTRY_PATH = resolve(__dirname, '../../Infraestructura_Registry.js');
+
 const sourceCode = readFileSync(SOURCE_PATH, 'utf-8');
+const memoCacheCode = readFileSync(MEMO_CACHE_PATH, 'utf-8');
+const registryCode = readFileSync(REGISTRY_PATH, 'utf-8');
 
 function loadSource() {
+  // Load registry first (provides SpreadsheetRegistry_get)
+  const wrappedRegistry = `(function() { ${registryCode} \n; globalThis.SpreadsheetRegistry_get = SpreadsheetRegistry_get; globalThis.SpreadsheetRegistry_has = SpreadsheetRegistry_has; globalThis._spreadsheetRegistry = _spreadsheetRegistry; })()`;
+  eval(wrappedRegistry);
+
+  // Load MemoCache (provides MemoCache_getIndiceUuid and global _indiceUuidFila)
+  const wrappedMemo = `(function() { ${memoCacheCode} \n; globalThis.MemoCache_getIndiceUuid = MemoCache_getIndiceUuid; globalThis._indiceUuidFila = _indiceUuidFila; })()`;
+  eval(wrappedMemo);
+
+  // Load the main source
   const wrapped = `(function() { ${sourceCode}\n; globalThis.marcarSolicitudRadicada = marcarSolicitudRadicada; })()`;
   eval(wrapped);
 }
@@ -53,6 +70,7 @@ function setupEnvironment(opts) {
 
   globalThis.SpreadsheetApp = app;
   globalThis.getHojaControlId = () => 'mock-control-id';
+  globalThis._registrarEvento_ = () => {}; // no-op for safety
   globalThis.Utilities = {
     formatDate: function(date) {
       return date instanceof Date ? date.toISOString().slice(0, 10) : '';
@@ -62,21 +80,46 @@ function setupEnvironment(opts) {
   const lockService = createLockService({ simulateContention: !!opts.lockNoDisponible });
   globalThis.LockService = lockService;
 
+  // Reset the SpreadsheetRegistry so it uses our mock
+  globalThis._spreadsheetRegistry = {};
+
   loadSource();
+
+  // Set the UUID index AFTER loadSource to avoid being overwritten by MemoCache init
+  if (!opts.noPreBuildIndex) {
+    const uuid = String(opts.filaControl[61] || '').trim();
+    if (uuid) {
+      // Fila 2 (1-based) because row 1 is header
+      globalThis._indiceUuidFila = { [uuid]: 2 };
+    } else {
+      globalThis._indiceUuidFila = {};
+    }
+  } else {
+    globalThis._indiceUuidFila = null;
+  }
 
   return { app };
 }
 
-describe('marcarSolicitudRadicada() — escritura batch', () => {
+describe('marcarSolicitudRadicada() — índice UUID en memoria', () => {
   beforeEach(() => {
     delete globalThis.SpreadsheetApp;
     delete globalThis.LockService;
     delete globalThis.getHojaControlId;
     delete globalThis.Utilities;
     delete globalThis.marcarSolicitudRadicada;
+    delete globalThis.SpreadsheetRegistry_get;
+    delete globalThis.SpreadsheetRegistry_has;
+    delete globalThis._spreadsheetRegistry;
+    delete globalThis.MemoCache_getIndiceUuid;
+    delete globalThis._indiceUuidFila;
+    delete globalThis._registrarEvento_;
+    delete globalThis._sessionEmail;
+    delete globalThis._cacheUsuariosTodos;
+    delete globalThis._indiceLoteFila;
   });
 
-  it('usa exactamente 1 lectura y 1 escritura de fila completa en Control_General (sin getValue/setValue individuales)', () => {
+  it('usa índice UUID en memoria y realiza 1 lectura + 1 escritura de fila (sin TextFinder)', () => {
     const filaControl = generarFilaControlGeneral({ uuid: 'uuid-100' });
     const { app } = setupEnvironment({ filaControl });
 
@@ -89,11 +132,14 @@ describe('marcarSolicitudRadicada() — escritura batch', () => {
     expect(resultado.ok).toBe(true);
 
     const hojaControl = app._spreadsheet.getSheetByName('Control_General');
+    // No debe usar TextFinder
+    expect(hojaControl.getCallLog('TextFinder.findNext').length).toBe(0);
+    expect(hojaControl.getCallLog('createTextFinder').length).toBe(0);
+    // Debe usar getValues y setValues (1 lectura + 1 escritura de fila)
     expect(hojaControl.getCallLog('getValue').length).toBe(0);
     expect(hojaControl.getCallLog('setValue').length).toBe(0);
     expect(hojaControl.getCallLog('getValues').length).toBe(1);
     expect(hojaControl.getCallLog('setValues').length).toBe(1);
-    expect(hojaControl.getCallLog('TextFinder.findNext').length).toBe(1);
   });
 
   it('inserta en COLA_ANALISIS exactamente 1 vez, con los datos correctos leídos de la misma fila', () => {
@@ -166,5 +212,58 @@ describe('marcarSolicitudRadicada() — escritura batch', () => {
     const hojaControl = app._spreadsheet.getSheetByName('Control_General');
     expect(hojaControl.getCallLog('getValues').length).toBe(0);
     expect(hojaControl.getCallLog('setValues').length).toBe(0);
+  });
+
+  it('retorna ok:false si UUID no está en el índice (solicitud no encontrada)', () => {
+    const filaControl = generarFilaControlGeneral({ uuid: 'uuid-existente' });
+    const { app } = setupEnvironment({ filaControl });
+
+    // Buscar un UUID que no existe en el índice
+    const resultado = globalThis.marcarSolicitudRadicada('uuid-inexistente', {});
+
+    expect(resultado.ok).toBe(false);
+    expect(resultado.mensaje).toContain('no encontrada');
+
+    const hojaControl = app._spreadsheet.getSheetByName('Control_General');
+    expect(hojaControl.getCallLog('setValues').length).toBe(0);
+  });
+
+  it('retorna ok:false si la fila ya no contiene el UUID esperado (edición concurrente)', () => {
+    // Setup: el índice dice que 'uuid-original' está en fila 2,
+    // pero la fila realmente tiene 'uuid-cambiado' (otro proceso lo movió)
+    const filaControl = generarFilaControlGeneral({ uuid: 'uuid-cambiado' });
+    const { app } = setupEnvironment({ filaControl });
+
+    // Forzar el índice a mapear 'uuid-original' → fila 2
+    globalThis._indiceUuidFila = { 'uuid-original': 2 };
+
+    const resultado = globalThis.marcarSolicitudRadicada('uuid-original', {
+      solicitudInquilino: 'SOL-X'
+    });
+
+    expect(resultado.ok).toBe(false);
+    expect(resultado.mensaje).toContain('cambió de posición');
+
+    // No debe haber escrito nada
+    const hojaControl = app._spreadsheet.getSheetByName('Control_General');
+    expect(hojaControl.getCallLog('setValues').length).toBe(0);
+
+    const hojaCola = app._spreadsheet.getSheetByName('COLA_ANALISIS');
+    expect(hojaCola.getCallLog('appendRow').length).toBe(0);
+  });
+
+  it('si el índice no está precargado, lee datos completos y construye el índice', () => {
+    const filaControl = generarFilaControlGeneral({ uuid: 'uuid-600' });
+    const { app } = setupEnvironment({ filaControl, noPreBuildIndex: true });
+
+    const resultado = globalThis.marcarSolicitudRadicada('uuid-600', {
+      solicitudInquilino: 'SOL-600'
+    });
+
+    expect(resultado.ok).toBe(true);
+
+    // Should have called getDataRange to build the index
+    const hojaControl = app._spreadsheet.getSheetByName('Control_General');
+    expect(hojaControl.getCallLog('getDataRange').length).toBe(1);
   });
 });

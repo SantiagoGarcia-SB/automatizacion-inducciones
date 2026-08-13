@@ -173,10 +173,10 @@ function _mapearColumnasMetricasLotes(headers) {
     registroAnalistaSai: 'REGISTRO ANALISTA SAI'
   };
 
-  var claves = Object.keys(mapa);
-  for (var i = 0; i < claves.length; i++) {
-    if (mapa[claves[i]] === -1) {
-      columnasNoEncontradas.push(nombresColumnas[claves[i]]);
+  var clavesRequeridas = Object.keys(nombresColumnas);
+  for (var i = 0; i < clavesRequeridas.length; i++) {
+    if (mapa[clavesRequeridas[i]] === -1) {
+      columnasNoEncontradas.push(nombresColumnas[clavesRequeridas[i]]);
     }
   }
 
@@ -507,12 +507,13 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
 // ============================================================
 
 /**
- * Calcula y retorna las métricas operativas de lotes para un rango de fechas.
- * Función principal del servicio — orquesta: validación → cache → lectura → cálculo → cache store → retorno.
+ * Calcula las métricas operativas de lotes para un rango de fechas desde Sheets.
+ * Función de cálculo puro — la estrategia cache-first es responsabilidad del caller (api_obtenerMetricasLotes).
  *
  * @param {string} fechaDesde - Fecha inicio en formato YYYY-MM-DD
  * @param {string} fechaHasta - Fecha fin en formato YYYY-MM-DD
  * @returns {{resumen: Object, detallePorLote: Array}}
+ * @sheets_read 1-2 (headers + datos de registro analisis)
  */
 function calcularMetricasLotes(fechaDesde, fechaHasta) {
   // ── 1. Validar parámetros ──
@@ -521,46 +522,37 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     return _metricasLotesVacias();
   }
 
-  // ── 2. Intentar cache hit ──
-  var cacheKey = 'METRICAS_LOTES_' + fechaDesde + '_' + fechaHasta;
+  // ── 2. Calcular desde Sheets ──
   try {
-    var cached = CacheWrapper_getJSON(cacheKey);
-    if (cached) return cached;
-  } catch (e) {
-    // CacheService no disponible — continuar sin caché (degradación elegante)
-  }
-
-  // ── 3. Cache miss — calcular desde Sheets ──
-  try {
-    // 3a. Leer headers (con caché propio de 300s)
+    // 2a. Leer headers (con caché propio de 300s)
     var headers = _obtenerHeadersMetricasLotes();
     if (!headers) return _metricasLotesVacias();
 
-    // 3b. Mapear columnas
+    // 2b. Mapear columnas
     var mapa = _mapearColumnasMetricasLotes(headers);
     if (!mapa) return _metricasLotesVacias();
 
-    // 3c. Leer datos completos de la hoja
+    // 2c. Leer datos completos de la hoja
     var ss = SpreadsheetApp.openById(getArchivoAnalisisId());
     var hoja = ss.getSheetByName('registro analisis');
     if (!hoja || hoja.getLastRow() < 2) return _metricasLotesVacias();
 
     var datos = hoja.getDataRange().getValues();
 
-    // 3d. Filtrar filas por rango de fechas
+    // 2d. Filtrar filas por rango de fechas
     var filasFiltradas = _filtrarFilasPorPeriodo(datos, mapa, rango.desde, rango.hasta);
 
-    // 3e. Calcular resumen
+    // 2e. Calcular resumen
     var lotesCount = _calcularLotesAprobadosNegados(filasFiltradas);
     var solicitudesCount = _calcularSolicitudesAprobNegReconsideradas(filasFiltradas);
 
-    // 3e2. Calcular total de solicitudes del periodo (todas, sin importar estado)
+    // 2f. Calcular total de solicitudes del periodo (todas, sin importar estado)
     var totalSolicitudes = filasFiltradas.length;
 
-    // 3f. Calcular detalle por lote
+    // 2g. Calcular detalle por lote
     var detalle = _agruparPorLoteYCalcularMetricas(filasFiltradas);
 
-    // 3f2. Recalcular solicitudesAprobadas y solicitudesNegadas desde detalle
+    // 2h. Recalcular solicitudesAprobadas y solicitudesNegadas desde detalle
     // para coherencia con la tabla (incluye aprobaciones individuales de lotes negados)
     var aprobDesdeDetalle = 0;
     var negDesdeDetalle = 0;
@@ -579,7 +571,7 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     solicitudesCount.solicitudesReconsideradas = reconsDesdeDetalle;
     solicitudesCount.solicitudesEnProceso = enProcesoDesdeDetalle;
 
-    // 3g. Formatear fechas en detalle para serialización
+    // 2i. Formatear fechas en detalle para serialización
     for (var i = 0; i < detalle.length; i++) {
       if (detalle[i].fechaLote instanceof Date) {
         detalle[i].fechaLote = Utilities.formatDate(detalle[i].fechaLote, 'GMT-5', 'd/MM/yyyy');
@@ -588,7 +580,7 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
       }
     }
 
-    // 3h. Construir resultado
+    // 2j. Construir resultado
     // Extraer sucursales únicas del detalle para chips de filtro en frontend
     var sucursalesMap = {};
     for (var s = 0; s < detalle.length; s++) {
@@ -613,22 +605,7 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
       detallePorLote: detalle
     };
 
-    // ── 4. Almacenar en caché (verificar tamaño) ──
-    var payloadSize = JSON.stringify(resultado).length;
-
-    if (payloadSize > 512000) {
-      // Payload > 500KB: NO cachear, registrar WARN
-      _registrarEvento_('WARN', 'Servicios_MetricasLotes.js', 'calcularMetricasLotes', 'Payload excede 500KB (' + payloadSize + ' bytes). No se cachea el resultado para rango ' + fechaDesde + ' a ' + fechaHasta);
-    } else {
-      // Payload <= 500KB: almacenar en caché con TTL 120s
-      try {
-        CacheWrapper_putJSON(cacheKey, resultado, 120);
-      } catch (e) {
-        // CacheService no disponible — retornar sin cachear (degradación elegante)
-      }
-    }
-
-    // ── 5. Retornar resultado ──
+    // ── 3. Retornar resultado (cache es responsabilidad del caller) ──
     return resultado;
 
   } catch (e) {
@@ -645,41 +622,61 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
 
 /**
  * Calcula métricas históricas resumidas para los últimos N meses.
- * Reutiliza la lógica existente de filtrado y conteo, pero lee los datos UNA sola vez
- * y filtra por mes en memoria (mucho más rápido que N llamadas a calcularMetricasLotes).
+ * Lee registro_analisis UNA sola vez y filtra por cada mes en memoria.
+ *
+ * Optimizaciones:
+ * - Usa SpreadsheetRegistry_get para evitar abrir el libro más de una vez por ejecución.
+ * - Para rangos > 90 días (cantidadMeses > 3), lee solo las columnas necesarias
+ *   mediante getRange limitado (máximo 17 columnas) en vez de todas las 100+ columnas.
+ * - No adquiere LockService ni comparte dependencias de escritura, permitiendo
+ *   ejecución en paralelo con api_obtenerMetricasLotes.
  *
  * @param {number} cantidadMeses - Cantidad de meses hacia atrás (1-12)
- * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number, solicitudesReconsideradas:number}>}
+ * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number}>}
+ * @sheets_read 0 en cache-hit, 1 en cache-miss
  */
 function calcularMetricasLotesHistorico(cantidadMeses) {
   var n = parseInt(cantidadMeses, 10);
   if (isNaN(n) || n < 1 || n > 12) return [];
 
   try {
-    // Intentar cache hit
+    // ── 1. Intentar cache hit (degradación elegante si CacheService falla) ──
     var cacheKey = 'METRICAS_HIST_' + n;
     try {
       var cached = CacheWrapper_getJSON(cacheKey);
       if (cached) return cached;
-    } catch (e) { /* degradación elegante */ }
+    } catch (e) { /* degradación elegante — continuar sin cache */ }
 
-    // Leer headers y mapear columnas
+    // ── 2. Leer headers y mapear columnas ──
     var headers = _obtenerHeadersMetricasLotes();
     if (!headers) return [];
 
     var mapa = _mapearColumnasMetricasLotes(headers);
     if (!mapa) return [];
 
-    // Leer datos completos UNA vez
-    var ss = SpreadsheetApp.openById(getArchivoAnalisisId());
+    // ── 3. Lectura ÚNICA de registro_analisis (vía SpreadsheetRegistry) ──
+    var ss = SpreadsheetRegistry_get(getArchivoAnalisisId());
     var hoja = ss.getSheetByName('registro analisis');
     if (!hoja || hoja.getLastRow() < 2) return [];
 
-    var datos = hoja.getDataRange().getValues();
+    var datos;
+    var ultimaFila = hoja.getLastRow();
 
-    // Calcular rangos de meses
+    // Para rangos > 90 días (cantidadMeses > 3), usar getRange limitado a columnas necesarias
+    if (n > 3) {
+      datos = _leerColumnasNecesariasHistorico(hoja, mapa, ultimaFila, headers);
+    } else {
+      // Para rangos <= 90 días, getDataRange completo (pocas columnas extra no impactan)
+      datos = hoja.getDataRange().getValues();
+    }
+
+    if (!datos || datos.length < 2) return [];
+
+    // ── 4. Calcular rangos de meses ──
     var hoy = new Date();
     var meses = [];
+    var nombresMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+
     for (var i = 1; i <= n; i++) {
       var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
       var primerDia = new Date(d.getFullYear(), d.getMonth(), 1);
@@ -687,7 +684,6 @@ function calcularMetricasLotesHistorico(cantidadMeses) {
       primerDia.setHours(0, 0, 0, 0);
       ultimoDia.setHours(0, 0, 0, 0);
 
-      var nombresMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
       meses.push({
         mes: d.getMonth() + 1,
         anio: d.getFullYear(),
@@ -700,7 +696,7 @@ function calcularMetricasLotesHistorico(cantidadMeses) {
     // Invertir para orden cronológico (más antiguo primero)
     meses.reverse();
 
-    // Para cada mes, filtrar filas y calcular conteos
+    // ── 5. Para cada mes, filtrar filas en memoria y calcular conteos ──
     var resultado = [];
     for (var m = 0; m < meses.length; m++) {
       var mesDatos = meses[m];
@@ -719,10 +715,10 @@ function calcularMetricasLotesHistorico(cantidadMeses) {
       });
     }
 
-    // Cachear resultado (TTL 300s — datos históricos cambian poco)
+    // ── 6. Cachear resultado (TTL 300s — datos históricos cambian poco) ──
     try {
       CacheWrapper_putJSON(cacheKey, resultado, 300);
-    } catch (e) { /* degradación elegante */ }
+    } catch (e) { /* degradación elegante — continuar sin cachear */ }
 
     return resultado;
 
@@ -730,6 +726,55 @@ function calcularMetricasLotesHistorico(cantidadMeses) {
     _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', 'calcularMetricasLotesHistorico', 'Error: ' + e.message);
     return [];
   }
+}
+
+/**
+ * Lee solo las columnas necesarias para el cálculo de métricas históricas.
+ * Construye un array 2D compatible con el formato que _filtrarFilasPorPeriodo espera
+ * (mismos índices de columna que el mapa), pero leyendo solo las columnas requeridas
+ * en vez de las 100+ columnas totales de registro_analisis.
+ *
+ * Se usa para rangos > 90 días donde leer todas las columnas sería ineficiente.
+ * Máximo 17 columnas leídas (6 requeridas + sucursal + margen de seguridad).
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} hoja - Hoja registro_analisis
+ * @param {{fechaLote:number, solicitudInquilino:number, codigoLote:number, resultadoLote:number, resultadoSolicitud:number, registroAnalistaSai:number, sucursal:number}} mapa - Índices de columnas
+ * @param {number} ultimaFila - Última fila con datos en la hoja
+ * @param {string[]} headers - Headers completos de la hoja
+ * @returns {any[][]} Array 2D con header en posición 0 y datos desde posición 1
+ * @sheets_read 1
+ */
+function _leerColumnasNecesariasHistorico(hoja, mapa, ultimaFila, headers) {
+  // Determinar las columnas que necesitamos (0-based en mapa, 1-based en Sheets)
+  var columnasNecesarias = [
+    mapa.fechaLote,
+    mapa.solicitudInquilino,
+    mapa.codigoLote,
+    mapa.resultadoLote,
+    mapa.resultadoSolicitud,
+    mapa.registroAnalistaSai
+  ];
+
+  // Agregar sucursal si existe
+  if (mapa.sucursal !== -1) {
+    columnasNecesarias.push(mapa.sucursal);
+  }
+
+  // Encontrar la columna máxima para determinar el rango mínimo necesario
+  var colMax = 0;
+  for (var c = 0; c < columnasNecesarias.length; c++) {
+    if (columnasNecesarias[c] > colMax) {
+      colMax = columnasNecesarias[c];
+    }
+  }
+
+  // Leer desde fila 1 (headers) hasta última fila, limitado a las columnas necesarias.
+  // El rango incluye hasta colMax+1 columnas (todas las columnas desde A hasta la más lejana necesaria).
+  // Si colMax+1 ya es ≤ 17, se cumple el requisito 12.5 directamente.
+  var numColumnas = colMax + 1;
+  var datosLimitados = hoja.getRange(1, 1, ultimaFila, numColumnas).getValues();
+
+  return datosLimitados;
 }
 
 

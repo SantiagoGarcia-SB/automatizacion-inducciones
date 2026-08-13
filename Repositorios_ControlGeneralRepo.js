@@ -15,7 +15,7 @@
  * @returns {{radicados:number, enAnalisis:number, pendientePS:number, errorTerceros:number, terminados:number}}
  */
 function obtenerResumenComercial(emailComercial) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) return _resumenVacio();
 
   var ultimaFila = hoja.getLastRow();
@@ -78,21 +78,12 @@ function obtenerResumenComercial(emailComercial) {
 
 /**
  * Genera el nombre del comercial en el formato exacto que se guarda en Control_General.
- * Replica la lógica de: obtenerNombreCompletoDeComercial(email).toUpperCase()
+ * Usa la función canónica emailANombre con formato MAYUSCULAS.
  * @param {string} email
  * @returns {string} Nombre en MAYÚSCULAS
  */
 function _nombreComercialParaBusqueda(email) {
-  if (!email || typeof email !== 'string' || email.indexOf('@') === -1) return '';
-  var partes = email.split('@')[0].split('.');
-  var resultado = [];
-  for (var i = 0; i < partes.length; i++) {
-    var p = partes[i].trim();
-    if (p.length > 0) {
-      resultado.push(p.charAt(0).toUpperCase() + p.slice(1).toLowerCase());
-    }
-  }
-  return resultado.join(' ').toUpperCase();
+  return emailANombre(email, 'MAYUSCULAS');
 }
 
 /**
@@ -104,13 +95,13 @@ function _nombreComercialParaBusqueda(email) {
 function _resolverNombresFiltro(emailComercial) {
   if (emailComercial === null || emailComercial === undefined) return null;
   if (typeof emailComercial === 'string') {
-    var nombre = _nombreComercialParaBusqueda(emailComercial);
+    var nombre = emailANombre(emailComercial, 'MAYUSCULAS');
     return nombre ? [nombre] : null;
   }
   if (Array.isArray(emailComercial)) {
     var nombres = [];
     for (var i = 0; i < emailComercial.length; i++) {
-      var n = _nombreComercialParaBusqueda(emailComercial[i]);
+      var n = emailANombre(emailComercial[i], 'MAYUSCULAS');
       if (n && nombres.indexOf(n) === -1) nombres.push(n);
     }
     return nombres.length > 0 ? nombres : null;
@@ -145,7 +136,7 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
   filtroEstado = (filtroEstado || '').toUpperCase().trim();
   busquedaId = (busquedaId || '').trim().toUpperCase();
 
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) {
     return { datos: [], total: 0, pagina: 1, totalPaginas: 0 };
   }
@@ -293,7 +284,7 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
  * @returns {Array<{idLote:string, dias:number}>}
  */
 function obtenerLotesPendientesPazYSalvo(nombreComercial) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) return [];
 
   var ultimaFila = hoja.getLastRow();
@@ -344,30 +335,37 @@ function _obtenerEstadoPrincipal(estados) {
 
 /**
  * Obtiene el detalle completo de un lote: datos generales + solicitudes.
+ * Usa MemoCache_getIndiceLote() para búsqueda en memoria en vez de TextFinder.
+ * Reutiliza datos ya cargados si obtenerLotesDeComercial() los leyó previamente.
+ *
  * @param {string} idLote - ID del lote
  * @returns {{lote:Object, solicitudes:Array}}
+ * @sheets_read 0-1 (0 si índice ya existe en memoria, 1 si necesita leer Control_General)
  */
 function obtenerDetalleLote(idLote) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  if (!idLote || typeof idLote !== 'string') return { lote: null, solicitudes: [] };
+  idLote = idLote.trim();
+  if (!idLote) return { lote: null, solicitudes: [] };
+
+  var ss = SpreadsheetRegistry_get(getHojaControlId());
+  var hoja = ss.getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) return { lote: null, solicitudes: [] };
 
-  // Usar TextFinder para encontrar filas de este lote (rápido)
-  var finder = hoja.createTextFinder(idLote).matchEntireCell(true).matchCase(false);
-  var celdas = finder.findAll();
+  // Intentar obtener el índice loteId ya construido en esta ejecución
+  var indiceLote = MemoCache_getIndiceLote(null);
 
-  if (celdas.length === 0) return { lote: null, solicitudes: [] };
-
-  // Filtrar solo coincidencias en columna A (ID Lote)
-  var filasDelLote = [];
-  for (var i = 0; i < celdas.length; i++) {
-    if (celdas[i].getColumn() === 1) {
-      filasDelLote.push(celdas[i].getRow());
-    }
+  // Si el índice no existe (primera llamada sin datos previos), leer Control_General y construirlo
+  if (!indiceLote || Object.keys(indiceLote).length === 0) {
+    var ultimaFila = hoja.getLastRow();
+    var datosControlGeneral = hoja.getRange(1, 1, ultimaFila, 62).getValues();
+    indiceLote = MemoCache_getIndiceLote(datosControlGeneral);
   }
 
-  if (filasDelLote.length === 0) return { lote: null, solicitudes: [] };
+  // Buscar filas del lote en el índice
+  var filasDelLote = indiceLote[idLote];
+  if (!filasDelLote || filasDelLote.length === 0) return { lote: null, solicitudes: [] };
 
-  // Leer datos de las filas encontradas (cols 1-28 para tener los datos principales)
+  // Leer datos de las filas encontradas directamente por número de fila
   var solicitudes = [];
   var loteInfo = null;
 

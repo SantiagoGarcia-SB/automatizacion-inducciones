@@ -16,7 +16,7 @@
  * @returns {{datos:Array, total:number, cargadas:number}}
  */
 function obtenerSolicitudesResumen(desde, cantidad) {
-  var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
+  var hoja = SpreadsheetRegistry_get(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja || hoja.getLastRow() < 2) return { datos: [], total: 0, cargadas: 0 };
 
   var ultimaFila = hoja.getLastRow();
@@ -102,7 +102,7 @@ function _formatearFechaRepo(valor) {
  * @returns {Object} Datos organizados por sección
  */
 function obtenerDetalleSolicitud(filaNum) {
-  var hoja = SpreadsheetApp.openById(getArchivoAnalisisId()).getSheetByName('registro analisis');
+  var hoja = SpreadsheetRegistry_get(getArchivoAnalisisId()).getSheetByName('registro analisis');
   if (!hoja) return null;
 
   // Headers cacheados (5 min) — usa CacheWrapper unificado

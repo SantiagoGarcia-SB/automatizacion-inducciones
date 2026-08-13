@@ -38,6 +38,7 @@ function setupGlobals(sheetsConfig, cacheOptions) {
     'registro analisis': [HEADERS_COMPLETOS]
   });
   globalThis.SpreadsheetApp = app;
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
 
   globalThis.getArchivoAnalisisId = () => 'mock-analisis-id';
 
@@ -216,7 +217,8 @@ describe('_mapearColumnasMetricasLotes', () => {
       codigoLote: 2,
       resultadoLote: 3,
       resultadoSolicitud: 4,
-      registroAnalistaSai: 5
+      registroAnalistaSai: 5,
+      sucursal: -1
     });
   });
 
@@ -232,7 +234,8 @@ describe('_mapearColumnasMetricasLotes', () => {
       codigoLote: 4,
       resultadoLote: 6,
       resultadoSolicitud: 7,
-      registroAnalistaSai: 9
+      registroAnalistaSai: 9,
+      sucursal: -1
     });
   });
 

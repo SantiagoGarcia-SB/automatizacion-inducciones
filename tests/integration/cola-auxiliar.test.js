@@ -78,11 +78,14 @@ function setupEnvironment(dataRows) {
   const allData = [header, ...dataRows];
 
   const app = createSpreadsheetApp({
+
     'Control_General': allData
   });
 
   globalThis.SpreadsheetApp = app;
   globalThis.getHojaControlId = () => 'mock-id';
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
+  globalThis.emailANombre = (email, formato) => email ? email.split('@')[0].replace('.', ' ').toUpperCase() : '';
 
   // Load the actual source code into global scope
   loadSource();
@@ -96,6 +99,8 @@ describe('obtenerColaAuxiliar() — ventana de lectura', () => {
   beforeEach(() => {
     delete globalThis.SpreadsheetApp;
     delete globalThis.getHojaControlId;
+    delete globalThis.SpreadsheetRegistry_get;
+    delete globalThis.emailANombre;
     delete globalThis.obtenerColaAuxiliar;
   });
 
@@ -211,6 +216,8 @@ describe('obtenerColaAuxiliar() — ventana de lectura', () => {
     });
     globalThis.SpreadsheetApp = app;
     globalThis.getHojaControlId = () => 'mock-id';
+    globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
+    globalThis.emailANombre = (email, formato) => email ? email.split('@')[0].replace('.', ' ').toUpperCase() : '';
     loadSource();
 
     const resultado = globalThis.obtenerColaAuxiliar();

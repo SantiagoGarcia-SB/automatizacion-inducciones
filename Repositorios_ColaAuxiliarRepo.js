@@ -16,7 +16,7 @@
  * @returns {Array}
  */
 function obtenerColaAuxiliar(emailsEquipo) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja || hoja.getLastRow() < 2) return [];
 
   var ultimaFila = hoja.getLastRow();
@@ -30,11 +30,11 @@ function obtenerColaAuxiliar(emailsEquipo) {
   var nombres = null;
   if (emailsEquipo !== null && emailsEquipo !== undefined) {
     if (typeof emailsEquipo === 'string') {
-      nombres = [_nombreComercialParaBusqueda(emailsEquipo)];
+      nombres = [emailANombre(emailsEquipo, 'MAYUSCULAS')];
     } else {
       nombres = [];
       for (var ne = 0; ne < emailsEquipo.length; ne++) {
-        var n = _nombreComercialParaBusqueda(emailsEquipo[ne]);
+        var n = emailANombre(emailsEquipo[ne], 'MAYUSCULAS');
         if (n) nombres.push(n);
       }
     }
@@ -76,7 +76,7 @@ function obtenerColaAuxiliar(emailsEquipo) {
  * @returns {Object} Datos completos de la solicitud
  */
 function obtenerSolicitudCompletaAuxiliar(filaNum) {
-  var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
   if (!hoja) return null;
 
   var datos = hoja.getRange(filaNum, 1, 1, 62).getValues()[0];
@@ -164,7 +164,7 @@ function tomarSolicitudAuxiliar(idLote, uuid, emailAuxiliar) {
   }
 
   try {
-    var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+    var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
 
     // Buscar la fila por UUID
     var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
@@ -189,9 +189,14 @@ function tomarSolicitudAuxiliar(idLote, uuid, emailAuxiliar) {
 
 /**
  * Marca una solicitud como RADICADO y guarda los números de SAI.
+ * Usa índice UUID en memoria (MemoCache) en vez de TextFinder para localizar la fila.
+ * Verifica integridad de fila antes de escribir (detección de edición concurrente).
+ *
  * @param {string} uuid
  * @param {Object} numeros - {solicitudInquilino, nroCoa1, nroCoa2, nroCoa3, nroCoa4, nroCoa5}
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1-2 (1 lectura de Control_General para índice si no cacheado, 1 lectura de fila)
+ * @sheets_write 1-2 (1 setValues en Control_General + 1 appendRow en COLA_ANALISIS)
  */
 function marcarSolicitudRadicada(uuid, numeros) {
   var lock = LockService.getScriptLock();
@@ -200,19 +205,32 @@ function marcarSolicitudRadicada(uuid, numeros) {
   }
 
   try {
-    var hoja = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('Control_General');
+    var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
 
-    var finder = hoja.createTextFinder(uuid).matchEntireCell(true);
-    var celda = finder.findNext();
-    if (!celda) return { ok: false, mensaje: 'Solicitud no encontrada.' };
+    // Construir o reutilizar índice UUID → fila en memoria
+    // Si el índice no fue construido previamente, leer datos de Control_General
+    var indiceUuid = _indiceUuidFila;
+    if (!indiceUuid) {
+      var datosCompletos = hoja.getDataRange().getValues();
+      indiceUuid = MemoCache_getIndiceUuid(datosCompletos);
+    }
 
-    var fila = celda.getRow();
+    // Buscar UUID en el índice en memoria (en vez de TextFinder)
+    var fila = indiceUuid[uuid];
+    if (!fila) return { ok: false, mensaje: 'Solicitud no encontrada.' };
+
     var ANCHO_FILA = 63;
+    var COL_UUID = 61; // Columna BJ (0-based)
 
-    // OPTIMIZADO: 1 sola lectura de la fila completa (antes: 1 getValue de estado +
-    // hasta 6 getValue individuales más abajo para armar COLA_ANALISIS = 7 llamadas).
+    // Lectura de la fila completa
     var rango = hoja.getRange(fila, 1, 1, ANCHO_FILA);
     var filaValores = rango.getValues()[0];
+
+    // Verificar que la fila corresponde al UUID esperado (detección de edición concurrente)
+    var uuidEnFila = String(filaValores[COL_UUID] || '').trim();
+    if (uuidEnFila !== uuid) {
+      return { ok: false, mensaje: 'La solicitud cambió de posición. Recarga la cola.' };
+    }
 
     // Verificar que no se haya radicado ya (idempotencia) — columna J = índice 9
     var estadoActual = String(filaValores[9] || '').trim().toUpperCase();
@@ -245,14 +263,12 @@ function marcarSolicitudRadicada(uuid, numeros) {
       filaValores[62] = numeros.siniestros;
     }
 
-    // OPTIMIZADO: 1 sola escritura de la fila completa (antes: hasta 8 setValue
-    // individuales — estado + solicitud + 5 NRO + siniestros).
+    // Escritura de la fila completa
     rango.setValues([filaValores]);
 
     // Insertar en COLA_ANALISIS para que el analista pueda tomarlo rápidamente
-    // (reutiliza filaValores ya leído — antes eran 6 getValue individuales más)
     try {
-      var hojaColaA = SpreadsheetApp.openById(getHojaControlId()).getSheetByName('COLA_ANALISIS');
+      var hojaColaA = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('COLA_ANALISIS');
       if (hojaColaA) {
         var idLote = String(filaValores[0] || '');
         var fechaLote = filaValores[2];
@@ -288,22 +304,61 @@ function marcarSolicitudRadicada(uuid, numeros) {
 
 /**
  * Marca ERROR EN TERCEROS en Control_General y registra detalle en Errores_Terceros.
+ *
+ * OPTIMIZADO (Req 10.2, 5.2):
+ *   - Recibe filaNum como parámetro (ya conocido por el caller desde obtenerColaAuxiliar).
+ *   - Verifica que el UUID en la fila corresponda al esperado (seguridad concurrente).
+ *   - Usa máximo 2 llamadas de escritura: 1 setValues para estado + 1 setValues para Errores_Terceros.
+ *   - Si filaNum no se proporciona, usa MemoCache_getIndiceUuid como fallback (compatibilidad).
+ *
  * @param {string} uuid
  * @param {Array} participantes - [{participante, requerimientos}]
  * @param {string} nota - Nota interna
  * @param {string} emailAuxiliar
+ * @param {number} [filaNum] - Número de fila en Control_General (1-based). Si no se pasa, se busca vía MemoCache_getIndiceUuid.
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 2-3 (Control_General verificación + Errores_Terceros ciclo + Hoja_Control notificación)
+ * @sheets_write 2 (1 estado en Control_General + 1 filas en Errores_Terceros)
  */
-function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
-  var ss = SpreadsheetApp.openById(getHojaControlId());
-
-  // 1. Cambiar estado en Control_General
+function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar, filaNum) {
+  var ss = SpreadsheetRegistry_get(getHojaControlId());
   var hojaControl = ss.getSheetByName('Control_General');
-  var finder = hojaControl.createTextFinder(uuid).matchEntireCell(true);
-  var celda = finder.findNext();
-  if (!celda) return { ok: false, mensaje: 'Solicitud no encontrada.' };
 
-  var fila = celda.getRow();
+  // --- Resolver fila ---
+  var fila;
+  if (filaNum && typeof filaNum === 'number' && filaNum >= 2) {
+    // Verificar que el UUID en la fila corresponde al esperado (seguridad concurrente)
+    var uuidEnHoja = String(hojaControl.getRange(filaNum, 62).getValue() || '').trim(); // col BJ = 62 (1-based)
+    if (uuidEnHoja !== uuid) {
+      return { ok: false, mensaje: 'La solicitud cambió de posición. Por favor recarga la cola.' };
+    }
+    fila = filaNum;
+  } else {
+    // Fallback: buscar vía MemoCache (compatibilidad con callers legacy)
+    var indice = MemoCache_getIndiceUuid(null);
+    if (indice && indice[uuid]) {
+      fila = indice[uuid];
+      // Verificar UUID en la fila encontrada
+      var uuidVerif = String(hojaControl.getRange(fila, 62).getValue() || '').trim();
+      if (uuidVerif !== uuid) {
+        return { ok: false, mensaje: 'La solicitud cambió de posición. Por favor recarga la cola.' };
+      }
+    } else {
+      // Último recurso: lectura directa de la columna BJ para construir índice
+      var ultimaFilaHoja = hojaControl.getLastRow();
+      if (ultimaFilaHoja < 2) return { ok: false, mensaje: 'Solicitud no encontrada.' };
+      var colUuid = hojaControl.getRange(2, 62, ultimaFilaHoja - 1, 1).getValues();
+      for (var idx = 0; idx < colUuid.length; idx++) {
+        if (String(colUuid[idx][0] || '').trim() === uuid) {
+          fila = idx + 2;
+          break;
+        }
+      }
+      if (!fila) return { ok: false, mensaje: 'Solicitud no encontrada.' };
+    }
+  }
+
+  // Escribir 1: Cambiar estado en Control_General (1 setValues)
   hojaControl.getRange(fila, 10).setValue('ERROR EN TERCEROS');
 
   // 2. Registrar en pestaña Errores_Terceros
@@ -321,7 +376,7 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
   }
   var nuevoCiclo = cicloMax + 1;
 
-  // Insertar una fila por cada participante con error
+  // Construir filas a insertar
   var filasNuevas = [];
   var fechaAhora = new Date();
 
@@ -341,31 +396,26 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
     ]);
   }
 
+  // Escribir 2: Insertar filas en Errores_Terceros (1 setValues)
   if (filasNuevas.length > 0) {
     var ultimaFila = hojaErrores.getLastRow();
     hojaErrores.getRange(ultimaFila + 1, 1, filasNuevas.length, 11).setValues(filasNuevas);
   }
 
-  // Notificar al comercial por correo (delegado al servicio de notificaciones)
+  // Notificar al comercial por correo (best-effort, lecturas para notificación excluidas del conteo de escritura)
   try {
-    var hojaCtrl = ss.getSheetByName('Control_General');
-    var finderCtrl = hojaCtrl.createTextFinder(uuid).matchEntireCell(true);
-    var celdaCtrl = finderCtrl.findNext();
-    if (celdaCtrl) {
-      var filaCtrl = celdaCtrl.getRow();
-      var arrendatarioNotif = String(hojaCtrl.getRange(filaCtrl, 24).getValue() || '');
-      var idLoteNotif = String(hojaCtrl.getRange(filaCtrl, 1).getValue() || '');
-      // Buscar email del comercial
-      var hojaLog = ss.getSheetByName('Hoja_Control');
-      var emailComercial = '';
-      if (hojaLog) {
-        var dataLog = hojaLog.getDataRange().getValues();
-        for (var lg = 1; lg < dataLog.length; lg++) {
-          if (String(dataLog[lg][5] || '').trim() === idLoteNotif) { emailComercial = String(dataLog[lg][1] || '').trim(); break; }
-        }
+    var arrendatarioNotif = String(hojaControl.getRange(fila, 24).getValue() || '');
+    var idLoteNotif = String(hojaControl.getRange(fila, 1).getValue() || '');
+    // Buscar email del comercial
+    var hojaLog = ss.getSheetByName('Hoja_Control');
+    var emailComercial = '';
+    if (hojaLog) {
+      var dataLog = hojaLog.getDataRange().getValues();
+      for (var lg = 1; lg < dataLog.length; lg++) {
+        if (String(dataLog[lg][5] || '').trim() === idLoteNotif) { emailComercial = String(dataLog[lg][1] || '').trim(); break; }
       }
-      notificarErrorAlComercial(uuid, arrendatarioNotif, idLoteNotif, emailComercial);
     }
+    notificarErrorAlComercial(uuid, arrendatarioNotif, idLoteNotif, emailComercial);
   } catch (errMail) {
     console.warn('Notificación de error no enviada: ' + errMail.message);
   }
@@ -385,7 +435,7 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar) {
  * @returns {Array}
  */
 function obtenerErroresPendientesComercial(emailsEquipo) {
-  var ss = SpreadsheetApp.openById(getHojaControlId());
+  var ss = SpreadsheetRegistry_get(getHojaControlId());
   var hojaErrores = ss.getSheetByName('Errores_Terceros');
   if (!hojaErrores || hojaErrores.getLastRow() < 2) return [];
 
@@ -450,11 +500,11 @@ function obtenerErroresPendientesComercial(emailsEquipo) {
     // Convertir array de emails a array de nombres comerciales para búsqueda
     if (typeof emailsEquipo === 'string') {
       // Backward compatible: si recibe un solo email string, tratarlo como array de 1
-      nombres = [_nombreComercialParaBusqueda(emailsEquipo)];
+      nombres = [emailANombre(emailsEquipo, 'MAYUSCULAS')];
     } else {
       nombres = [];
       for (var ne = 0; ne < emailsEquipo.length; ne++) {
-        var n = _nombreComercialParaBusqueda(emailsEquipo[ne]);
+        var n = emailANombre(emailsEquipo[ne], 'MAYUSCULAS');
         if (n) nombres.push(n);
       }
     }
@@ -517,7 +567,7 @@ function obtenerErroresPendientesComercial(emailsEquipo) {
  * @returns {{ok:boolean, mensaje:string}}
  */
 function guardarCorreccionComercial(uuid, respuestas, emailComercial) {
-  var ss = SpreadsheetApp.openById(getHojaControlId());
+  var ss = SpreadsheetRegistry_get(getHojaControlId());
   var hojaErrores = ss.getSheetByName('Errores_Terceros');
   if (!hojaErrores) return { ok: false, mensaje: 'Pestaña Errores_Terceros no encontrada.' };
 

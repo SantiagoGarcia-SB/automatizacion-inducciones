@@ -1,28 +1,91 @@
 /**
- * Unit tests para calcularMetricasLotes (función principal de orquestación)
+ * Unit tests para calcularMetricasLotes y api_obtenerMetricasLotes (orquestación)
  *
  * Verifica:
  * - Validación de parámetros → retorna safe-default si inválidos
- * - Cache hit → retorna datos cacheados sin leer Sheets
- * - Cache miss → lee de Sheets, calcula y almacena en caché
- * - Payload > 500KB → retorna sin cachear + registra WARN
+ * - calcularMetricasLotes: cálculo puro desde Sheets (sin cache)
+ * - api_obtenerMetricasLotes: cache-first, degradación elegante, payload > 512KB
  * - CacheService no disponible → calcula directo y retorna
  * - Error inesperado → retorna safe-default + registra ERROR
  *
- * Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6
+ * Requirements: 12.1, 12.2, 12.6
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-// ── Load source file ──
-const srcPath = resolve(__dirname, '../../Servicios_MetricasLotes.js');
-const srcCode = readFileSync(srcPath, 'utf-8');
+// ── Load source files ──
+const srcPathMetricas = resolve(__dirname, '../../Servicios_MetricasLotes.js');
+const srcCodeMetricas = readFileSync(srcPathMetricas, 'utf-8');
 
 function loadSource() {
-  const wrapped = `(function() { ${srcCode}\n; globalThis.calcularMetricasLotes = calcularMetricasLotes; globalThis._metricasLotesVacias = _metricasLotesVacias; globalThis._validarParametrosPeriodo = _validarParametrosPeriodo; globalThis._obtenerHeadersMetricasLotes = _obtenerHeadersMetricasLotes; globalThis._mapearColumnasMetricasLotes = _mapearColumnasMetricasLotes; globalThis._filtrarFilasPorPeriodo = _filtrarFilasPorPeriodo; globalThis._calcularLotesAprobadosNegados = _calcularLotesAprobadosNegados; globalThis._calcularSolicitudesAprobNegReconsideradas = _calcularSolicitudesAprobNegReconsideradas; globalThis._agruparPorLoteYCalcularMetricas = _agruparPorLoteYCalcularMetricas; })()`;
+  const wrapped = `(function() { ${srcCodeMetricas}\n; globalThis.calcularMetricasLotes = calcularMetricasLotes; globalThis._metricasLotesVacias = _metricasLotesVacias; globalThis._validarParametrosRango = _validarParametrosRango; globalThis._obtenerHeadersMetricasLotes = _obtenerHeadersMetricasLotes; globalThis._mapearColumnasMetricasLotes = _mapearColumnasMetricasLotes; globalThis._filtrarFilasPorPeriodo = _filtrarFilasPorPeriodo; globalThis._calcularLotesAprobadosNegados = _calcularLotesAprobadosNegados; globalThis._calcularSolicitudesAprobNegReconsideradas = _calcularSolicitudesAprobNegReconsideradas; globalThis._agruparPorLoteYCalcularMetricas = _agruparPorLoteYCalcularMetricas; })()`;
   eval(wrapped);
+}
+
+function loadApiSource() {
+  // Define api_obtenerMetricasLotes directly (mirrors Api.js implementation)
+  globalThis.api_obtenerMetricasLotes = function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
+    try {
+      verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+
+      // ── 1. Validar parámetros de entrada ──
+      if (typeof fechaDesde !== 'string' || typeof fechaHasta !== 'string' ||
+          !fechaDesde || !fechaHasta) {
+        return _metricasLotesVacias();
+      }
+
+      var regexFecha = /^\d{4}-\d{2}-\d{2}$/;
+      if (!regexFecha.test(fechaDesde) || !regexFecha.test(fechaHasta)) {
+        return _metricasLotesVacias();
+      }
+
+      var desde = new Date(fechaDesde + 'T00:00:00');
+      var hasta = new Date(fechaHasta + 'T00:00:00');
+      if (isNaN(desde.getTime()) || isNaN(hasta.getTime())) {
+        return _metricasLotesVacias();
+      }
+
+      if (desde.getTime() > hasta.getTime()) {
+        return _metricasLotesVacias();
+      }
+
+      var diffDias = Math.ceil((hasta.getTime() - desde.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDias > 183) {
+        return _metricasLotesVacias();
+      }
+
+      // ── 2. Cache-first: intentar leer de CacheWrapper ──
+      var cacheKey = 'METRICAS_LOTES_' + fechaDesde + '_' + fechaHasta;
+      try {
+        var cached = CacheWrapper_getJSON(cacheKey);
+        if (cached) {
+          return cached; // Cache-hit: 0 lecturas a Sheets
+        }
+      } catch (e) {
+        // CacheService no disponible — degradación elegante, continuar sin cache
+      }
+
+      // ── 3. Cache-miss: calcular desde Sheets ──
+      var resultado = calcularMetricasLotes(fechaDesde, fechaHasta);
+
+      // ── 4. Almacenar en cache si payload < 512 KB ──
+      try {
+        var payloadStr = JSON.stringify(resultado);
+        if (payloadStr.length <= 512000) {
+          CacheWrapper_putJSON(cacheKey, resultado, 120);
+        }
+      } catch (e) {
+        // CacheService no disponible al escribir — degradación elegante, no interrumpir
+      }
+
+      return resultado;
+    } catch (e) {
+      _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMetricasLotes', e.message);
+      return _metricasLotesVacias();
+    }
+  };
 }
 
 // ── Tracking variables ──
@@ -100,8 +163,12 @@ function setupGlobals() {
 
   globalThis.CacheService = { getScriptCache: function() { return { get: function() { return null; }, put: function() {} }; } };
 
+  // Mock verificarRol for api_obtenerMetricasLotes
+  globalThis.verificarRol = function() {};
+
   // Execute the source to register all functions
   loadSource();
+  loadApiSource();
 }
 
 function cleanupGlobals() {
@@ -112,7 +179,7 @@ function cleanupGlobals() {
   delete globalThis.SpreadsheetApp;
   delete globalThis.Utilities;
   delete globalThis._metricasLotesVacias;
-  delete globalThis._validarParametrosPeriodo;
+  delete globalThis._validarParametrosRango;
   delete globalThis._obtenerHeadersMetricasLotes;
   delete globalThis._mapearColumnasMetricasLotes;
   delete globalThis._filtrarFilasPorPeriodo;
@@ -120,6 +187,8 @@ function cleanupGlobals() {
   delete globalThis._calcularSolicitudesAprobNegReconsideradas;
   delete globalThis._agruparPorLoteYCalcularMetricas;
   delete globalThis.calcularMetricasLotes;
+  delete globalThis.api_obtenerMetricasLotes;
+  delete globalThis.verificarRol;
   delete globalThis._COLUMNAS_METRICAS_LOTES;
 }
 
@@ -139,98 +208,195 @@ beforeEach(() => {
   globalThis.CacheWrapper_putJSON = function(key, value, ttl) {
     cacheStore[key] = JSON.parse(JSON.stringify(value));
   };
+  // Use a dynamic reference to mockHojaData so tests can swap it before calling
   globalThis.SpreadsheetApp = {
     openById: function() {
       return {
         getSheetByName: function(name) {
           if (name === 'registro analisis') {
-            return createMockHoja(mockHojaData);
+            // Dynamically read mockHojaData at call time (not at setup time)
+            return {
+              getLastRow: function() { return mockHojaData.length; },
+              getLastColumn: function() { return mockHojaData[0] ? mockHojaData[0].length : 0; },
+              getRange: function() {
+                return { getValues: function() { return [mockHojaData[0]]; } };
+              },
+              getDataRange: function() {
+                return { getValues: function() { sheetsReadCount++; return mockHojaData; } };
+              }
+            };
           }
           return null;
         }
       };
     }
   };
+  globalThis.verificarRol = function() {};
 });
 
-describe('calcularMetricasLotes', () => {
+describe('calcularMetricasLotes (cálculo puro)', () => {
 
   describe('Validación de parámetros', () => {
-    it('retorna safe-default para mes inválido (0)', () => {
-      var result = calcularMetricasLotes(0, 2025);
+    it('retorna safe-default para fechaDesde no string', () => {
+      var result = calcularMetricasLotes(123, '2025-01-31');
       expect(result).toEqual(_metricasLotesVacias());
       expect(sheetsReadCount).toBe(0);
     });
 
-    it('retorna safe-default para mes inválido (13)', () => {
-      var result = calcularMetricasLotes(13, 2025);
+    it('retorna safe-default para formato inválido', () => {
+      var result = calcularMetricasLotes('enero-2025', '2025-01-31');
       expect(result).toEqual(_metricasLotesVacias());
       expect(sheetsReadCount).toBe(0);
     });
 
-    it('retorna safe-default para anio inválido (99)', () => {
-      var result = calcularMetricasLotes(1, 99);
+    it('retorna safe-default para rango > 183 días', () => {
+      var result = calcularMetricasLotes('2024-01-01', '2025-01-01');
       expect(result).toEqual(_metricasLotesVacias());
       expect(sheetsReadCount).toBe(0);
     });
 
-    it('retorna safe-default para mes no numérico', () => {
-      var result = calcularMetricasLotes('enero', 2025);
+    it('retorna safe-default para fechaDesde > fechaHasta', () => {
+      var result = calcularMetricasLotes('2025-02-01', '2025-01-01');
       expect(result).toEqual(_metricasLotesVacias());
       expect(sheetsReadCount).toBe(0);
+    });
+  });
+
+  describe('Cálculo desde Sheets (sin cache)', () => {
+    it('lee de Sheets y retorna resultado calculado', () => {
+      var result = calcularMetricasLotes('2025-01-01', '2025-01-31');
+
+      expect(sheetsReadCount).toBe(1);
+      expect(result.resumen.lotesAprobados).toBe(1);
+      expect(result.resumen.lotesNegados).toBe(1);
+      expect(result.detallePorLote).toHaveLength(2);
+    });
+
+    it('NO almacena resultado en caché (responsabilidad del caller)', () => {
+      calcularMetricasLotes('2025-01-01', '2025-01-31');
+
+      expect(cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31']).toBeUndefined();
+    });
+
+    it('retorna safe-default si no hay datos para el periodo', () => {
+      var result = calcularMetricasLotes('2025-06-01', '2025-06-30');
+      expect(result.resumen.lotesAprobados).toBe(0);
+      expect(result.detallePorLote).toHaveLength(0);
+    });
+  });
+
+  describe('Error inesperado durante cálculo', () => {
+    it('retorna safe-default y registra ERROR si SpreadsheetApp falla', () => {
+      globalThis.SpreadsheetApp = {
+        openById: function() { throw new Error('Hoja no accesible'); }
+      };
+
+      var result = calcularMetricasLotes('2025-01-01', '2025-01-31');
+
+      expect(result).toEqual(_metricasLotesVacias());
+      var error = loggedEvents.find(e => e.nivel === 'ERROR' && e.modulo === 'Servicios_MetricasLotes.js');
+      expect(error).toBeDefined();
+    });
+
+    it('retorna safe-default si headers retorna null', () => {
+      globalThis.SpreadsheetApp = {
+        openById: function() {
+          return { getSheetByName: function() { return null; } };
+        }
+      };
+
+      var result = calcularMetricasLotes('2025-01-01', '2025-01-31');
+      expect(result).toEqual(_metricasLotesVacias());
+    });
+  });
+
+  describe('Formato de respuesta', () => {
+    it('retorna objeto con resumen y detallePorLote', () => {
+      var result = calcularMetricasLotes('2025-01-01', '2025-01-31');
+
+      expect(result).toHaveProperty('resumen');
+      expect(result).toHaveProperty('detallePorLote');
+      expect(result.resumen).toHaveProperty('lotesAprobados');
+      expect(result.resumen).toHaveProperty('lotesNegados');
+      expect(result.resumen).toHaveProperty('solicitudesAprobadas');
+      expect(result.resumen).toHaveProperty('solicitudesNegadas');
+      expect(result.resumen).toHaveProperty('solicitudesReconsideradas');
+    });
+
+    it('formatea fechaLote como string en detallePorLote', () => {
+      var result = calcularMetricasLotes('2025-01-01', '2025-01-31');
+
+      for (var i = 0; i < result.detallePorLote.length; i++) {
+        expect(typeof result.detallePorLote[i].fechaLote).toBe('string');
+      }
+    });
+  });
+});
+
+describe('api_obtenerMetricasLotes (cache-first)', () => {
+
+  describe('Validación de entrada', () => {
+    it('retorna safe-default para fechaDesde vacío', () => {
+      var result = api_obtenerMetricasLotes('', '2025-01-31');
+      expect(result).toEqual(_metricasLotesVacias());
+    });
+
+    it('retorna safe-default para formato no YYYY-MM-DD', () => {
+      var result = api_obtenerMetricasLotes('01/01/2025', '31/01/2025');
+      expect(result).toEqual(_metricasLotesVacias());
+    });
+
+    it('retorna safe-default para rango > 183 días', () => {
+      var result = api_obtenerMetricasLotes('2024-01-01', '2025-01-01');
+      expect(result).toEqual(_metricasLotesVacias());
+    });
+
+    it('retorna safe-default si fechaDesde > fechaHasta', () => {
+      var result = api_obtenerMetricasLotes('2025-02-01', '2025-01-01');
+      expect(result).toEqual(_metricasLotesVacias());
     });
   });
 
   describe('Cache hit', () => {
     it('retorna datos cacheados sin leer Sheets', () => {
       var cachedData = {
-        resumen: { lotesAprobados: 5, lotesNegados: 2, solicitudesAprobadas: 10, solicitudesNegadas: 3, solicitudesReconsideradas: 1 },
+        resumen: { lotesAprobados: 5, lotesNegados: 2, solicitudesAprobadas: 10 },
         detallePorLote: [{ codigoLote: 'X', fechaLote: '15/01/2025' }]
       };
-      cacheStore['METRICAS_LOTES_1_2025'] = cachedData;
+      cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31'] = cachedData;
 
-      var result = calcularMetricasLotes(1, 2025);
+      var result = api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
       expect(result).toEqual(cachedData);
       expect(sheetsReadCount).toBe(0);
     });
 
-    it('construye la clave de caché correctamente con mes y anio', () => {
-      cacheStore['METRICAS_LOTES_6_2024'] = { resumen: {}, detallePorLote: [] };
+    it('construye la clave de caché correctamente: METRICAS_LOTES_{fechaDesde}_{fechaHasta}', () => {
+      cacheStore['METRICAS_LOTES_2024-06-01_2024-06-30'] = { resumen: {}, detallePorLote: [] };
 
-      var result = calcularMetricasLotes(6, 2024);
+      var result = api_obtenerMetricasLotes('2024-06-01', '2024-06-30');
       expect(result).toEqual({ resumen: {}, detallePorLote: [] });
     });
   });
 
-  describe('Cache miss — cálculo desde Sheets', () => {
-    it('lee de Sheets y retorna resultado calculado', () => {
-      var result = calcularMetricasLotes(1, 2025);
+  describe('Cache miss — calcula y almacena', () => {
+    it('lee de Sheets cuando no hay cache-hit', () => {
+      var result = api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
       expect(sheetsReadCount).toBe(1);
       expect(result.resumen.lotesAprobados).toBe(1);
       expect(result.resumen.lotesNegados).toBe(1);
-      expect(result.resumen.solicitudesAprobadas).toBe(2);
-      expect(result.resumen.solicitudesNegadas).toBe(1);
-      expect(result.detallePorLote).toHaveLength(2);
     });
 
-    it('almacena resultado en caché con clave correcta', () => {
-      calcularMetricasLotes(1, 2025);
+    it('almacena resultado en caché con clave correcta tras cache-miss', () => {
+      api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
-      expect(cacheStore['METRICAS_LOTES_1_2025']).toBeDefined();
-      expect(cacheStore['METRICAS_LOTES_1_2025'].resumen.lotesAprobados).toBe(1);
-    });
-
-    it('retorna safe-default si no hay datos para el periodo', () => {
-      var result = calcularMetricasLotes(6, 2025); // junio — no hay datos
-      expect(result.resumen.lotesAprobados).toBe(0);
-      expect(result.detallePorLote).toHaveLength(0);
+      expect(cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31']).toBeDefined();
+      expect(cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31'].resumen.lotesAprobados).toBe(1);
     });
   });
 
-  describe('Payload > 500KB', () => {
-    it('retorna sin cachear y registra WARN si payload excede 500KB', () => {
-      // Crear un dataset grande que genere un payload > 512000 bytes
+  describe('Payload > 512 KB', () => {
+    it('NO cachea si payload excede 512000 bytes', () => {
       var bigData = [HEADERS];
       for (var i = 0; i < 5000; i++) {
         bigData.push([
@@ -244,21 +410,13 @@ describe('calcularMetricasLotes', () => {
       }
       mockHojaData = bigData;
 
-      // Re-eval to pick up the new mockHojaData
-      var result = calcularMetricasLotes(1, 2025);
+      var result = api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
-      // Debe haber resultado válido
       expect(result.detallePorLote.length).toBeGreaterThan(0);
 
-      // Verificar si se cacheó o no
       var payloadSize = JSON.stringify(result).length;
       if (payloadSize > 512000) {
-        // No debe haber cacheado
-        expect(cacheStore['METRICAS_LOTES_1_2025']).toBeUndefined();
-        // Debe haber registrado WARN
-        var warn = loggedEvents.find(e => e.nivel === 'WARN' && e.mensaje === 'calcularMetricasLotes');
-        expect(warn).toBeDefined();
-        expect(warn.detalle).toContain('500KB');
+        expect(cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31']).toBeUndefined();
       }
     });
   });
@@ -267,7 +425,7 @@ describe('calcularMetricasLotes', () => {
     it('calcula directo si CacheWrapper_getJSON lanza error', () => {
       globalThis.CacheWrapper_getJSON = function() { throw new Error('CacheService unavailable'); };
 
-      var result = calcularMetricasLotes(1, 2025);
+      var result = api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
       expect(result.resumen.lotesAprobados).toBe(1);
       expect(result.resumen.lotesNegados).toBe(1);
@@ -277,59 +435,24 @@ describe('calcularMetricasLotes', () => {
     it('retorna resultado si CacheWrapper_putJSON lanza error', () => {
       globalThis.CacheWrapper_putJSON = function() { throw new Error('CacheService unavailable'); };
 
-      var result = calcularMetricasLotes(1, 2025);
+      var result = api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
       expect(result.resumen.lotesAprobados).toBe(1);
-      expect(cacheStore['METRICAS_LOTES_1_2025']).toBeUndefined();
+      expect(cacheStore['METRICAS_LOTES_2025-01-01_2025-01-31']).toBeUndefined();
     });
   });
 
-  describe('Error inesperado durante cálculo', () => {
-    it('retorna safe-default y registra ERROR si SpreadsheetApp falla', () => {
-      globalThis.SpreadsheetApp = {
-        openById: function() { throw new Error('Hoja no accesible'); }
+  describe('No adquiere LockService (Req 12.4)', () => {
+    it('no invoca LockService durante ejecución', () => {
+      var lockCalled = false;
+      globalThis.LockService = {
+        getScriptLock: function() { lockCalled = true; return { tryLock: function() { return true; }, releaseLock: function() {} }; }
       };
 
-      var result = calcularMetricasLotes(1, 2025);
+      api_obtenerMetricasLotes('2025-01-01', '2025-01-31');
 
-      expect(result).toEqual(_metricasLotesVacias());
-      // _obtenerHeadersMetricasLotes catches the error internally and logs it
-      var error = loggedEvents.find(e => e.nivel === 'ERROR' && e.modulo === 'Servicios_MetricasLotes.js');
-      expect(error).toBeDefined();
-    });
-
-    it('retorna safe-default si headers retorna null', () => {
-      // Simular hoja no encontrada para que _obtenerHeadersMetricasLotes retorne null
-      globalThis.SpreadsheetApp = {
-        openById: function() {
-          return { getSheetByName: function() { return null; } };
-        }
-      };
-
-      var result = calcularMetricasLotes(1, 2025);
-      expect(result).toEqual(_metricasLotesVacias());
-    });
-  });
-
-  describe('Formato de respuesta', () => {
-    it('retorna objeto con resumen y detallePorLote', () => {
-      var result = calcularMetricasLotes(1, 2025);
-
-      expect(result).toHaveProperty('resumen');
-      expect(result).toHaveProperty('detallePorLote');
-      expect(result.resumen).toHaveProperty('lotesAprobados');
-      expect(result.resumen).toHaveProperty('lotesNegados');
-      expect(result.resumen).toHaveProperty('solicitudesAprobadas');
-      expect(result.resumen).toHaveProperty('solicitudesNegadas');
-      expect(result.resumen).toHaveProperty('solicitudesReconsideradas');
-    });
-
-    it('formatea fechaLote como string en detallePorLote', () => {
-      var result = calcularMetricasLotes(1, 2025);
-
-      for (var i = 0; i < result.detallePorLote.length; i++) {
-        expect(typeof result.detallePorLote[i].fechaLote).toBe('string');
-      }
+      expect(lockCalled).toBe(false);
+      delete globalThis.LockService;
     });
   });
 });

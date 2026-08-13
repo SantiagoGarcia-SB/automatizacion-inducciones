@@ -20,6 +20,7 @@ function setupGlobals() {
   globalThis.CacheWrapper_getJSON = function() { return null; };
   globalThis.CacheWrapper_putJSON = function() {};
   globalThis.SpreadsheetApp = { openById: function() { return { getSheetByName: function() { return null; } }; } };
+  globalThis.SpreadsheetRegistry_get = function() { return { getSheetByName: function() { return null; } }; };
   globalThis.getArchivoAnalisisId = function() { return 'mock-id'; };
   globalThis.CacheService = { getScriptCache: function() { return { get: function() { return null; }, put: function() {} }; } };
 
@@ -197,25 +198,25 @@ describe('_calcularSolicitudesAprobNegReconsideradas', () => {
     it('retorna ceros para array vacío', () => {
       setupGlobals();
       var result = _calcularSolicitudesAprobNegReconsideradas([]);
-      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0 });
+      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0, solicitudesEnProceso: 0 });
     });
 
     it('retorna ceros para null', () => {
       setupGlobals();
       var result = _calcularSolicitudesAprobNegReconsideradas(null);
-      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0 });
+      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0, solicitudesEnProceso: 0 });
     });
 
     it('retorna ceros para undefined', () => {
       setupGlobals();
       var result = _calcularSolicitudesAprobNegReconsideradas(undefined);
-      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0 });
+      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0, solicitudesEnProceso: 0 });
     });
 
     it('retorna ceros para no-array', () => {
       setupGlobals();
       var result = _calcularSolicitudesAprobNegReconsideradas('not an array');
-      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0 });
+      expect(result).toEqual({ solicitudesAprobadas: 0, solicitudesNegadas: 0, solicitudesReconsideradas: 0, solicitudesEnProceso: 0 });
     });
   });
 });

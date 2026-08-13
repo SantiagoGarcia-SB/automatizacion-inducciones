@@ -1,10 +1,9 @@
 /**
- * Unit tests para Servicios_AuthService.js — Task 2.5
+ * Unit tests para Servicios_AuthService.js — Task 2.5 / Task 4.4
  *
  * Valida:
  *   - obtenerCorreoDeDirector(email): lee EMAIL_DIRECTOR de Hoja_Usuarios
- *   - obtenerCorreosSuperiores(): wrapper cacheado en memoria sobre UsuariosRepo_getCorreosSuperiores
- *   - obtenerCorreosLideres(): alias de transición de obtenerCorreosSuperiores
+ *   - obtenerCorreosSuperiores(): función canónica usando MemoCache_getUsuarios()
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createSpreadsheetApp } from '../mocks/spreadsheet-app.mock.js';
@@ -109,7 +108,7 @@ function setupGlobals(sheetsConfig) {
     return null;
   };
 
-  // UsuariosRepo_getCorreosSuperiores (copiar lógica de producción)
+  // UsuariosRepo_getCorreosSuperiores (legacy — ya no se usa en obtenerCorreosSuperiores)
   globalThis.UsuariosRepo_getCorreosSuperiores = function() {
     var ROLES_SUPERIORES = ['DIRECTOR', 'GERENTE', 'ADMIN'];
     var usuarios = UsuariosRepo_leerTodos();
@@ -128,10 +127,17 @@ function setupGlobals(sheetsConfig) {
     return resultado;
   };
 
-  // Reset cache de memoria de ejecución
-  globalThis._cacheCorreosSuperiores = null;
+  // MemoCache_getUsuarios (nueva dependencia de obtenerCorreosSuperiores)
+  globalThis._cacheUsuariosTodos = null;
+  globalThis.MemoCache_getUsuarios = function() {
+    if (globalThis._cacheUsuariosTodos !== null) {
+      return globalThis._cacheUsuariosTodos;
+    }
+    globalThis._cacheUsuariosTodos = UsuariosRepo_leerTodos();
+    return globalThis._cacheUsuariosTodos;
+  };
 
-  // Funciones bajo test (copiar lógica de AuthService)
+  // Funciones bajo test (copiar lógica de AuthService — nueva implementación canónica)
   globalThis.obtenerCorreoDeDirector = function(emailUsuario) {
     var usuario = UsuariosRepo_buscarPorEmail(emailUsuario);
     if (!usuario) return '';
@@ -139,16 +145,23 @@ function setupGlobals(sheetsConfig) {
   };
 
   globalThis.obtenerCorreosSuperiores = function() {
-    if (globalThis._cacheCorreosSuperiores !== null) {
-      return globalThis._cacheCorreosSuperiores;
+    var ROLES_SUPERIORES = ['DIRECTOR', 'GERENTE', 'ADMIN'];
+    var usuarios = MemoCache_getUsuarios();
+    var emailsSet = {};
+    var resultado = [];
+
+    for (var i = 0; i < usuarios.length; i++) {
+      var usuario = usuarios[i];
+      if (usuario.activo === true && ROLES_SUPERIORES.indexOf(usuario.rol) !== -1) {
+        if (!emailsSet[usuario.email]) {
+          emailsSet[usuario.email] = true;
+          resultado.push(usuario.email);
+        }
+      }
     }
-    globalThis._cacheCorreosSuperiores = UsuariosRepo_getCorreosSuperiores();
-    return globalThis._cacheCorreosSuperiores;
+    return resultado;
   };
 
-  globalThis.obtenerCorreosLideres = function() {
-    return obtenerCorreosSuperiores();
-  };
 }
 
 // ─── Tests para obtenerCorreoDeDirector ─────────────────────────────────────────
@@ -236,10 +249,10 @@ describe('obtenerCorreosSuperiores', () => {
     expect(resultado).not.toContain('maria.auxiliar@empresa.com');
   });
 
-  it('cachea resultado en memoria para llamadas subsecuentes', () => {
+  it('cachea resultado en memoria para llamadas subsecuentes (via MemoCache)', () => {
     const primera = obtenerCorreosSuperiores();
-    // Mutar datos subyacentes para probar que no se relee
-    globalThis.UsuariosRepo_getCorreosSuperiores = () => ['diferente@test.com'];
+    // MemoCache_getUsuarios already cached — mutating UsuariosRepo_leerTodos won't affect
+    globalThis.UsuariosRepo_leerTodos = () => [{ email: 'diferente@test.com', rol: 'DIRECTOR', activo: true, cupo: 0, emailDirector: '', emailGerente: '', emailsAlternos: [] }];
     const segunda = obtenerCorreosSuperiores();
     expect(segunda).toEqual(primera);
   });
@@ -255,42 +268,6 @@ describe('obtenerCorreosSuperiores', () => {
     expect(resultado).toEqual([]);
   });
 });
-
-// ─── Tests para obtenerCorreosLideres (alias) ────────────────────────────────
-
-describe('obtenerCorreosLideres', () => {
-  beforeEach(() => {
-    setupGlobals();
-  });
-
-  it('retorna el mismo resultado que obtenerCorreosSuperiores', () => {
-    const superiores = obtenerCorreosSuperiores();
-    // Reset cache para que obtenerCorreosLideres haga su propia llamada
-    globalThis._cacheCorreosSuperiores = null;
-    const lideres = obtenerCorreosLideres();
-    expect(lideres).toEqual(superiores);
-  });
-
-  it('contiene DIRECTOR, GERENTE y ADMIN activos', () => {
-    const resultado = obtenerCorreosLideres();
-    expect(resultado).toContain('jenny.director@empresa.com');
-    expect(resultado).toContain('kharen.gerente@empresa.com');
-    expect(resultado).toContain('carlos.admin@empresa.com');
-  });
-
-  it('no contiene usuarios inactivos', () => {
-    const resultado = obtenerCorreosLideres();
-    expect(resultado).not.toContain('director.inactivo@empresa.com');
-  });
-
-  it('es un alias funcional de obtenerCorreosSuperiores', () => {
-    // Verificar que ambas funciones retornan la misma referencia (desde cache)
-    const resultA = obtenerCorreosLideres();
-    const resultB = obtenerCorreosSuperiores();
-    expect(resultA).toBe(resultB);
-  });
-});
-
 
 // ─── Tests para _rolCoincide — Task 2.6 (Alias roles legacy) ────────────────────
 
@@ -1449,7 +1426,10 @@ describe('getEmailsEquipoVisible (Task 2.4 - Req 3.6)', () => {
       return encontrado;
     };
 
-    // getEmailsEquipoVisible (función bajo test — Task 2.4)
+    // _sesionResuelta — variable de memoización intra-ejecución (Task 4.3)
+    globalThis._sesionResuelta = null;
+
+    // getEmailsEquipoVisible (función bajo test — Task 4.3, Req 9.1, 9.5)
     globalThis.getEmailsEquipoVisible = function(email) {
       var emailNorm = String(email || '').toLowerCase().trim();
       if (!emailNorm) return [emailNorm];
@@ -1465,10 +1445,20 @@ describe('getEmailsEquipoVisible (Task 2.4 - Req 3.6)', () => {
         }
       } catch (e) {}
 
-      var usuario = _obtenerUsuarioPorEmail(emailNorm);
-      if (!usuario) return [emailNorm];
+      // Resolver el rol del usuario
+      var rolUsuario = null;
 
-      var resultado = UsuariosRepo_getEmailsEquipoVisible(emailNorm, usuario.rol);
+      // Si resolverSesion/verificarRol ya fue llamado y el email coincide, reutilizar (Req 9.1)
+      if (_sesionResuelta !== null && _sesionResuelta.autorizado && _sesionResuelta.email === emailNorm) {
+        rolUsuario = _sesionResuelta.rol;
+      } else {
+        // Fallback: resolver vía _obtenerUsuarioPorEmail (Req 9.5)
+        var usuario = _obtenerUsuarioPorEmail(emailNorm);
+        if (!usuario) return [emailNorm];
+        rolUsuario = usuario.rol;
+      }
+
+      var resultado = UsuariosRepo_getEmailsEquipoVisible(emailNorm, rolUsuario);
 
       try {
         var cacheEscribir = CacheService.getScriptCache();
@@ -1641,6 +1631,533 @@ describe('getEmailsEquipoVisible (Task 2.4 - Req 3.6)', () => {
     it('email no registrado retorna array con solo ese email', () => {
       const resultado = getEmailsEquipoVisible('noexiste@empresa.com');
       expect(resultado).toEqual(['noexiste@empresa.com']);
+    });
+  });
+
+  // ─── Reutilización de _sesionResuelta (Task 4.3 — Req 9.1, 9.5) ──────────
+
+  describe('Reutilización de _sesionResuelta (Task 4.3 — Req 9.1, 9.5)', () => {
+    it('usa rol de _sesionResuelta cuando email coincide (evita _obtenerUsuarioPorEmail)', () => {
+      const { cacheService } = setupGetEmailsEquipoVisible();
+
+      // Simular que resolverSesion/verificarRol ya fue llamado
+      globalThis._sesionResuelta = {
+        autorizado: true,
+        email: 'director1@empresa.com',
+        rol: 'DIRECTOR',
+        cupo: 0,
+        emailDirector: '',
+        emailGerente: 'gerente1@empresa.com'
+      };
+
+      // Espiar _obtenerUsuarioPorEmail para verificar que NO se llama
+      let obtenerUsuarioFueLlamado = false;
+      const originalObtener = globalThis._obtenerUsuarioPorEmail;
+      globalThis._obtenerUsuarioPorEmail = function(email) {
+        obtenerUsuarioFueLlamado = true;
+        return originalObtener(email);
+      };
+
+      const resultado = getEmailsEquipoVisible('director1@empresa.com');
+
+      expect(obtenerUsuarioFueLlamado).toBe(false);
+      expect(resultado).toContain('director1@empresa.com');
+      expect(resultado).toContain('consultor1@empresa.com');
+      expect(resultado).toContain('consultor2@empresa.com');
+    });
+
+    it('usa fallback _obtenerUsuarioPorEmail cuando _sesionResuelta es null (Req 9.5)', () => {
+      setupGetEmailsEquipoVisible();
+
+      // _sesionResuelta es null (no se llamó verificarRol)
+      globalThis._sesionResuelta = null;
+
+      let obtenerUsuarioFueLlamado = false;
+      const originalObtener = globalThis._obtenerUsuarioPorEmail;
+      globalThis._obtenerUsuarioPorEmail = function(email) {
+        obtenerUsuarioFueLlamado = true;
+        return originalObtener(email);
+      };
+
+      const resultado = getEmailsEquipoVisible('consultor1@empresa.com');
+
+      expect(obtenerUsuarioFueLlamado).toBe(true);
+      expect(resultado).toEqual(['consultor1@empresa.com']);
+    });
+
+    it('usa fallback cuando _sesionResuelta tiene email diferente', () => {
+      setupGetEmailsEquipoVisible();
+
+      // _sesionResuelta es de otro usuario
+      globalThis._sesionResuelta = {
+        autorizado: true,
+        email: 'admin1@empresa.com',
+        rol: 'ADMIN',
+        cupo: 10,
+        emailDirector: '',
+        emailGerente: ''
+      };
+
+      let obtenerUsuarioFueLlamado = false;
+      const originalObtener = globalThis._obtenerUsuarioPorEmail;
+      globalThis._obtenerUsuarioPorEmail = function(email) {
+        obtenerUsuarioFueLlamado = true;
+        return originalObtener(email);
+      };
+
+      const resultado = getEmailsEquipoVisible('consultor1@empresa.com');
+
+      expect(obtenerUsuarioFueLlamado).toBe(true);
+      expect(resultado).toEqual(['consultor1@empresa.com']);
+    });
+
+    it('usa fallback cuando _sesionResuelta tiene autorizado=false', () => {
+      setupGetEmailsEquipoVisible();
+
+      globalThis._sesionResuelta = {
+        autorizado: false,
+        email: 'consultor1@empresa.com'
+      };
+
+      let obtenerUsuarioFueLlamado = false;
+      const originalObtener = globalThis._obtenerUsuarioPorEmail;
+      globalThis._obtenerUsuarioPorEmail = function(email) {
+        obtenerUsuarioFueLlamado = true;
+        return originalObtener(email);
+      };
+
+      const resultado = getEmailsEquipoVisible('consultor1@empresa.com');
+
+      expect(obtenerUsuarioFueLlamado).toBe(true);
+      expect(resultado).toEqual(['consultor1@empresa.com']);
+    });
+
+    it('ADMIN retorna null cuando se reutiliza desde _sesionResuelta', () => {
+      setupGetEmailsEquipoVisible();
+
+      globalThis._sesionResuelta = {
+        autorizado: true,
+        email: 'admin1@empresa.com',
+        rol: 'ADMIN',
+        cupo: 10,
+        emailDirector: '',
+        emailGerente: ''
+      };
+
+      const resultado = getEmailsEquipoVisible('admin1@empresa.com');
+      expect(resultado).toBeNull();
+    });
+
+    it('ASESOR retorna null cuando se reutiliza desde _sesionResuelta', () => {
+      setupGetEmailsEquipoVisible();
+
+      globalThis._sesionResuelta = {
+        autorizado: true,
+        email: 'asesor1@empresa.com',
+        rol: 'ASESOR',
+        cupo: 0,
+        emailDirector: '',
+        emailGerente: ''
+      };
+
+      const resultado = getEmailsEquipoVisible('asesor1@empresa.com');
+      expect(resultado).toBeNull();
+    });
+
+    it('cache across-execution tiene prioridad sobre _sesionResuelta', () => {
+      const { cacheService } = setupGetEmailsEquipoVisible();
+
+      // Pre-cargar cache
+      const cache = cacheService.getScriptCache();
+      cache.put('EQUIPO_director1@empresa.com', JSON.stringify(['cached@result.com']), 60);
+
+      globalThis._sesionResuelta = {
+        autorizado: true,
+        email: 'director1@empresa.com',
+        rol: 'DIRECTOR',
+        cupo: 0,
+        emailDirector: '',
+        emailGerente: 'gerente1@empresa.com'
+      };
+
+      const resultado = getEmailsEquipoVisible('director1@empresa.com');
+      // Debe retornar el valor del CacheService, no recalcular
+      expect(resultado).toEqual(['cached@result.com']);
+    });
+  });
+});
+
+
+// ─── Tests para verificarRol con resolverSesion (Task 4.2 — Req 9.1, 9.3) ───────
+
+describe('verificarRol — reutilizando resolverSesion() (Task 4.2 - Req 9.1, 9.3)', () => {
+  const HEADERS_42 = ['EMAIL', 'ROL', 'ACTIVO', 'CUPO', 'EMAIL_DIRECTOR', 'EMAIL_GERENTE', 'EMAILS_ALTERNOS'];
+
+  const DATOS_USUARIOS_42 = [
+    HEADERS_42,
+    ['consultor@empresa.com', 'CONSULTOR', true, 5, 'director@empresa.com', 'gerente@empresa.com', 'alt.consultor@gmail.com'],
+    ['director@empresa.com', 'DIRECTOR', true, 0, '', 'gerente@empresa.com', ''],
+    ['gerente@empresa.com', 'GERENTE', true, 0, '', '', ''],
+    ['admin@empresa.com', 'ADMIN', true, 10, '', '', ''],
+    ['inactivo@empresa.com', 'CONSULTOR', false, 5, 'director@empresa.com', '', ''],
+    ['analista@empresa.com', 'ANALISTA', true, 3, 'director@empresa.com', '', ''],
+  ];
+
+  function setupResolverSesionVerificarRol(sessionEmail) {
+    const app = createSpreadsheetApp({ 'USUARIOS': DATOS_USUARIOS_42 });
+    globalThis.SpreadsheetApp = app;
+    globalThis.getHojaControlId = () => 'mock-id';
+    globalThis._registrarEvento_ = () => {};
+    globalThis.Logger = { log: () => {} };
+
+    globalThis.COL_EMAIL = 0;
+    globalThis.COL_ROL = 1;
+    globalThis.COL_ACTIVO = 2;
+    globalThis.COL_CUPO = 3;
+    globalThis.COL_EMAIL_DIRECTOR = 4;
+    globalThis.COL_EMAIL_GERENTE = 5;
+    globalThis.COL_EMAILS_ALTERNOS = 6;
+
+    // Mock Session
+    globalThis.Session = {
+      getActiveUser: () => ({
+        getEmail: () => sessionEmail
+      })
+    };
+
+    // Mock CacheService
+    const cacheStore = {};
+    globalThis.CacheService = {
+      getScriptCache: () => ({
+        get: (key) => cacheStore[key] || null,
+        put: (key, value, ttl) => { cacheStore[key] = value; },
+        remove: (key) => { delete cacheStore[key]; }
+      })
+    };
+
+    // MemoCache_getSessionEmail (production logic)
+    globalThis._sessionEmail = null;
+    globalThis.MemoCache_getSessionEmail = function() {
+      if (globalThis._sessionEmail !== null) {
+        return globalThis._sessionEmail;
+      }
+      globalThis._sessionEmail = Session.getActiveUser().getEmail().toLowerCase().trim();
+      return globalThis._sessionEmail;
+    };
+
+    // MemoCache_getUsuarios (production logic)
+    globalThis._cacheUsuariosTodos = null;
+    globalThis.MemoCache_getUsuarios = function() {
+      if (globalThis._cacheUsuariosTodos !== null) {
+        return globalThis._cacheUsuariosTodos;
+      }
+      globalThis._cacheUsuariosTodos = UsuariosRepo_leerTodos();
+      return globalThis._cacheUsuariosTodos;
+    };
+
+    // UsuariosRepo_leerTodos
+    globalThis.UsuariosRepo_leerTodos = function() {
+      var hojaId = getHojaControlId();
+      var ss = SpreadsheetApp.openById(hojaId);
+      var hoja = ss.getSheetByName('USUARIOS');
+      if (!hoja) return [];
+
+      var datos = hoja.getDataRange().getValues();
+      if (datos.length < 2) return [];
+
+      var resultado = [];
+      for (var i = 1; i < datos.length; i++) {
+        var fila = datos[i];
+        var emailPrimario = String(fila[COL_EMAIL] || '').toLowerCase().trim();
+        if (!emailPrimario) continue;
+
+        var rolRaw = String(fila[COL_ROL] || '').toUpperCase().trim();
+        var activoRaw = fila[COL_ACTIVO];
+        var activo = (activoRaw === true || activoRaw === 'TRUE' || activoRaw === 'true');
+        var cupo = Number(fila[COL_CUPO]) || 0;
+        var emailDirector = String(fila[COL_EMAIL_DIRECTOR] || '').toLowerCase().trim();
+        var emailGerente = String(fila[COL_EMAIL_GERENTE] || '').toLowerCase().trim();
+
+        var emailsAlternosRaw = String(fila[COL_EMAILS_ALTERNOS] || '').trim();
+        var emailsAlternos = [];
+        if (emailsAlternosRaw) {
+          var partes = emailsAlternosRaw.split(',');
+          for (var j = 0; j < partes.length; j++) {
+            var alterno = partes[j].toLowerCase().trim();
+            if (alterno) emailsAlternos.push(alterno);
+          }
+        }
+
+        resultado.push({
+          email: emailPrimario,
+          rol: rolRaw,
+          activo: activo,
+          cupo: cupo,
+          emailDirector: emailDirector,
+          emailGerente: emailGerente,
+          emailsAlternos: emailsAlternos
+        });
+      }
+      return resultado;
+    };
+
+    // _sesionResuelta (production memoization variable — reset per test)
+    globalThis._sesionResuelta = null;
+
+    // resolverSesion (production logic from Servicios_AuthService.js)
+    globalThis.resolverSesion = function() {
+      if (_sesionResuelta !== null) {
+        return _sesionResuelta;
+      }
+
+      var email = MemoCache_getSessionEmail();
+
+      if (!email) {
+        _sesionResuelta = { autorizado: false, email: '' };
+        return _sesionResuelta;
+      }
+
+      var usuario = null;
+      var key = 'USR_' + email;
+
+      try {
+        var cache = CacheService.getScriptCache();
+        var cached = cache.get(key);
+        if (cached) {
+          usuario = JSON.parse(cached);
+        }
+      } catch (e) {}
+
+      if (!usuario) {
+        var usuarios = MemoCache_getUsuarios();
+        var emailNorm = email.toLowerCase().trim();
+
+        for (var i = 0; i < usuarios.length; i++) {
+          if (usuarios[i].email === emailNorm) {
+            usuario = usuarios[i];
+            break;
+          }
+        }
+
+        if (!usuario) {
+          for (var j = 0; j < usuarios.length; j++) {
+            var alternos = usuarios[j].emailsAlternos || [];
+            for (var k = 0; k < alternos.length; k++) {
+              if (alternos[k] === emailNorm) {
+                usuario = usuarios[j];
+                break;
+              }
+            }
+            if (usuario) break;
+          }
+        }
+
+        if (usuario) {
+          try {
+            var cacheEscribir = CacheService.getScriptCache();
+            cacheEscribir.put(key, JSON.stringify(usuario), 120);
+          } catch (e) {}
+        }
+      }
+
+      if (!usuario || !usuario.activo) {
+        _sesionResuelta = { autorizado: false, email: email };
+        return _sesionResuelta;
+      }
+
+      _sesionResuelta = {
+        autorizado: true,
+        email: usuario.email,
+        rol: usuario.rol,
+        cupo: usuario.cupo || 0,
+        emailDirector: usuario.emailDirector || '',
+        emailGerente: usuario.emailGerente || ''
+      };
+
+      return _sesionResuelta;
+    };
+
+    // _rolCoincide (production logic)
+    globalThis._rolCoincide = function(rolUsuario, rolesPermitidos) {
+      if (rolesPermitidos.indexOf(rolUsuario) !== -1) return true;
+
+      var ALIASES = {
+        'CONSULTOR': 'COMERCIAL',
+        'COMERCIAL': 'CONSULTOR',
+        'DIRECTOR': 'LIDER',
+        'LIDER': 'DIRECTOR',
+        'ADMIN': 'ADMINISTRADOR',
+        'ADMINISTRADOR': 'ADMIN'
+      };
+
+      var alias = ALIASES[rolUsuario];
+      if (alias && rolesPermitidos.indexOf(alias) !== -1) return true;
+
+      return false;
+    };
+
+    // verificarRol (production logic from Servicios_AuthService.js)
+    globalThis.verificarRol = function(rolesPermitidos) {
+      var sesion = resolverSesion();
+      if (!sesion.autorizado) {
+        throw new Error('NO_AUTORIZADO');
+      }
+      if (!_rolCoincide(sesion.rol, rolesPermitidos)) {
+        throw new Error('SIN_PERMISOS');
+      }
+      return sesion;
+    };
+  }
+
+  // ─── Retorno de objeto completo (Req 9.3) ─────────────────────────────────
+
+  describe('Retorna objeto completo con email, rol, cupo, emailDirector, emailGerente (Req 9.3)', () => {
+    it('retorna email del usuario autorizado', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.email).toBe('consultor@empresa.com');
+    });
+
+    it('retorna rol del usuario', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.rol).toBe('CONSULTOR');
+    });
+
+    it('retorna cupo del usuario', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.cupo).toBe(5);
+    });
+
+    it('retorna emailDirector del usuario', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.emailDirector).toBe('director@empresa.com');
+    });
+
+    it('retorna emailGerente del usuario', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.emailGerente).toBe('gerente@empresa.com');
+    });
+
+    it('retorna todos los campos esperados para un DIRECTOR', () => {
+      setupResolverSesionVerificarRol('director@empresa.com');
+      const resultado = verificarRol(['DIRECTOR']);
+      expect(resultado).toEqual({
+        autorizado: true,
+        email: 'director@empresa.com',
+        rol: 'DIRECTOR',
+        cupo: 0,
+        emailDirector: '',
+        emailGerente: 'gerente@empresa.com'
+      });
+    });
+
+    it('retorna todos los campos esperados para un ADMIN', () => {
+      setupResolverSesionVerificarRol('admin@empresa.com');
+      const resultado = verificarRol(['ADMIN']);
+      expect(resultado).toEqual({
+        autorizado: true,
+        email: 'admin@empresa.com',
+        rol: 'ADMIN',
+        cupo: 10,
+        emailDirector: '',
+        emailGerente: ''
+      });
+    });
+  });
+
+  // ─── Lanza excepciones correctas ──────────────────────────────────────────
+
+  describe('Lanza excepción NO_AUTORIZADO o SIN_PERMISOS según corresponda', () => {
+    it('lanza NO_AUTORIZADO si el email no existe en el sistema', () => {
+      setupResolverSesionVerificarRol('noexiste@empresa.com');
+      expect(() => verificarRol(['CONSULTOR'])).toThrow('NO_AUTORIZADO');
+    });
+
+    it('lanza NO_AUTORIZADO si el usuario está inactivo', () => {
+      setupResolverSesionVerificarRol('inactivo@empresa.com');
+      expect(() => verificarRol(['CONSULTOR'])).toThrow('NO_AUTORIZADO');
+    });
+
+    it('lanza SIN_PERMISOS si el rol no coincide', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      expect(() => verificarRol(['ADMIN', 'GERENTE'])).toThrow('SIN_PERMISOS');
+    });
+
+    it('lanza SIN_PERMISOS para ANALISTA cuando solo se permiten CONSULTOR/DIRECTOR', () => {
+      setupResolverSesionVerificarRol('analista@empresa.com');
+      expect(() => verificarRol(['CONSULTOR', 'DIRECTOR'])).toThrow('SIN_PERMISOS');
+    });
+
+    it('NO lanza cuando el rol coincide por alias (CONSULTOR/COMERCIAL)', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      expect(() => verificarRol(['COMERCIAL'])).not.toThrow();
+    });
+
+    it('NO lanza cuando el rol coincide por alias (DIRECTOR/LIDER)', () => {
+      setupResolverSesionVerificarRol('director@empresa.com');
+      expect(() => verificarRol(['LIDER'])).not.toThrow();
+    });
+  });
+
+  // ─── Reutiliza resolverSesion() (Req 9.1) ─────────────────────────────────
+
+  describe('Reutiliza resultado de resolverSesion() memoizado (Req 9.1)', () => {
+    it('verificarRol retorna el mismo objeto que resolverSesion()', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+      const sesion = resolverSesion();
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado).toBe(sesion); // Misma referencia — memoizado
+    });
+
+    it('múltiples llamadas a verificarRol no re-resuelven la sesión', () => {
+      setupResolverSesionVerificarRol('admin@empresa.com');
+      let sessionCallCount = 0;
+      const originalGetEmail = globalThis.Session.getActiveUser().getEmail;
+      globalThis.Session = {
+        getActiveUser: () => ({
+          getEmail: () => {
+            sessionCallCount++;
+            return 'admin@empresa.com';
+          }
+        })
+      };
+
+      verificarRol(['ADMIN']);
+      verificarRol(['ADMIN']);
+      verificarRol(['ADMIN']);
+
+      // Solo debe haber llamado Session.getActiveUser().getEmail() 1 vez
+      expect(sessionCallCount).toBe(1);
+    });
+
+    it('verificarRol usa _sesionResuelta si ya fue llamado resolverSesion previamente', () => {
+      setupResolverSesionVerificarRol('consultor@empresa.com');
+
+      // Primera llamada resuelve sesión
+      resolverSesion();
+
+      // Eliminar acceso a datos para probar que NO se vuelve a leer
+      globalThis.MemoCache_getUsuarios = () => { throw new Error('NO DEBERÍA LLAMARSE'); };
+
+      // verificarRol debe usar _sesionResuelta existente
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.email).toBe('consultor@empresa.com');
+    });
+  });
+
+  // ─── Resolución por email alterno ─────────────────────────────────────────
+
+  describe('Resolución por email alterno vía resolverSesion', () => {
+    it('resuelve usuario por email alterno y retorna datos del primario', () => {
+      setupResolverSesionVerificarRol('alt.consultor@gmail.com');
+      const resultado = verificarRol(['CONSULTOR']);
+      expect(resultado.email).toBe('consultor@empresa.com');
+      expect(resultado.rol).toBe('CONSULTOR');
+      expect(resultado.emailDirector).toBe('director@empresa.com');
     });
   });
 });

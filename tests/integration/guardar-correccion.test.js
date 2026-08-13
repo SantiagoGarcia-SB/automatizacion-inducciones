@@ -40,6 +40,7 @@ function setupEnvironment(filasErrores) {
   globalThis.getHojaControlId = () => 'mock-control-id';
   globalThis.getCarpetaRaizId = () => 'mock-carpeta-id';
   globalThis.notificarCorreccionAlAuxiliar = function() {};
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
 
   loadSource();
   return { app };
@@ -59,6 +60,7 @@ describe('guardarCorreccionComercial() — lectura única + escritura agrupada',
     delete globalThis.getHojaControlId;
     delete globalThis.getCarpetaRaizId;
     delete globalThis.notificarCorreccionAlAuxiliar;
+    delete globalThis.SpreadsheetRegistry_get;
     delete globalThis.guardarCorreccionComercial;
   });
 

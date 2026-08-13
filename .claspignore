@@ -12,3 +12,4 @@ package.json
 package-lock.json
 vitest.config.js
 README.md
+TestUtils.js

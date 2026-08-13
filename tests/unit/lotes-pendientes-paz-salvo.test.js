@@ -37,6 +37,7 @@ function setupEnvironment(filas) {
   });
   globalThis.SpreadsheetApp = app;
   globalThis.getHojaControlId = () => 'mock-control-id';
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
   loadSource();
   return { app };
 }
@@ -45,6 +46,7 @@ describe('obtenerLotesPendientesPazYSalvo()', () => {
   beforeEach(() => {
     delete globalThis.SpreadsheetApp;
     delete globalThis.getHojaControlId;
+    delete globalThis.SpreadsheetRegistry_get;
     delete globalThis.obtenerLotesPendientesPazYSalvo;
     vi.useRealTimers();
   });

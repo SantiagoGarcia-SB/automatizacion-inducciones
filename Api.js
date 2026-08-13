@@ -13,6 +13,8 @@
  * Expone emailDirector y emailGerente para que el frontend muestre la cadena de supervisión.
  * @returns {{autorizado:boolean, email:string, rol?:string, cupo?:number,
  *            emailDirector?:string, emailGerente?:string}}
+ * @sheets_read 0-1
+ * @sheets_write 0
  */
 function api_obtenerUsuarioActual() {
   try {
@@ -29,6 +31,8 @@ function api_obtenerUsuarioActual() {
  * - null → métricas globales (ADMIN, ASESOR)
  * - string[] → métricas del equipo visible (DIRECTOR, GERENTE, CONSULTOR, etc.)
  * @returns {{radicados:number, enAnalisis:number, pendientePS:number, errorTerceros:number, terminados:number}}
+ * @sheets_read 0-2
+ * @sheets_write 0
  */
 function api_obtenerResumenDashboard() {
   try {
@@ -65,6 +69,8 @@ function api_obtenerResumenDashboard() {
  * @param {string|null} [fechaDesde] - Fecha inicio para búsqueda histórica (ISO string o date string)
  * @param {string|null} [fechaHasta] - Fecha fin para búsqueda histórica (ISO string o date string)
  * @returns {{datos:Array, total:number, pagina:number, totalPaginas:number}}
+ * @sheets_read 1-2
+ * @sheets_write 0
  */
 function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta) {
   try {
@@ -83,6 +89,8 @@ function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaD
  * Retorna el detalle de un lote: datos del lote + lista de solicitudes.
  * @param {string} idLote - ID del lote a consultar
  * @returns {{lote:Object, solicitudes:Array}}
+ * @sheets_read 1-2
+ * @sheets_write 0
  */
 function api_obtenerDetalleLote(idLote) {
   try {
@@ -100,6 +108,8 @@ function api_obtenerDetalleLote(idLote) {
  * Usa CacheServiceWrapper para manejar payloads > 100 KB con fragmentación automática.
  * Filtrado por vista jerárquica: cada rol ve solo los lotes de su equipo visible.
  * @returns {Array} Lista de lotes con estados
+ * @sheets_read 0-2
+ * @sheets_write 0
  */
 function api_obtenerTodosLosLotes() {
   try {
@@ -135,6 +145,8 @@ function api_obtenerTodosLosLotes() {
  * Filtrado por vista jerárquica del solicitante. No expone campos sensibles (cupo, emailsAlternos).
  * Accesible por GERENTE, DIRECTOR, ADMIN, ASESOR (y aliases de transición).
  * @returns {Array<{email: string, nombre: string, rol: string, emailDirector: string, emailGerente: string, activo: boolean}>}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerUsuariosDashboard() {
   try {
@@ -160,7 +172,7 @@ function api_obtenerUsuariosDashboard() {
       var u = usuariosFiltrados[j];
       resultado.push({
         email: u.email,
-        nombre: _derivarNombreDeEmail(u.email),
+        nombre: emailANombre(u.email, 'COMPLETO'),
         rol: u.rol,
         emailDirector: u.emailDirector || '',
         emailGerente: u.emailGerente || '',
@@ -181,6 +193,8 @@ function api_obtenerUsuariosDashboard() {
  * - ADMIN/ASESOR → todos los usuarios (sin filtro)
  * - DIRECTOR/GERENTE → solo usuarios de su equipo visible
  * @returns {Array} Lista de usuarios
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerUsuarios() {
   try {
@@ -214,6 +228,8 @@ function api_obtenerUsuarios() {
  * @param {Object} datos - {email, rol, activo, cupo, emailDirector, emailGerente, emailsAlternos}
  * @param {boolean} esNuevo - true = crear, false = actualizar
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_guardarUsuario(datos, esNuevo) {
   try {
@@ -247,6 +263,8 @@ function api_guardarUsuario(datos, esNuevo) {
  * @param {number} desde - Fila inicio (0-based desde el final). 0 = las más recientes
  * @param {number} cantidad - Cuántas filas traer (default 500)
  * @returns {{datos:Array, total:number, cargadas:number}}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerSolicitudes(desde, cantidad) {
   try {
@@ -262,6 +280,8 @@ function api_obtenerSolicitudes(desde, cantidad) {
  * Retorna el detalle completo de una solicitud (todos los campos de evaluación).
  * @param {number} filaNum - Número de fila en registro analisis
  * @returns {Object} Datos completos de la solicitud
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerDetalleSolicitud(filaNum) {
   try {
@@ -282,6 +302,8 @@ function api_obtenerDetalleSolicitud(filaNum) {
  * Solo datos del listado (rápido). Datos completos se cargan al abrir el modal.
  * Usa vista jerárquica: ADMIN/ASESOR ven todos, otros filtran por equipo visible.
  * @returns {Array}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerColaAuxiliar() {
   try {
@@ -299,6 +321,8 @@ function api_obtenerColaAuxiliar() {
  * Retorna datos completos de una solicitud para el modal del auxiliar.
  * @param {number} filaNum - Fila en Control_General
  * @returns {Object}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerSolicitudAuxiliar(filaNum) {
   try {
@@ -313,6 +337,8 @@ function api_obtenerSolicitudAuxiliar(filaNum) {
 /**
  * Retorna las solicitudes asignadas al auxiliar logueado.
  * @returns {Array}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerMisSolicitudesAuxiliar() {
   try {
@@ -329,6 +355,8 @@ function api_obtenerMisSolicitudesAuxiliar() {
  * @param {string} idLote - ID del lote
  * @param {string} uuid - UUID de la solicitud
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_tomarSolicitudAuxiliar(idLote, uuid) {
   try {
@@ -345,6 +373,8 @@ function api_tomarSolicitudAuxiliar(idLote, uuid) {
  * @param {string} uuid - UUID de la solicitud
  * @param {Object} numeros - {solicitudInquilino, nroCoa1, nroCoa2...}
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_marcarRadicado(uuid, numeros) {
   try {
@@ -361,12 +391,15 @@ function api_marcarRadicado(uuid, numeros) {
  * @param {string} uuid - UUID de la solicitud
  * @param {Array} participantes - [{participante:'INQ', requerimientos:'celular|doc'}]
  * @param {string} nota - Nota interna del auxiliar
+ * @param {number} [filaNum] - Número de fila en Control_General (ya conocido desde obtenerColaAuxiliar)
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 2-3
+ * @sheets_write 2
  */
-function api_marcarErrorTerceros(uuid, participantes, nota) {
+function api_marcarErrorTerceros(uuid, participantes, nota, filaNum) {
   try {
     var usuario = verificarRol(['AUXILIAR', 'CONSULTOR', 'COMERCIAL', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
-    return marcarErrorEnTerceros(uuid, participantes, nota, usuario.email);
+    return marcarErrorEnTerceros(uuid, participantes, nota, usuario.email, filaNum);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_marcarErrorTerceros', e.message);
     return { ok: false, mensaje: 'Error: ' + e.message };
@@ -380,6 +413,8 @@ function api_marcarErrorTerceros(uuid, participantes, nota) {
 /**
  * Retorna las solicitudes asignadas al analista logueado + info de cupo.
  * @returns {{solicitudes:Array, cupo:number, activas:number}}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerMisSolicitudesAnalista() {
   try {
@@ -395,6 +430,8 @@ function api_obtenerMisSolicitudesAnalista() {
 /**
  * Analista pide UNA solicitud de la cola (la más antigua disponible).
  * @returns {{ok:boolean, mensaje:string, solicitud?:Object}}
+ * @sheets_read 1-2
+ * @sheets_write 1
  */
 function api_pedirSolicitudAnalista() {
   try {
@@ -410,6 +447,8 @@ function api_pedirSolicitudAnalista() {
  * Retorna datos completos de una solicitud para el formulario de evaluación.
  * @param {number} filaNum - Fila en registro analisis
  * @returns {Object}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerSolicitudParaEvaluar(filaNum) {
   try {
@@ -427,6 +466,8 @@ function api_obtenerSolicitudParaEvaluar(filaNum) {
  * @param {Object} datos - {ingresos, acierta, ocupacion, respuestaModelo, reglaDura, ...por COA, comentarios}
  * @param {boolean} finalizar - Si true, marca REGISTRO ANALISTA SAI + Fecha Evaluacion
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1-6
  */
 function api_guardarEvaluacion(filaNum, datos, finalizar) {
   try {
@@ -448,6 +489,8 @@ function api_guardarEvaluacion(filaNum, datos, finalizar) {
  * Retorna los errores pendientes de respuesta del comercial logueado.
  * Usa vista jerárquica: ADMIN/ASESOR ven todos, otros filtran por equipo visible.
  * @returns {Array}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerMisErroresPendientes() {
   try {
@@ -466,6 +509,8 @@ function api_obtenerMisErroresPendientes() {
  * @param {string} uuid - UUID de la solicitud
  * @param {Array} respuestas - [{participante, respuesta}]
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1-2
+ * @sheets_write 1-2
  */
 function api_enviarCorreccion(uuid, respuestas) {
   try {
@@ -484,6 +529,8 @@ function api_enviarCorreccion(uuid, respuestas) {
 /**
  * Retorna todas las solicitudes asignadas a analistas (en evaluación).
  * @returns {Array}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerAsignaciones() {
   try {
@@ -500,6 +547,8 @@ function api_obtenerAsignaciones() {
  * @param {number} filaNum - Fila en registro analisis
  * @param {string} nuevoEmail - Email del nuevo analista (vacío = liberar)
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_reasignarSolicitud(filaNum, nuevoEmail) {
   try {
@@ -518,6 +567,8 @@ function api_reasignarSolicitud(filaNum, nuevoEmail) {
 /**
  * Envía el reporte de gestión por correo (el mismo que envía el trigger diario).
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 3-4
+ * @sheets_write 0
  */
 function api_enviarReporteGestion() {
   try {
@@ -535,6 +586,8 @@ function api_enviarReporteGestion() {
  * envía el trigger mensual del día 1). Puede tardar varios segundos si hay
  * muchos comerciales activos — se ejecuta 1 por 1.
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 2-3
+ * @sheets_write 0
  */
 function api_enviarReportesCierreMes() {
   try {
@@ -554,6 +607,8 @@ function api_enviarReportesCierreMes() {
 /**
  * Retorna el catálogo de motivos de error en terceros.
  * @returns {Array}
+ * @sheets_read 0-1
+ * @sheets_write 0
  */
 function api_obtenerCatalogoMotivos() {
   try {
@@ -569,6 +624,8 @@ function api_obtenerCatalogoMotivos() {
  * @param {Object} motivo - {id, label, instruccion, activo}
  * @param {boolean} esNuevo
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_guardarMotivo(motivo, esNuevo) {
   try {
@@ -583,6 +640,8 @@ function api_guardarMotivo(motivo, esNuevo) {
  * Elimina un motivo del catálogo.
  * @param {string} id
  * @returns {{ok:boolean, mensaje:string}}
+ * @sheets_read 1
+ * @sheets_write 1
  */
 function api_eliminarMotivo(id) {
   try {
@@ -702,20 +761,74 @@ function _eliminarMotivo(id) {
 // ============================================================
 
 /**
- * Retorna métricas operativas de lotes para un periodo mensual.
- * Expuesta vía google.script.run.
- * @param {number} mes - Entero 1-12
-/**
  * API: Obtiene métricas operativas de lotes para un rango de fechas.
+ * Estrategia cache-first: intenta leer de CacheWrapper antes de acceder a Sheets.
+ * NO adquiere LockService para permitir ejecución en paralelo con api_obtenerMetricasLotesHistorico.
+ *
+ * Clave de cache: METRICAS_LOTES_{fechaDesde}_{fechaHasta}
+ * TTL: 120 segundos (solo si payload < 512 KB)
  *
  * @param {string} fechaDesde - Fecha inicio en formato YYYY-MM-DD
- * @param {string} fechaHasta - Fecha fin en formato YYYY-MM-DD
+ * @param {string} fechaHasta - Fecha fin en formato YYYY-MM-DD (rango máximo 183 días)
  * @returns {{resumen: Object, detallePorLote: Array}}
+ * @sheets_read 0 en cache-hit, 1-2 en cache-miss
+ * @sheets_write 0
  */
 function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
   try {
     verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
-    return calcularMetricasLotes(fechaDesde, fechaHasta);
+
+    // ── 1. Validar parámetros de entrada ──
+    if (typeof fechaDesde !== 'string' || typeof fechaHasta !== 'string' ||
+        !fechaDesde || !fechaHasta) {
+      return _metricasLotesVacias();
+    }
+
+    var regexFecha = /^\d{4}-\d{2}-\d{2}$/;
+    if (!regexFecha.test(fechaDesde) || !regexFecha.test(fechaHasta)) {
+      return _metricasLotesVacias();
+    }
+
+    var desde = new Date(fechaDesde + 'T00:00:00');
+    var hasta = new Date(fechaHasta + 'T00:00:00');
+    if (isNaN(desde.getTime()) || isNaN(hasta.getTime())) {
+      return _metricasLotesVacias();
+    }
+
+    if (desde.getTime() > hasta.getTime()) {
+      return _metricasLotesVacias();
+    }
+
+    var diffDias = Math.ceil((hasta.getTime() - desde.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDias > 183) {
+      return _metricasLotesVacias();
+    }
+
+    // ── 2. Cache-first: intentar leer de CacheWrapper ──
+    var cacheKey = 'METRICAS_LOTES_' + fechaDesde + '_' + fechaHasta;
+    try {
+      var cached = CacheWrapper_getJSON(cacheKey);
+      if (cached) {
+        return cached; // Cache-hit: 0 lecturas a Sheets
+      }
+    } catch (e) {
+      // CacheService no disponible — degradación elegante, continuar sin cache
+    }
+
+    // ── 3. Cache-miss: calcular desde Sheets ──
+    var resultado = calcularMetricasLotes(fechaDesde, fechaHasta);
+
+    // ── 4. Almacenar en cache si payload < 512 KB ──
+    try {
+      var payloadStr = JSON.stringify(resultado);
+      if (payloadStr.length <= 512000) {
+        CacheWrapper_putJSON(cacheKey, resultado, 120);
+      }
+    } catch (e) {
+      // CacheService no disponible al escribir — degradación elegante, no interrumpir
+    }
+
+    return resultado;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMetricasLotes', e.message);
     return _metricasLotesVacias();
@@ -729,6 +842,8 @@ function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
  * @param {string} fechaDesde - YYYY-MM-DD
  * @param {string} fechaHasta - YYYY-MM-DD
  * @returns {{desglose: Object, detalle: Array}}
+ * @sheets_read 1
+ * @sheets_write 0
  */
 function api_obtenerDetalleEnProceso(fechaDesde, fechaHasta) {
   try {
@@ -749,8 +864,17 @@ function api_obtenerDetalleEnProceso(fechaDesde, fechaHasta) {
  * API: Obtiene métricas históricas de lotes/solicitudes para los últimos N meses.
  * Usado para la gráfica de tendencia. Se llama bajo demanda (en paralelo con métricas).
  *
+ * Lee registro_analisis una sola vez y filtra por cada mes en memoria.
+ * No adquiere LockService ni comparte dependencias de escritura, permitiendo
+ * ejecución en paralelo con api_obtenerMetricasLotes sin serialización.
+ *
+ * Para rangos > 90 días (cantidadMeses > 3), usa getRange() limitado a las
+ * columnas necesarias (máximo 17) en vez de leer todas las 100+ columnas.
+ *
  * @param {number} cantidadMeses - Cantidad de meses hacia atrás (1-12, default 6)
  * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number}>}
+ * @sheets_read 0 en cache-hit, 1 en cache-miss
+ * @sheets_write 0
  */
 function api_obtenerMetricasLotesHistorico(cantidadMeses) {
   try {

@@ -9,6 +9,395 @@ const BCC_AUDITORIA = PropertiesService.getScriptProperties().getProperty('BCC_A
 
 
 // ============================================================
+//  FUNCIÓN CANÓNICA DE ESCALAMIENTO PROGRESIVO
+//  Determina nivel, emoji y mensaje según días transcurridos.
+//  Reemplaza la lógica duplicada en enviarRecordatoriosPazYSalvoDiario
+//  y enviarRecordatoriosErrorTercerosDiario.
+// ============================================================
+
+/**
+ * Determina el nivel de escalamiento basado en días transcurridos.
+ * Función canónica reutilizable para todas las notificaciones con
+ * escalamiento progresivo (paz y salvo, error en terceros, etc.).
+ *
+ * @param {number} diasTranscurridos — Días desde último aviso o ingreso (entero no negativo)
+ * @returns {{nivel: string, emoji: string, mensajeExtra: string}}
+ *   nivel: "normal"|"recordatorio"|"elevado"|"urgente"|"critico"
+ *   emoji: Emoji para el asunto del correo
+ *   mensajeExtra: HTML adicional según umbral alcanzado
+ */
+function calcularEscalamiento(diasTranscurridos) {
+  var dias = typeof diasTranscurridos === "number" ? Math.floor(diasTranscurridos) : 0;
+  if (dias < 0) dias = 0;
+
+  if (dias >= 21) {
+    return {
+      nivel: "critico",
+      emoji: "🚨",
+      mensajeExtra: '<br><br><strong style="color:#BD0F14;">⚠️ ALERTA CR&Iacute;TICA:</strong> Este lote lleva m&aacute;s de 21 d&iacute;as sin respuesta. Se requiere acci&oacute;n inmediata para evitar el cierre del tr&aacute;mite.'
+    };
+  }
+
+  if (dias >= 14) {
+    return {
+      nivel: "urgente",
+      emoji: "⚠️",
+      mensajeExtra: '<br><br><strong style="color:#E65100;">Atenci&oacute;n:</strong> Este lote lleva m&aacute;s de 14 d&iacute;as en espera. Por favor priorizar el env&iacute;o del documento.'
+    };
+  }
+
+  if (dias >= 7) {
+    return {
+      nivel: "elevado",
+      emoji: "📌",
+      mensajeExtra: '<br><br><strong style="color:#253150;">Nota:</strong> Este lote supera los 7 d&iacute;as sin respuesta. El equipo de inducciones est&aacute; monitoreando.'
+    };
+  }
+
+  if (dias >= 3) {
+    return {
+      nivel: "recordatorio",
+      emoji: "🔔",
+      mensajeExtra: ""
+    };
+  }
+
+  // dias < 3: nivel normal, sin escalamiento
+  return {
+    nivel: "normal",
+    emoji: "",
+    mensajeExtra: ""
+  };
+}
+
+
+// ============================================================
+//  RESOLUCIÓN DE EMAIL POR LOTE (mapa pre-cargado)
+//  Función canónica reutilizable por todas las notificaciones.
+//  Validates: Requirements 3.1, 3.5
+// ============================================================
+
+/**
+ * Resuelve el email del comercial por ID de lote desde un mapa pre-cargado.
+ * Omite el lote si no se encuentra el ID o el email no contiene "@".
+ *
+ * @param {Object<string, string>} mapaLoteEmail — Mapa idLote → email (pre-cargado de Hoja_Control col F → col B)
+ * @param {string} idLote — ID del lote a resolver
+ * @returns {string|null} Email del comercial, o null si no encontrado o inválido
+ */
+function resolverEmailPorLote(mapaLoteEmail, idLote) {
+  if (!mapaLoteEmail || typeof idLote !== "string" || !idLote.trim()) {
+    _registrarEvento_("WARN", "Notificaciones.js", "resolverEmailPorLote: ID de lote vacío o mapa inválido", "idLote: " + String(idLote));
+    return null;
+  }
+
+  var email = mapaLoteEmail[idLote.trim()];
+
+  if (email === undefined || email === null || String(email).trim() === "") {
+    _registrarEvento_("WARN", "Notificaciones.js", "resolverEmailPorLote: ID de lote no encontrado en mapa", "idLote: " + idLote);
+    return null;
+  }
+
+  email = String(email).trim();
+
+  if (email.indexOf("@") === -1) {
+    _registrarEvento_("WARN", "Notificaciones.js", "resolverEmailPorLote: email sin '@' para lote", "idLote: " + idLote + " | email: " + email);
+    return null;
+  }
+
+  return email;
+}
+
+
+// ============================================================
+//  ORQUESTADOR DIARIO DE RECORDATORIOS (Consolidación)
+//  Lee Hoja_Control y Control_General UNA sola vez y procesa
+//  secuencialmente paz y salvo + error en terceros.
+//  Validates: Requirements 3.1, 3.2, 3.4, 3.5
+// ============================================================
+
+/**
+ * Orquestador diario de recordatorios. Lee Hoja_Control y Control_General
+ * una sola vez y procesa secuencialmente recordatorios de paz y salvo y
+ * de error en terceros.
+ *
+ * @sheets_read 2 (Hoja_Control + Control_General, una vez cada una)
+ * @sheets_write 1 por bloque contiguo de filas actualizadas
+ */
+function ejecutarRecordatoriosDiarios() {
+
+  // ── 1. Abrir libro de control una sola vez ──
+  var ss = SpreadsheetRegistry_get(ID_HOJA_CONTROL);
+  var sheetHC = ss.getSheetByName("Hoja_Control");
+  var sheetCG = ss.getSheetByName("Control_General");
+
+  if (!sheetCG || !sheetHC) {
+    _registrarEvento_("ERROR", "Notificaciones.js", "ejecutarRecordatoriosDiarios: hojas no encontradas");
+    return;
+  }
+
+  // ── 2. Leer Hoja_Control UNA vez → construir mapaLoteEmail ──
+  var dataHC = sheetHC.getDataRange().getValues();
+  var mapaLoteEmail = {};
+  for (var i = 1; i < dataHC.length; i++) {
+    var emailHC = String(dataHC[i][1]).trim();  // Columna B
+    var idLoteHC = String(dataHC[i][5]).trim(); // Columna F
+    if (idLoteHC) {
+      mapaLoteEmail[idLoteHC] = emailHC;
+    }
+  }
+
+  // ── 3. Leer Control_General UNA vez ──
+  var ultimaFilaCG = sheetCG.getLastRow();
+  if (ultimaFilaCG < 2) {
+    _registrarEvento_("INFO", "Notificaciones.js", "ejecutarRecordatoriosDiarios: Control_General sin datos");
+    return;
+  }
+  var dataCG = sheetCG.getRange(1, 1, ultimaFilaCG, 61).getValues();
+
+  // ── 4. Clasificar lotes por estado (paz y salvo / error en terceros) ──
+  var hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  var lotesPazYSalvo = {};
+  var lotesErrorTerceros = {};
+
+  for (var j = 1; j < dataCG.length; j++) {
+    var idLote = String(dataCG[j][0]).trim();
+    var estado = String(dataCG[j][9]).trim().toUpperCase();
+    var fIngreso = dataCG[j][2];
+    var fAviso = dataCG[j][60]; // Columna BI (índice 60)
+
+    if (!idLote) continue;
+
+    var destino = null;
+    if (estado === "PENDIENTE PAZ Y SALVO") {
+      destino = lotesPazYSalvo;
+    } else if (estado === "ERROR EN TERCEROS") {
+      destino = lotesErrorTerceros;
+    }
+
+    if (!destino) continue;
+
+    if (!destino[idLote]) {
+      var fechaRef = (fAviso instanceof Date && !isNaN(fAviso)) ? fAviso : fIngreso;
+      if (!(fechaRef instanceof Date) && typeof fechaRef === "string") {
+        var partes = fechaRef.split(/[/ -]/);
+        if (partes.length >= 3) {
+          fechaRef = new Date(partes[2], partes[1] - 1, partes[0]);
+        }
+      }
+
+      destino[idLote] = {
+        timestamp: (fechaRef instanceof Date && !isNaN(fechaRef)) ? new Date(fechaRef).setHours(0, 0, 0, 0) : null,
+        filas: []
+      };
+    }
+    destino[idLote].filas.push(j + 1); // fila 1-based en la hoja
+  }
+
+  // ── 5. Calcular total de emails y verificar cuota ──
+  var lotesPSIds = Object.keys(lotesPazYSalvo);
+  var lotesETIds = Object.keys(lotesErrorTerceros);
+  var totalEmailsRequeridos = lotesPSIds.length + lotesETIds.length;
+
+  if (totalEmailsRequeridos === 0) {
+    return; // Nada que enviar
+  }
+
+  var cuotaRestante = MailApp.getRemainingDailyQuota();
+  if (cuotaRestante < totalEmailsRequeridos) {
+    _registrarEvento_(
+      "WARN",
+      "Notificaciones.js",
+      "ejecutarRecordatoriosDiarios: cuota insuficiente, envío abortado",
+      "Cuota restante: " + cuotaRestante + " | Requeridos: " + totalEmailsRequeridos
+    );
+    return;
+  }
+
+  // ── 6. Procesar recordatorios de Paz y Salvo ──
+  _procesarRecordatoriosEnLote_(sheetCG, lotesPazYSalvo, mapaLoteEmail, hoy, "PENDIENTE PAZ Y SALVO");
+
+  // ── 7. Procesar recordatorios de Error en Terceros ──
+  _procesarRecordatoriosEnLote_(sheetCG, lotesErrorTerceros, mapaLoteEmail, hoy, "ERROR EN TERCEROS");
+}
+
+/**
+ * Procesa y envía recordatorios para un conjunto de lotes del mismo tipo.
+ * Función interna del orquestador — no debe invocarse directamente.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheetCG — Hoja Control_General
+ * @param {Object} lotesMapa — Mapa idLote → {timestamp, filas}
+ * @param {Object} mapaLoteEmail — Mapa idLote → email (pre-cargado de Hoja_Control)
+ * @param {Date} hoy — Fecha actual normalizada a medianoche
+ * @param {string} tipoEstado — "PENDIENTE PAZ Y SALVO" | "ERROR EN TERCEROS"
+ */
+function _procesarRecordatoriosEnLote_(sheetCG, lotesMapa, mapaLoteEmail, hoy, tipoEstado) {
+  var esPazYSalvo = (tipoEstado === "PENDIENTE PAZ Y SALVO");
+  var filasParaActualizarFecha = [];
+
+  for (var idLote in lotesMapa) {
+    if (!lotesMapa.hasOwnProperty(idLote)) continue;
+
+    var lote = lotesMapa[idLote];
+    if (!lote.timestamp) continue;
+
+    var diffDias = Math.floor((hoy.getTime() - lote.timestamp) / (1000 * 60 * 60 * 24));
+    if (diffDias < 3) continue;
+
+    // ── Resolver email del comercial ──
+    var emailReal = resolverEmailPorLote(mapaLoteEmail, idLote);
+    if (!emailReal) continue;
+
+    // ── Calcular escalamiento ──
+    var escalamiento = calcularEscalamiento(diffDias);
+    var nivelEscalamiento = escalamiento.nivel;
+    var asuntoEmoji = escalamiento.emoji;
+    var mensajeExtra = escalamiento.mensajeExtra;
+
+    // ── Construir email ──
+    var nombreComercial = emailANombre(emailReal, "PRIMER_NOMBRE") || "Ejecutivo Comercial";
+    var cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
+    var ccs = [];
+    for (var k = 0; k < cadenaJerarquica.length; k++) {
+      if (cadenaJerarquica[k] && ccs.indexOf(cadenaJerarquica[k]) === -1) {
+        ccs.push(cadenaJerarquica[k]);
+      }
+    }
+    var ccsStr = ccs.filter(function(c) { return c && c.length > 0; }).join(",");
+
+    var barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
+    var htmlBody;
+
+    if (esPazYSalvo) {
+      htmlBody = _envolver_([
+        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci\u00f3n urgente" : "Recordatorio"),
+        _bloque_barra_estado_(barraColor, "&#128260;", "Pendiente hace " + diffDias + " d\u00edas"),
+        _bloque_cuerpo_inicio_(
+          "Hola, " + nombreComercial,
+          "El lote <strong>" + idLote + "</strong> est&aacute; a la espera del soporte de Paz y Salvo para ser aprobado." + mensajeExtra
+        ),
+        _bloque_chips_([
+          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+          { label: "D&iacute;as de espera", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
+        ]),
+        _bloque_nota_(
+          '<strong style="color:#253150;">C&oacute;mo enviar el soporte:</strong> ' +
+          'Responde a este correo usando <strong>"Responder a todos"</strong> y adjunta ' +
+          'el documento de Paz y Salvo. El equipo de inducciones lo gestionar&aacute; de inmediato.'
+        ),
+        _bloque_pie_()
+      ].join(""));
+    } else {
+      htmlBody = _envolver_([
+        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci\u00f3n urgente" : "Recordatorio"),
+        _bloque_barra_estado_(barraColor, "&#9888;", "Error en terceros hace " + diffDias + " d\u00edas"),
+        _bloque_cuerpo_inicio_(
+          "Hola, " + nombreComercial,
+          "El lote <strong>" + idLote + "</strong> presenta errores en los datos de terceros que impiden continuar con el proceso de inducci&oacute;n. La operaci&oacute;n ya solicit&oacute; la correcci&oacute;n correspondiente." + mensajeExtra
+        ),
+        _bloque_chips_([
+          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
+          { label: "D&iacute;as pendiente", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
+        ]),
+        _bloque_nota_(
+          '<strong style="color:#253150;">Acci&oacute;n requerida:</strong> ' +
+          'Verifica y corrige los datos de terceros solicitados por el equipo de inducciones. ' +
+          'Una vez corregidos, responde a este correo usando <strong>"Responder a todos"</strong> ' +
+          'para que la operaci&oacute;n pueda continuar con el tr&aacute;mite.'
+        ),
+        _bloque_pie_()
+      ].join(""));
+    }
+
+    // ── Enviar email ──
+    var asuntoTipo = esPazYSalvo
+      ? (asuntoEmoji + " Paz y salvo " + (nivelEscalamiento === "critico" ? "URGENTE" : "a\u00fan pendiente") + " \u00b7 Lote " + idLote)
+      : (asuntoEmoji + " Error en terceros " + (nivelEscalamiento === "critico" ? "URGENTE" : "pendiente de correcci\u00f3n") + " \u00b7 Lote " + idLote);
+
+    try {
+      MailApp.sendEmail({
+        to: emailReal,
+        subject: asuntoTipo,
+        htmlBody: htmlBody,
+        cc: ccsStr,
+        bcc: BCC_AUDITORIA,
+        name: "Inducciones \u00b7 El Libertador"
+      });
+
+      // Registrar filas para actualizar fecha de aviso
+      for (var f = 0; f < lote.filas.length; f++) {
+        filasParaActualizarFecha.push(lote.filas[f]);
+      }
+
+      var tipoLog = esPazYSalvo ? "paz y salvo" : "error terceros";
+      _registrarEvento_("INFO", "Notificaciones.js", "Recordatorio " + tipoLog + " enviado", "Lote: " + idLote + " | Destino: " + emailReal);
+    } catch (err) {
+      var tipoErr = esPazYSalvo ? "paz y salvo" : "error terceros";
+      _registrarEvento_("ERROR", "Notificaciones.js", "Error al enviar recordatorio " + tipoErr, "Lote: " + idLote + " | Error: " + err.message);
+    }
+  }
+
+  // ── Actualizar fechas de aviso en batch (columna BI = 61) ──
+  if (filasParaActualizarFecha.length > 0) {
+    var ahora = new Date();
+    var operaciones = [];
+    for (var m = 0; m < filasParaActualizarFecha.length; m++) {
+      operaciones.push({ fila: filasParaActualizarFecha[m], columna: 61, valor: ahora });
+    }
+    BatchWriter_escribir(sheetCG, operaciones);
+  }
+}
+
+
+// ============================================================
+//  CONFIGURACIÓN DE TRIGGER — RECORDATORIOS DIARIOS
+//  Ejecutar UNA vez manualmente desde el editor de Apps Script.
+//  Reemplaza los triggers separados de enviarRecordatoriosPazYSalvoDiario
+//  y enviarRecordatoriosErrorTercerosDiario por uno solo consolidado.
+//  Validates: Requirements 3.2
+// ============================================================
+
+/**
+ * Configura el trigger diario consolidado de recordatorios.
+ * - Elimina triggers existentes de enviarRecordatoriosPazYSalvoDiario
+ * - Elimina triggers existentes de enviarRecordatoriosErrorTercerosDiario
+ * - Elimina triggers existentes de ejecutarRecordatoriosDiarios (idempotente)
+ * - Crea un único trigger que ejecuta ejecutarRecordatoriosDiarios a las 8:00am Colombia
+ *
+ * Ejecutar manualmente una sola vez desde el editor de Apps Script.
+ */
+function configurarTriggerRecordatoriosDiarios() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var funcionesAEliminar = [
+    "enviarRecordatoriosPazYSalvoDiario",
+    "enviarRecordatoriosErrorTercerosDiario",
+    "ejecutarRecordatoriosDiarios"
+  ];
+
+  // ── Eliminar triggers existentes de las funciones objetivo ──
+  for (var i = 0; i < triggers.length; i++) {
+    var handlerFunction = triggers[i].getHandlerFunction();
+    if (funcionesAEliminar.indexOf(handlerFunction) !== -1) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  // ── Crear trigger consolidado: ejecutarRecordatoriosDiarios a las 8:00am Colombia ──
+  ScriptApp.newTrigger("ejecutarRecordatoriosDiarios")
+    .timeBased()
+    .atHour(8)
+    .nearMinute(0)
+    .everyDays(1)
+    .inTimezone("America/Bogota")
+    .create();
+
+  Logger.log("✅ Trigger configurado: ejecutarRecordatoriosDiarios → diario 8:00am (America/Bogota)");
+}
+
+
+// ============================================================
 //  BLOQUES HTML — Construcción modular
 //  Cada función retorna un <tr> listo para insertar
 //  dentro de la tabla maestra del correo.
@@ -499,7 +888,7 @@ if (10 < colStart || 10 > colEnd) return;
   if (!emailFinal || !emailFinal.includes("@")) return;
 
   const correoDirector  = obtenerCorreoDeDirector(emailFinal);
-  const nombreComercial = obtenerNombreDeComercial(emailFinal);
+  const nombreComercial = emailANombre(emailFinal, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
   const cadenaJerarquica = obtenerCadenaJerarquica(emailFinal);
   const ccParts = [correoDirector, ...cadenaJerarquica].filter(function(c) { return c && c.length > 0; });
   // Eliminar duplicados (el director ya viene en la cadena jerárquica)
@@ -563,7 +952,12 @@ if (10 < colStart || 10 > colEnd) return;
 // ============================================================
 
 /**
- * Revisa diariamente los lotes estancados y busca el correo real 
+ * @deprecated Reemplazada por ejecutarRecordatoriosDiarios() que consolida
+ * ambos recordatorios (paz y salvo + error en terceros) en una sola ejecución
+ * con lecturas únicas a Hoja_Control y Control_General.
+ * Se conserva temporalmente para seguridad de rollback.
+ *
+ * Revisa diariamente los lotes estancados y busca el correo real
  * haciendo el cruce entre Control_General y Hoja_Control.
  */
 function enviarRecordatoriosPazYSalvoDiario() {
@@ -662,7 +1056,7 @@ function enviarRecordatoriosPazYSalvoDiario() {
         continue;
       }
 
-      const nombreComercial = _correoANombre(emailReal);
+      const nombreComercial = emailANombre(emailReal, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
       const cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
       
       // CC solo a la cadena jerárquica directa del comercial (Director + Gerente)
@@ -721,6 +1115,11 @@ function enviarRecordatoriosPazYSalvoDiario() {
 // ============================================================
 
 /**
+ * @deprecated Reemplazada por ejecutarRecordatoriosDiarios() que consolida
+ * ambos recordatorios (paz y salvo + error en terceros) en una sola ejecución
+ * con lecturas únicas a Hoja_Control y Control_General.
+ * Se conserva temporalmente para seguridad de rollback.
+ *
  * Revisa diariamente los lotes en estado "ERROR EN TERCEROS" y envía
  * recordatorio al comercial (CC líderes + director) para que corrija
  * los datos de terceros. Mismo escalamiento que paz y salvo (3/7/14/21 días).
@@ -818,7 +1217,7 @@ function enviarRecordatoriosErrorTercerosDiario() {
         continue;
       }
 
-      const nombreComercial = _correoANombre(emailReal);
+      const nombreComercial = emailANombre(emailReal, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
       var cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
       // CC solo a la cadena jerárquica directa del comercial (Director + Gerente)
       var ccs = [...new Set(cadenaJerarquica)].filter(function(c) { return c && c.length > 0; }).join(',');
@@ -889,25 +1288,7 @@ function _obtenerDatosCorreos_() {
   return _cacheHojaCorreos_;
 }
 
-function _correoANombre(correo) {
-  if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
-  const partes = correo.split("@")[0].split(".");
-  // Solo el primer nombre, capitalizado (para saludos en correos)
-  return partes[0].charAt(0).toUpperCase() + partes[0].slice(1).toLowerCase();
-}
-
-function _correoANombreCompleto(correo) {
-  if (!correo || typeof correo !== 'string' || !correo.includes("@")) return "Ejecutivo Comercial";
-  return correo.split("@")[0].split(".").map(p => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
-}
-
-function obtenerNombreDeComercial(email) {
-  return _correoANombre(email);
-}
-
-function obtenerNombreCompletoDeComercial(email) {
-  return _correoANombreCompleto(email);
-}
+// Funciones de nombre eliminadas — ahora se usa emailANombre(email, formato) de Utilidades_Nombres.js
 
 // obtenerCorreoDeDirector — migrado a Servicios_AuthService.js (lee de USUARIOS, no de CORREOS)
 // obtenerCorreoDeBackup — ELIMINADA (reemplazada por CC al Director automático via obtenerCorreoDeDirector)
@@ -931,7 +1312,7 @@ function obtenerNombreCompletoDeComercial(email) {
  */
 function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, urlDrive, filasParaInsertar) {
 
-  const nombreComercial = obtenerNombreDeComercial(emailComercial);
+  const nombreComercial = emailANombre(emailComercial, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
   // ── CC solo a la cadena jerárquica directa del comercial (Director + Gerente) ──

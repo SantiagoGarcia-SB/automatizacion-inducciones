@@ -8,24 +8,7 @@
 var ID_HOJA_CONTROL      = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
 var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
 var ID_CARPETA_RAIZ      = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
-var CORREOS_LIDERES   = null; // Se resuelve dinámicamente via obtenerCorreosSuperiores()
 
-/**
- * Retorna los correos de líderes activos (DIRECTOR, GERENTE, ADMIN).
- * Alias de transición: delega a obtenerCorreosSuperiores() definida en AuthService.
- * Usa cache en memoria para evitar lecturas repetidas en la misma ejecución.
- * @returns {string[]}
- */
-function obtenerCorreosLideres() {
-  if (CORREOS_LIDERES !== null) return CORREOS_LIDERES;
-  try {
-    CORREOS_LIDERES = obtenerCorreosSuperiores();
-  } catch (e) {
-    Logger.log("WARN: No se pudo leer superiores de USUARIOS, usando fallback vacío. " + e.message);
-    CORREOS_LIDERES = [];
-  }
-  return CORREOS_LIDERES;
-}
 var MIME_EXCEL_VALIDOS = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel"
@@ -61,21 +44,27 @@ function doGet(e) {
     var usuario = obtenerUsuarioActual_v2();
     var datosIniciales = { usuario: usuario };
 
-    // Pre-cargar resumen y lotes SOLO si ya están en CacheService (lectura rápida, no bloquea).
-    // En cache-miss, el cliente los pide vía google.script.run con skeleton normal.
+    // Pre-cargar resumen y lotes SOLO desde CacheWrapper (lectura rápida, no bloquea).
     // NUNCA se invoca obtenerResumenComercial() ni obtenerLotesDeComercial() aquí.
+    // La ÚNICA lectura a Sheets permitida en doGet es obtenerUsuarioActual_v2() (TTL 120s).
+    // En cache-miss o error, el cliente los pide vía google.script.run con skeleton.
     if (usuario && usuario.autorizado) {
-      var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
+      try {
+        var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
 
-      // Resumen: cache-hit → inyectar, cache-miss → null (cliente pide async)
-      var resumenKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
-      var resumenCached = CacheWrapper_getJSON(resumenKey);
-      datosIniciales.resumen = resumenCached || null;
+        // Resumen: cache-hit → inyectar, cache-miss → null (cliente pide async)
+        var resumenKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+        datosIniciales.resumen = CacheWrapper_getJSON(resumenKey) || null;
 
-      // Lotes: misma lógica — inyectar si cache-hit, null si cache-miss
-      var lotesKey = verTodos ? 'LOTES_GLOBAL' : 'LOTES_' + usuario.email;
-      var lotesCached = CacheWrapper_getJSON(lotesKey);
-      datosIniciales.lotes = lotesCached || null;
+        // Lotes: misma lógica — inyectar si cache-hit, null si cache-miss
+        var lotesKey = verTodos ? 'LOTES_GLOBAL' : 'LOTES_' + usuario.email;
+        datosIniciales.lotes = CacheWrapper_getJSON(lotesKey) || null;
+      } catch (err) {
+        // Degradación elegante: si CacheWrapper falla, el frontend carga async.
+        // No interrumpir entrega del HTML (Req 7.5).
+        datosIniciales.resumen = null;
+        datosIniciales.lotes = null;
+      }
     }
 
     template.datosIniciales = JSON.stringify(datosIniciales);
@@ -470,7 +459,7 @@ function motorDeAuditoria(formData) {
     const fechaId         = Utilities.formatDate(ts, "GMT-5", "d/M/yyyy");
     const horaMin         = Utilities.formatDate(ts, "GMT-5", "HHmm");
     const idLote          = fechaId + "-" + formData.poliza + "-" + horaMin;
-    const nombreComercial = obtenerNombreCompletoDeComercial(usuarioEmail).toUpperCase();
+    const nombreComercial = emailANombre(usuarioEmail, 'MAYUSCULAS');
     const estadoCartera   = "PAZ Y SALVO";
     const filasParaInsertar = [];
 
@@ -907,7 +896,7 @@ function obtenerLotesDelUsuario() {
  */
 function obtenerNombreUsuarioActual() {
   const email = Session.getActiveUser().getEmail();
-  return obtenerNombreDeComercial(email);
+  return emailANombre(email, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
 }
 
 /**
@@ -917,7 +906,7 @@ function obtenerNombreUsuarioActual() {
  */
 function obtenerResumenSemanal() {
   const email = Session.getActiveUser().getEmail();
-  const nombre = obtenerNombreDeComercial(email);
+  const nombre = emailANombre(email, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
   const resumen = { radicados: 0, enAnalisis: 0, pendientePS: 0, terminados: 0 };
 
   const ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);

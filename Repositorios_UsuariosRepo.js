@@ -11,7 +11,7 @@
  *   - UsuariosRepo_buscarPorEmail(email)
  *   - UsuariosRepo_guardar(datos, esNuevo)
  *   - UsuariosRepo_getEmailsEquipoVisible(emailUsuario, rol)
- *   - UsuariosRepo_getCorreosSuperiores()
+ *   - UsuariosRepo_getCorreosSuperiores() [deprecated — usar obtenerCorreosSuperiores() de AuthService]
  * ============================================================
  */
 
@@ -59,7 +59,7 @@ function UsuariosRepo_guardar(datos, esNuevo) {
 
   try {
     var hojaId = getHojaControlId();
-    var ss = SpreadsheetApp.openById(hojaId);
+    var ss = SpreadsheetRegistry_get(hojaId);
     var hoja = ss.getSheetByName('USUARIOS');
 
     if (!hoja) {
@@ -174,59 +174,11 @@ function UsuariosRepo_guardar(datos, esNuevo) {
 
 /**
  * Lee todos los usuarios de la pestaña USUARIOS (nuevo esquema 7 columnas).
+ * Delega a MemoCache_getUsuarios() para aprovechar la memoización por ejecución.
  * @returns {UsuarioRecord[]}
  */
 function UsuariosRepo_leerTodos() {
-  var hojaId = getHojaControlId();
-  var ss = SpreadsheetApp.openById(hojaId);
-  var hoja = ss.getSheetByName('USUARIOS');
-
-  if (!hoja) {
-    _registrarEvento_('ERROR', 'Repositorios_UsuariosRepo.js', 'Pestaña USUARIOS no encontrada', '');
-    return [];
-  }
-
-  var datos = hoja.getDataRange().getValues();
-  if (datos.length < 2) return [];
-
-  var resultado = [];
-  for (var i = 1; i < datos.length; i++) {
-    var fila = datos[i];
-    var emailPrimario = String(fila[COL_EMAIL] || '').toLowerCase().trim();
-    if (!emailPrimario) continue;
-
-    var rolRaw = String(fila[COL_ROL] || '').toUpperCase().trim();
-    var activoRaw = fila[COL_ACTIVO];
-    var activo = (activoRaw === true || activoRaw === 'TRUE' || activoRaw === 'true');
-    var cupo = Number(fila[COL_CUPO]) || 0;
-    var emailDirector = String(fila[COL_EMAIL_DIRECTOR] || '').toLowerCase().trim();
-    var emailGerente = String(fila[COL_EMAIL_GERENTE] || '').toLowerCase().trim();
-
-    // Parsear EMAILS_ALTERNOS: separar por coma, normalizar a minúsculas, eliminar vacíos
-    var emailsAlternosRaw = String(fila[COL_EMAILS_ALTERNOS] || '').trim();
-    var emailsAlternos = [];
-    if (emailsAlternosRaw) {
-      var partes = emailsAlternosRaw.split(',');
-      for (var j = 0; j < partes.length; j++) {
-        var alterno = partes[j].toLowerCase().trim();
-        if (alterno) {
-          emailsAlternos.push(alterno);
-        }
-      }
-    }
-
-    resultado.push({
-      email: emailPrimario,
-      rol: rolRaw,
-      activo: activo,
-      cupo: cupo,
-      emailDirector: emailDirector,
-      emailGerente: emailGerente,
-      emailsAlternos: emailsAlternos
-    });
-  }
-
-  return resultado;
+  return MemoCache_getUsuarios();
 }
 
 /**

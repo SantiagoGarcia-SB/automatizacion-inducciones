@@ -20,11 +20,17 @@ import { resolve } from 'path';
 const SOURCE_PATH = resolve(__dirname, '../../Repositorios_ControlGeneralRepo.js');
 const sourceCode = readFileSync(SOURCE_PATH, 'utf-8');
 
+const UTILS_NOMBRES_PATH = resolve(__dirname, '../../Utilidades_Nombres.js');
+const utilsNombresCode = readFileSync(UTILS_NOMBRES_PATH, 'utf-8');
+
 /**
  * Loads obtenerLotesDeComercial and helpers into globalThis by eval'ing the source.
  * This simulates the GAS runtime where all functions share global scope.
  */
 function loadSource() {
+  // Load Utilidades_Nombres first (provides emailANombre used by _nombreComercialParaBusqueda)
+  const wrappedUtils = `(function() { ${utilsNombresCode}\n; globalThis.emailANombre = emailANombre; globalThis.FORMATO_NOMBRE = FORMATO_NOMBRE; })()`;
+  eval(wrappedUtils);
   const wrapped = `(function() { ${sourceCode}\n; globalThis.obtenerLotesDeComercial = obtenerLotesDeComercial; globalThis._nombreComercialParaBusqueda = _nombreComercialParaBusqueda; globalThis._resolverNombresFiltro = _resolverNombresFiltro; })()`;
   eval(wrapped);
 }
@@ -75,6 +81,7 @@ function setupEnvironment(dataRows) {
 
   globalThis.SpreadsheetApp = app;
   globalThis.getHojaControlId = () => 'mock-id';
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
   globalThis.Utilities = {
     formatDate: function(date, tz, fmt) {
       if (date instanceof Date) {
@@ -96,6 +103,7 @@ describe('obtenerLotesDeComercial() — ventana de lectura', () => {
   beforeEach(() => {
     delete globalThis.SpreadsheetApp;
     delete globalThis.getHojaControlId;
+    delete globalThis.SpreadsheetRegistry_get;
     delete globalThis.Utilities;
     delete globalThis.obtenerLotesDeComercial;
     delete globalThis._nombreComercialParaBusqueda;
@@ -105,6 +113,7 @@ describe('obtenerLotesDeComercial() — ventana de lectura', () => {
   afterEach(() => {
     delete globalThis.SpreadsheetApp;
     delete globalThis.getHojaControlId;
+    delete globalThis.SpreadsheetRegistry_get;
     delete globalThis.Utilities;
     delete globalThis.obtenerLotesDeComercial;
     delete globalThis._nombreComercialParaBusqueda;

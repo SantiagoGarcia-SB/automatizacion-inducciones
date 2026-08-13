@@ -76,18 +76,25 @@ function _bloque_resultados_enviados_(resultados) {
 }
 
 /**
- * Lee Control_General y registro analisis una sola vez cada una y agrega las
- * métricas del reporte de gestión.
+ * Lee Control_General, Hoja_Control, registro analisis e Historico_Envios
+ * usando SpreadsheetRegistry para garantizar una sola apertura por libro.
+ *
+ * Libros abiertos:
+ *   - ID_HOJA_CONTROL     → Control_General + Hoja_Control
+ *   - ID_ARCHIVO_ANALISIS → registro analisis + Historico_Envios
+ *
  * @param {Date} [fechaRef]  Fecha a usar como "hoy" para las métricas del día
  *   (analizadasHoy, resultadosEnviadosHoy). Por defecto la fecha actual — el
  *   envío real (enviarReporteGestionInducciones) siempre usa el valor por
  *   defecto; el parámetro solo existe para pruebas manuales con otra fecha.
+ * @sheets_read 2 (1 openById por libro vía SpreadsheetRegistry)
  */
 function _recolectarMetricasGestion_(fechaRef) {
   const fecha = fechaRef || new Date();
   const IDX = { idLote: 0, fechaIngreso: 2, estado: 9, comercial: 10 };
 
-  const ssControl    = retry(() => SpreadsheetApp.openById(ID_HOJA_CONTROL));
+  // ── 1. Libro de control: una sola apertura para Control_General + Hoja_Control ──
+  const ssControl    = SpreadsheetRegistry_get(ID_HOJA_CONTROL);
   const hojaControl  = ssControl.getSheetByName("Control_General");
   const dataControl  = retry(() => hojaControl.getDataRange().getValues());
 
@@ -116,7 +123,7 @@ function _recolectarMetricasGestion_(fechaRef) {
   }
 
   // Lotes activos = tienen al menos un contrato en un estado distinto de TERMINADO.
-  // Cruzamos con Hoja_Control para obtener el email real del comercial (col B por ID Lote en col F)
+  // Cruzamos con Hoja_Control (misma instancia ssControl) para obtener el email real del comercial
   const hojaHC = ssControl.getSheetByName("Hoja_Control");
   const mapaLoteEmail = {};
   if (hojaHC) {
@@ -132,7 +139,7 @@ function _recolectarMetricasGestion_(fechaRef) {
     .filter(l => Object.keys(l.estados).some(e => e !== "TERMINADO"))
     .map(l => ({
       idLote:         l.idLote,
-      comercial:      _correoANombreCompleto(mapaLoteEmail[l.idLote] || l.comercial),
+      comercial:      emailANombre(mapaLoteEmail[l.idLote] || l.comercial, 'COMPLETO'),
       fechaIngresoStr: l.fechaIngreso instanceof Date
         ? Utilities.formatDate(l.fechaIngreso, "GMT-5", "d/MM/yyyy")
         : String(l.fechaIngreso || ""),
@@ -141,20 +148,62 @@ function _recolectarMetricasGestion_(fechaRef) {
     }))
     .sort((a, b) => (a.fechaIngresoStr < b.fechaIngresoStr ? 1 : -1));
 
-  // "Resultados de lotes enviados": viene de la hoja "Historico_Envios" (mismo
-  // libro que registro analisis), donde cada fila es el resultado final que
-  // la aseguradora emitió para un lote completo (aprobadas/negadas/resultado).
-  const resultadosEnviadosHoy = _recolectarResultadosEnviadosHoy_(fecha);
+  // ── 2. Libro de análisis: una sola apertura para registro analisis + Historico_Envios ──
+  const ssAnalisis   = SpreadsheetRegistry_get(ID_ARCHIVO_ANALISIS);
 
-  // "Analizadas hoy": registro analisis, REGISTRO ANALISTA SAI diligenciado con
-  // Fecha Evaluacion = hoy.
-  const ssAnalisis   = retry(() => SpreadsheetApp.openById(ID_ARCHIVO_ANALISIS));
+  // ── 2a. Resultados enviados hoy (Historico_Envios) ──
+  const resultadosEnviadosHoy = (function() {
+    const resultado = { lotes: 0, solicitudesAprobadas: 0, solicitudesNegadas: 0, porResultado: {} };
+
+    const hojaHistorico = ssAnalisis.getSheetByName("Historico_Envios");
+    if (!hojaHistorico) {
+      Logger.log("Aviso: no se encontró la hoja 'Historico_Envios'. 'Resultados enviados hoy' quedará en 0.");
+      return resultado;
+    }
+
+    const datos      = retry(() => hojaHistorico.getDataRange().getValues());
+    const encHist    = datos[0];
+
+    const colFecha     = encHist.indexOf("Fecha de Emisión");
+    const colAprobadas = encHist.indexOf("Cantidad Solicitudes Aprobadas");
+    const colNegadas   = encHist.indexOf("Cantidad Solicitudes Negadas");
+    const colResultado = encHist.indexOf("Resultado Final Lote");
+
+    if (colFecha === -1) {
+      Logger.log("Aviso: no se encontró 'Fecha de Emisión' en 'Historico_Envios'. 'Resultados enviados hoy' quedará en 0.");
+      return resultado;
+    }
+
+    const hoyHist = new Date(fecha);
+    hoyHist.setHours(0, 0, 0, 0);
+
+    for (let i = 1; i < datos.length; i++) {
+      const fila       = datos[i];
+      const valorCrudo = fila[colFecha];
+      const f          = _normalizarFecha_(valorCrudo);
+
+      if (!f) continue;
+      if (f.getTime() !== hoyHist.getTime()) continue;
+
+      resultado.lotes++;
+      if (colAprobadas !== -1) resultado.solicitudesAprobadas += Number(fila[colAprobadas]) || 0;
+      if (colNegadas   !== -1) resultado.solicitudesNegadas   += Number(fila[colNegadas])   || 0;
+
+      if (colResultado !== -1) {
+        const valor = String(fila[colResultado] || "").trim() || "Sin dato";
+        resultado.porResultado[valor] = (resultado.porResultado[valor] || 0) + 1;
+      }
+    }
+
+    return resultado;
+  })();
+
+  // ── 2b. Analizadas hoy (registro analisis) ──
   const hojaAnalisis = ssAnalisis.getSheetByName("registro analisis");
   const dataAnalisis = retry(() => hojaAnalisis.getDataRange().getValues());
   const encabezados  = dataAnalisis[0];
 
-  const colRegistroSAI = encabezados.indexOf("REGISTRO ANALISTA SAI");
-  const colFechaEval   = encabezados.indexOf("Fecha Evaluacion");
+  const colFechaEval = encabezados.indexOf("Fecha Evaluacion");
 
   const hoy = new Date(fecha);
   hoy.setHours(0, 0, 0, 0);
@@ -184,16 +233,15 @@ function _recolectarMetricasGestion_(fechaRef) {
 }
 
 /**
- * Lee "Historico_Envios" (misma hoja de cálculo que registro analisis) y
- * agrega los resultados cuya "Fecha de Emisión" coincide con fechaRef: lotes
- * con resultado, total de solicitudes aprobadas/negadas, y desglose por
- * "Resultado Final Lote".
+ * @deprecated Lógica consolidada dentro de _recolectarMetricasGestion_().
+ * Se mantiene únicamente por si algún script manual la invoca directamente.
+ * Usa SpreadsheetRegistry_get para no duplicar aperturas.
  * @param {Date} [fechaRef]  Fecha a comparar contra "Fecha de Emisión". Por defecto hoy.
  */
 function _recolectarResultadosEnviadosHoy_(fechaRef) {
   const resultado = { lotes: 0, solicitudesAprobadas: 0, solicitudesNegadas: 0, porResultado: {} };
 
-  const ssAnalisis    = retry(() => SpreadsheetApp.openById(ID_ARCHIVO_ANALISIS));
+  const ssAnalisis    = SpreadsheetRegistry_get(ID_ARCHIVO_ANALISIS);
   const hojaHistorico = ssAnalisis.getSheetByName("Historico_Envios");
 
   if (!hojaHistorico) {
@@ -209,10 +257,6 @@ function _recolectarResultadosEnviadosHoy_(fechaRef) {
   const colNegadas   = encabezados.indexOf("Cantidad Solicitudes Negadas");
   const colResultado = encabezados.indexOf("Resultado Final Lote");
 
-  Logger.log("[DIAG] Encabezados reales de Historico_Envios: " + JSON.stringify(encabezados));
-  Logger.log("[DIAG] colFecha=" + colFecha + " colAprobadas=" + colAprobadas + " colNegadas=" + colNegadas + " colResultado=" + colResultado);
-  Logger.log("[DIAG] Filas de datos (sin encabezado): " + (datos.length - 1));
-
   if (colFecha === -1) {
     Logger.log("Aviso: no se encontró 'Fecha de Emisión' en 'Historico_Envios'. 'Resultados enviados hoy' quedará en 0.");
     return resultado;
@@ -220,21 +264,13 @@ function _recolectarResultadosEnviadosHoy_(fechaRef) {
 
   const hoy = new Date(fechaRef || new Date());
   hoy.setHours(0, 0, 0, 0);
-  Logger.log("[DIAG] Fecha de referencia normalizada (hoy/prueba): " + hoy);
 
   for (let i = 1; i < datos.length; i++) {
     const fila       = datos[i];
     const valorCrudo = fila[colFecha];
     const f          = _normalizarFecha_(valorCrudo);
 
-    if (i <= 4) { // solo las primeras filas, para no inundar el log
-      Logger.log("[DIAG] Fila " + (i + 1) + " — valor crudo: " + JSON.stringify(valorCrudo) +
-                 " (tipo: " + typeof valorCrudo + ", ¿es Date?: " + (valorCrudo instanceof Date) + ")" +
-                 " → normalizado: " + (f ? f.toString() : "null"));
-    }
-
     if (!f) continue;
-
     if (f.getTime() !== hoy.getTime()) continue;
 
     resultado.lotes++;
@@ -379,53 +415,7 @@ function enviarReporteGestionInducciones() {
   }
 }
 
-/**
- * Vista previa: arma el mismo correo y lo manda SOLO a quien ejecuta la
- * función (nunca a CORREOS_LIDERES), con [PRUEBA] en el asunto para que no
- * se confunda con un envío real. Selecciónala en el desplegable "Ejecutar"
- * para revisar cómo queda antes de activar el trigger diario.
- */
-function probarReporteGestion() {
-  const m = _recolectarMetricasGestion_();
-  const correo = _construirCorreoReporteGestion_(m);
-  const destinatario = Session.getActiveUser().getEmail();
 
-  MailApp.sendEmail({
-    to:       destinatario,
-    subject:  `[PRUEBA] ${correo.asunto}`,
-    htmlBody: correo.htmlBody,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador (prueba)"
-  });
-
-  Logger.log("Vista previa enviada solo a: " + destinatario);
-}
-
-/**
- * Vista previa con una fecha distinta a hoy — útil para cotejar días donde
- * SÍ hubo gestión (ej. ayer) mientras hoy está vacío. Cambia FECHA_PRUEBA
- * abajo cada vez que quieras revisar otro día y vuelve a ejecutar.
- * Igual que probarReporteGestion: solo se manda a quien la ejecuta, nunca a
- * CORREOS_LIDERES. No la usa ningún flujo de negocio real.
- */
-function probarReporteGestionConFecha() {
-  // ── Cambia esta fecha para cotejar otro día (año, mes 0-indexado, día) ──
-  const FECHA_PRUEBA = new Date(2026, 6, 24); // 24 de julio de 2026
-
-  const m = _recolectarMetricasGestion_(FECHA_PRUEBA);
-  const correo = _construirCorreoReporteGestion_(m, FECHA_PRUEBA);
-  const destinatario = Session.getActiveUser().getEmail();
-
-  MailApp.sendEmail({
-    to:       destinatario,
-    subject:  `[PRUEBA · fecha simulada] ${correo.asunto}`,
-    htmlBody: correo.htmlBody,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador (prueba)"
-  });
-
-  Logger.log("Vista previa con fecha simulada (" + FECHA_PRUEBA + ") enviada solo a: " + destinatario);
-}
 
 /**
  * Ejecutar UNA VEZ, manualmente, desde el editor de Apps Script para crear
@@ -490,17 +480,30 @@ function configurarTriggerReporteGestion() {
 /**
  * Cuenta lotes radicados agrupados por resultado (EXITOSO / FALLIDO) para un
  * comercial en un rango de fechas. Lee Hoja_Control columna D ("Resultado").
+ *
+ * Optimización (Req 4.5): acepta datos pre-cargados para evitar lecturas
+ * repetidas cuando se invoca para múltiples comerciales en el mismo ciclo.
+ *
  * @param {string} email - Email del comercial
  * @param {Date} fechaInicio
  * @param {Date} fechaFin
+ * @param {Array<Array>} [datosPreCargados] - Datos de Hoja_Control ya leídos (2D array con encabezados).
+ *   Si se provee, se usa directamente sin abrir ni leer la hoja.
+ *   Si no se provee, lee Hoja_Control via SpreadsheetRegistry_get (una sola apertura por ejecución).
  * @returns {{exitosos:number, fallidos:number, total:number}}
  */
-function contarRadicacionesPorResultadoEnRango(email, fechaInicio, fechaFin) {
-  var ss = SpreadsheetApp.openById(ID_HOJA_CONTROL);
-  var hoja = ss.getSheetByName("Hoja_Control");
-  if (!hoja) return { exitosos: 0, fallidos: 0, total: 0 };
+function contarRadicacionesPorResultadoEnRango(email, fechaInicio, fechaFin, datosPreCargados) {
+  var data;
 
-  var data = hoja.getDataRange().getValues();
+  if (datosPreCargados && datosPreCargados.length > 0) {
+    data = datosPreCargados;
+  } else {
+    var ss = SpreadsheetRegistry_get(ID_HOJA_CONTROL);
+    var hoja = ss.getSheetByName("Hoja_Control");
+    if (!hoja) return { exitosos: 0, fallidos: 0, total: 0 };
+    data = hoja.getDataRange().getValues();
+  }
+
   var emailLower = String(email || "").trim().toLowerCase();
   var lotesExitosos = new Set();
   var lotesFallidos = new Set();
@@ -799,12 +802,18 @@ function enviarReportesCierreMes() {
   var finMesMenos2    = new Date(ref.getFullYear(), ref.getMonth() - 2, 0, 23, 59, 59, 999);
   var nombreMesMenos2 = MESES_ES[inicioMesMenos2.getMonth()];
 
+  // Pre-cargar Hoja_Control una sola vez para contarRadicacionesPorResultadoEnRango
+  // (Req 4.5: evita N lecturas para N comerciales)
+  var ssControl = SpreadsheetRegistry_get(ID_HOJA_CONTROL);
+  var hojaHC = ssControl.getSheetByName("Hoja_Control");
+  var datosHojaControl = hojaHC ? hojaHC.getDataRange().getValues() : [];
+
   var enviados = 0;
   var fallidos = 0;
 
   comerciales.forEach(function(u) {
     try {
-      var nombreComercialMayus = obtenerNombreCompletoDeComercial(u.email).toUpperCase();
+      var nombreComercialMayus = emailANombre(u.email, 'MAYUSCULAS');
       var resumen           = obtenerResumenComercial(u.email);
       var radicadosEsteMes  = contarLotesRadicadosEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
       var radicadosMesAnt   = contarLotesRadicadosEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
@@ -812,10 +821,10 @@ function enviarReportesCierreMes() {
       var pendientesPS      = obtenerLotesPendientesPazYSalvo(nombreComercialMayus);
       var erroresTerceros   = obtenerErroresPendientesComercial(u.email);
 
-      // Datos de calidad por mes (exitosos vs fallidos)
-      var calidadMesMenos2 = contarRadicacionesPorResultadoEnRango(u.email, inicioMesMenos2, finMesMenos2);
-      var calidadMesAnt    = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
-      var calidadEsteMes   = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+      // Datos de calidad por mes (exitosos vs fallidos) — usa datos pre-cargados
+      var calidadMesMenos2 = contarRadicacionesPorResultadoEnRango(u.email, inicioMesMenos2, finMesMenos2, datosHojaControl);
+      var calidadMesAnt    = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin, datosHojaControl);
+      var calidadEsteMes   = contarRadicacionesPorResultadoEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin, datosHojaControl);
 
       // Capitalizar nombres de meses para las barras
       var capMesMenos2 = nombreMesMenos2.charAt(0).toUpperCase() + nombreMesMenos2.slice(1);
@@ -837,7 +846,7 @@ function enviarReportesCierreMes() {
       ]);
 
       var correo = _construirCorreoCierreMes_({
-        nombre: obtenerNombreDeComercial(u.email),
+        nombre: emailANombre(u.email, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial',
         nombreMes: rangos.mesReporte.nombre,
         nombreMesAnterior: rangos.mesComparacion.nombre,
         radicadosEsteMes: radicadosEsteMes,
@@ -908,7 +917,7 @@ function _enviarReportesCierreMesEquipo_(comerciales, rangos, inicioMesMenos2, f
 
       equiposPorDirector[emailDir].push({
         email: u.email,
-        nombre: obtenerNombreCompletoDeComercial(u.email),
+        nombre: emailANombre(u.email, 'COMPLETO'),
         radicadosEsteMes: radicadosEsteMes,
         radicadosMesAnt: radicadosMesAnt,
         terminados: resumen.terminados || 0,
@@ -934,7 +943,7 @@ function _enviarReportesCierreMesEquipo_(comerciales, rangos, inicioMesMenos2, f
     if (!director || !director.activo) return;
 
     var correo = _construirCorreoCierreMesEquipo_({
-      nombreDestinatario: obtenerNombreDeComercial(emailDirector),
+      nombreDestinatario: emailANombre(emailDirector, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial',
       rolDestinatario: 'Director',
       nombreMes: rangos.mesReporte.nombre,
       equipo: equipo
@@ -982,7 +991,7 @@ function _enviarReportesCierreMesEquipo_(comerciales, rangos, inicioMesMenos2, f
     if (!gerente || !gerente.activo) return;
 
     var correo = _construirCorreoCierreMesEquipo_({
-      nombreDestinatario: obtenerNombreDeComercial(emailGerente),
+      nombreDestinatario: emailANombre(emailGerente, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial',
       rolDestinatario: 'Gerente',
       nombreMes: rangos.mesReporte.nombre,
       equipo: equipo
@@ -1131,76 +1140,4 @@ function configurarTriggerReporteCierreMes() {
   Logger.log('Trigger creado: enviarReportesCierreMes — día 1 de cada mes, 7:00am (America/Bogota).');
 }
 
-/**
- * Prueba manual: arma el correo de cierre de mes con los datos REALES de un
- * comercial, pero lo manda SOLO a quien ejecuta la función (nunca al
- * comercial), con [PRUEBA] en el asunto. Cambia EMAIL_A_PROBAR abajo y
- * ejecuta desde el desplegable del editor antes de confiar en el botón real.
- */
-function probarReporteCierreMes() {
-  const EMAIL_A_PROBAR = 'CAMBIA_ESTE_EMAIL@segurosbolivar.com';
 
-  if (EMAIL_A_PROBAR.indexOf('CAMBIA_ESTE_EMAIL') !== -1) {
-    Logger.log('❌ Cambia EMAIL_A_PROBAR por el email real de un comercial antes de ejecutar.');
-    return;
-  }
-
-  const rangos = _rangosMesCierreYComparacion_();
-  const nombreComercialMayus = obtenerNombreCompletoDeComercial(EMAIL_A_PROBAR).toUpperCase();
-
-  // Rango del mes -2 para las barras de 3 meses
-  const ref = new Date();
-  const inicioMesMenos2 = new Date(ref.getFullYear(), ref.getMonth() - 3, 1, 0, 0, 0, 0);
-  const finMesMenos2    = new Date(ref.getFullYear(), ref.getMonth() - 2, 0, 23, 59, 59, 999);
-  const nombreMesMenos2 = MESES_ES[inicioMesMenos2.getMonth()];
-
-  const radicadosEsteMes  = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin);
-  const radicadosMesAnt   = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
-  const radicadosMesMenos2 = contarLotesRadicadosEnRango(EMAIL_A_PROBAR, inicioMesMenos2, finMesMenos2);
-
-  // Calidad por mes
-  const calidadMesMenos2 = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, inicioMesMenos2, finMesMenos2);
-  const calidadMesAnt    = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
-  const calidadEsteMes   = contarRadicacionesPorResultadoEnRango(EMAIL_A_PROBAR, rangos.mesReporte.inicio, rangos.mesReporte.fin);
-
-  const capMesMenos2 = nombreMesMenos2.charAt(0).toUpperCase() + nombreMesMenos2.slice(1);
-  const capMesAnt    = rangos.mesComparacion.nombre.charAt(0).toUpperCase() + rangos.mesComparacion.nombre.slice(1);
-  const capMesActual = rangos.mesReporte.nombre.charAt(0).toUpperCase() + rangos.mesReporte.nombre.slice(1);
-
-  const barrasRadicacion = _bloque_barras_radicacion_cierreMes_([
-    { nombre: capMesMenos2, valor: radicadosMesMenos2 },
-    { nombre: capMesAnt,    valor: radicadosMesAnt },
-    { nombre: capMesActual, valor: radicadosEsteMes }
-  ]);
-
-  const barrasCalidad = _bloque_barras_calidad_radicacion_([
-    { nombre: capMesMenos2, exitosos: calidadMesMenos2.exitosos, fallidos: calidadMesMenos2.fallidos },
-    { nombre: capMesAnt,    exitosos: calidadMesAnt.exitosos,    fallidos: calidadMesAnt.fallidos },
-    { nombre: capMesActual, exitosos: calidadEsteMes.exitosos,   fallidos: calidadEsteMes.fallidos }
-  ]);
-
-  const correo = _construirCorreoCierreMes_({
-    nombre: obtenerNombreDeComercial(EMAIL_A_PROBAR),
-    nombreMes: rangos.mesReporte.nombre,
-    nombreMesAnterior: rangos.mesComparacion.nombre,
-    radicadosEsteMes: radicadosEsteMes,
-    radicadosMesAnterior: radicadosMesAnt,
-    resumen: obtenerResumenComercial(EMAIL_A_PROBAR),
-    pendientesPS: obtenerLotesPendientesPazYSalvo(nombreComercialMayus),
-    erroresTerceros: obtenerErroresPendientesComercial(EMAIL_A_PROBAR),
-    barrasRadicacion: barrasRadicacion,
-    barrasCalidad: barrasCalidad
-  });
-
-  const destinatario = Session.getActiveUser().getEmail();
-
-  MailApp.sendEmail({
-    to:       destinatario,
-    subject:  `[PRUEBA · datos de ${EMAIL_A_PROBAR}] ${correo.asunto}`,
-    htmlBody: correo.htmlBody,
-    replyTo:  "noreply@ellibertador.co",
-    name:     "Inducciones · El Libertador (prueba)"
-  });
-
-  Logger.log('Vista previa con datos de ' + EMAIL_A_PROBAR + ' enviada solo a: ' + destinatario);
-}

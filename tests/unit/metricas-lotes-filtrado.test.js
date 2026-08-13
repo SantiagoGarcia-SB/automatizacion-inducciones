@@ -23,10 +23,21 @@ const MAPA_COLUMNAS = {
   codigoLote: 2,
   resultadoLote: 3,
   resultadoSolicitud: 4,
-  registroAnalistaSai: 5
+  registroAnalistaSai: 5,
+  sucursal: -1
 };
 
 const HEADERS = ['Fecha Lote', 'Solicitud Inquilino', 'codigo lote', 'RESULTADO LOTE', 'RESULTADO SOLICITUD', 'REGISTRO ANALISTA SAI'];
+
+// ─── Helper: construye fechaDesde y fechaHasta para un mes/año dado ──────────
+
+function rangoMes(mes, anio) {
+  var desde = new Date(anio, mes - 1, 1);
+  desde.setHours(0, 0, 0, 0);
+  var hasta = new Date(anio, mes, 0); // último día del mes
+  hasta.setHours(0, 0, 0, 0);
+  return { desde, hasta };
+}
 
 // ─── Setup ──────────────────────────────────────────────────────────────────────
 
@@ -40,6 +51,7 @@ function setupGlobals() {
   });
   globalThis.SpreadsheetApp = app;
   globalThis.getArchivoAnalisisId = () => 'mock-analisis-id';
+  globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
   globalThis.CacheService = { getScriptCache: () => ({ get: () => null, put: () => {} }) };
 
   globalThis._registrarEvento_ = function(nivel, modulo, mensaje, detalle) {
@@ -66,6 +78,7 @@ function loadSource() {
 function cleanupGlobals() {
   delete globalThis.CacheService;
   delete globalThis.SpreadsheetApp;
+  delete globalThis.SpreadsheetRegistry_get;
   delete globalThis.getArchivoAnalisisId;
   delete globalThis._registrarEvento_;
   delete globalThis.CacheWrapper_getJSON;
@@ -91,7 +104,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 31), 'SOL-003', 'LOTE-C', 'APROBADO', 'NEGADO', 'APROBADO'],     // Enero 2025 - último día
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(3);
     });
 
@@ -105,7 +119,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2024, 11, 31), 'SOL-003', 'LOTE-C', 'APROBADO', 'NEGADO', 'APROBADO'],    // Diciembre 2024
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
       expect(result[0].solicitudInquilino).toBe('SOL-001');
     });
@@ -118,7 +133,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 2, 1), 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],  // 1 de Marzo
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 3, 2025);
+      var { desde, hasta } = rangoMes(3, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
     });
 
@@ -130,7 +146,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2024, 1, 29), 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],  // 29 Feb 2024 (bisiesto)
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 2, 2024);
+      var { desde, hasta } = rangoMes(2, 2024);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
     });
 
@@ -142,7 +159,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 1, 1), 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],  // 1 Feb = fuera de enero
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(0);
     });
 
@@ -156,7 +174,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [fechaConHora, 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
       // El objeto Date en resultado debe tener hora 00:00:00
       expect(result[0].fechaLote.getHours()).toBe(0);
@@ -174,7 +193,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 15), 'SOL-002', 'LOTE-B', 'NEGADO', 'NEGADO', 'NEGADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
       expect(result[0].solicitudInquilino).toBe('SOL-002');
     });
@@ -187,7 +207,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [null, 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(0);
     });
 
@@ -199,7 +220,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [undefined, 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(0);
     });
 
@@ -212,7 +234,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         ['no es fecha', 'SOL-002', 'LOTE-B', 'NEGADO', 'NEGADO', 'NEGADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(0);
     });
 
@@ -226,7 +249,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         ['xyz', 'SOL-003', 'LOTE-C', 'APROBADO', 'NEGADO', 'APROBADO'],
       ];
 
-      _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(logEventos).toHaveLength(0);
     });
   });
@@ -240,7 +264,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 15), '  sol-001  ', ' lote-a ', '  aprobado  ', ' negado ', '  reconsiderado aprobado  '],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
       expect(result[0].solicitudInquilino).toBe('SOL-001');
       expect(result[0].codigoLote).toBe('LOTE-A');
@@ -257,7 +282,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 15), 12345, 67890, 'aprobado', 'negado', 'aprobado'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result[0].solicitudInquilino).toBe('12345');
       expect(result[0].codigoLote).toBe('67890');
     });
@@ -270,7 +296,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 15), '', null, undefined, '', ''],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(1);
       expect(result[0].solicitudInquilino).toBe('');
       expect(result[0].codigoLote).toBe('');
@@ -283,26 +310,30 @@ describe('_filtrarFilasPorPeriodo', () => {
   describe('Casos borde', () => {
     it('retorna array vacío si datos es null', () => {
       setupGlobals();
-      var result = _filtrarFilasPorPeriodo(null, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(null, MAPA_COLUMNAS, desde, hasta);
       expect(result).toEqual([]);
     });
 
     it('retorna array vacío si datos es undefined', () => {
       setupGlobals();
-      var result = _filtrarFilasPorPeriodo(undefined, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(undefined, MAPA_COLUMNAS, desde, hasta);
       expect(result).toEqual([]);
     });
 
     it('retorna array vacío si datos solo tiene headers (1 fila)', () => {
       setupGlobals();
       var datos = [HEADERS];
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toEqual([]);
     });
 
     it('retorna array vacío si datos es array vacío', () => {
       setupGlobals();
-      var result = _filtrarFilasPorPeriodo([], MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo([], MAPA_COLUMNAS, desde, hasta);
       expect(result).toEqual([]);
     });
 
@@ -312,7 +343,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         HEADERS,
         [new Date(2025, 0, 15), 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],
       ];
-      var result = _filtrarFilasPorPeriodo(datos, null, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, null, desde, hasta);
       expect(result).toEqual([]);
     });
 
@@ -324,7 +356,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2025, 0, 15), 'SOL-001', 'LOTE-A', 'APROBADO', 'APROBADO', 'APROBADO'],
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 1, 2025);
+      var { desde, hasta } = rangoMes(1, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result[0].fechaLote).toBeInstanceOf(Date);
       expect(result[0].fechaLote.getDate()).toBe(15);
       expect(result[0].fechaLote.getMonth()).toBe(0); // enero
@@ -341,7 +374,8 @@ describe('_filtrarFilasPorPeriodo', () => {
         [new Date(2026, 0, 1), 'SOL-003', 'LOTE-C', 'APROBADO', 'NEGADO', 'APROBADO'],  // Enero 2026 = fuera
       ];
 
-      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, 12, 2025);
+      var { desde, hasta } = rangoMes(12, 2025);
+      var result = _filtrarFilasPorPeriodo(datos, MAPA_COLUMNAS, desde, hasta);
       expect(result).toHaveLength(2);
     });
   });

@@ -850,12 +850,25 @@ var MetricasLotesView = (function() {
 
   /**
    * Carga las métricas del rango de fechas seleccionado desde el backend.
+   * Si los datos ya están pre-cargados en CacheManager (carga inicial), los usa directamente.
    */
   function _cargarMetricas() {
     if (_cargando) return;
 
     var rango = _obtenerRangoFechas();
     if (!rango) return;
+
+    // Verificar si ya tenemos datos pre-cargados para este rango exacto
+    var rangoPrecargado = CacheManager.get('metricas-lotes-rango');
+    var datosPrecargados = CacheManager.get('metricas-lotes');
+    if (datosPrecargados && rangoPrecargado &&
+        rangoPrecargado.fechaDesde === rango.fechaDesde &&
+        rangoPrecargado.fechaHasta === rango.fechaHasta) {
+      _renderizarResultados(datosPrecargados);
+      // Limpiar para que la siguiente consulta vaya al servidor
+      CacheManager.invalidar(['metricas-lotes', 'metricas-lotes-rango']);
+      return;
+    }
 
     _cargando = true;
     _deshabilitarFiltros();

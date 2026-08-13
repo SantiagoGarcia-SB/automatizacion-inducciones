@@ -20,20 +20,6 @@
 const VERTEX_CHUNK_SIZE = 100;
 
 /**
- * Diagnóstico manual: selecciónala en el desplegable "Ejecutar" del editor
- * y revisa el resultado en "Registro de ejecución". Prueba la cadena
- * completa (credenciales → OAuth2 → Vertex AI) sin pasar por un Excel real.
- * No la usa ningún flujo de negocio — se puede borrar cuando ya no se necesite.
- */
-function probarValidacionDestinoIA() {
-  const muestra = ["Peluquería", "comercializar", "Restaurante de comida rápida"];
-  const resultado = validarDestinosConIA_(muestra);
-
-  Logger.log("Degradado (Vertex AI no disponible): " + resultado.degradado);
-  Logger.log("Veredictos: " + JSON.stringify(resultado.mapa, null, 2));
-}
-
-/**
  * Crea el servicio OAuth2 que firma el JWT de la cuenta de servicio y
  * obtiene el access token de Vertex AI (scope cloud-platform).
  */

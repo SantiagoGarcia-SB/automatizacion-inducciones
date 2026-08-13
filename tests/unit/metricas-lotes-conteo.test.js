@@ -20,6 +20,7 @@ function setupGlobals() {
   globalThis.CacheWrapper_getJSON = function() { return null; };
   globalThis.CacheWrapper_putJSON = function() {};
   globalThis.SpreadsheetApp = { openById: function() { return { getSheetByName: function() { return null; } }; } };
+  globalThis.SpreadsheetRegistry_get = function() { return { getSheetByName: function() { return null; } }; };
   globalThis.getArchivoAnalisisId = function() { return 'mock-id'; };
   globalThis.CacheService = { getScriptCache: function() { return { get: function() { return null; }, put: function() {} }; } };
 
@@ -42,6 +43,7 @@ function cleanupGlobals() {
   delete globalThis.CacheWrapper_getJSON;
   delete globalThis.CacheWrapper_putJSON;
   delete globalThis.SpreadsheetApp;
+  delete globalThis.SpreadsheetRegistry_get;
   delete globalThis.getArchivoAnalisisId;
   delete globalThis.CacheService;
   delete globalThis._calcularLotesAprobadosNegados;
@@ -215,25 +217,25 @@ describe('_calcularLotesAprobadosNegados', () => {
     it('retorna {lotesAprobados: 0, lotesNegados: 0} para array vacío', () => {
       setupGlobals();
       var result = _calcularLotesAprobadosNegados([]);
-      expect(result).toEqual({ lotesAprobados: 0, lotesNegados: 0 });
+      expect(result).toEqual({ totalLotes: 0, lotesAprobados: 0, lotesNegados: 0, lotesEnProceso: 0 });
     });
 
     it('retorna {lotesAprobados: 0, lotesNegados: 0} para null', () => {
       setupGlobals();
       var result = _calcularLotesAprobadosNegados(null);
-      expect(result).toEqual({ lotesAprobados: 0, lotesNegados: 0 });
+      expect(result).toEqual({ totalLotes: 0, lotesAprobados: 0, lotesNegados: 0, lotesEnProceso: 0 });
     });
 
     it('retorna {lotesAprobados: 0, lotesNegados: 0} para undefined', () => {
       setupGlobals();
       var result = _calcularLotesAprobadosNegados(undefined);
-      expect(result).toEqual({ lotesAprobados: 0, lotesNegados: 0 });
+      expect(result).toEqual({ totalLotes: 0, lotesAprobados: 0, lotesNegados: 0, lotesEnProceso: 0 });
     });
 
     it('retorna {lotesAprobados: 0, lotesNegados: 0} para no-array', () => {
       setupGlobals();
       var result = _calcularLotesAprobadosNegados('not an array');
-      expect(result).toEqual({ lotesAprobados: 0, lotesNegados: 0 });
+      expect(result).toEqual({ totalLotes: 0, lotesAprobados: 0, lotesNegados: 0, lotesEnProceso: 0 });
     });
   });
 });

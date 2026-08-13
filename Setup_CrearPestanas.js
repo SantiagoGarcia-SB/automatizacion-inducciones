@@ -69,7 +69,7 @@ function crearPestanaUsuarios() {
       if (!emailEjecutivo) continue;
 
       // Derivar nombre del email (nombre.apellido@dominio → Nombre Apellido)
-      var nombre = _derivarNombreDeEmail(emailEjecutivo);
+      var nombre = emailANombre(emailEjecutivo, 'COMPLETO');
 
       filasNuevas.push([
         emailEjecutivo.toLowerCase(),
@@ -114,7 +114,7 @@ function _agregarLideres(hoja, numCols) {
     emailsExistentes[String(datosExistentes[i][0]).toLowerCase()] = true;
   }
 
-  var lideres = obtenerCorreosLideres();
+  var lideres = obtenerCorreosSuperiores();
   var filasNuevas = [];
 
   for (var j = 0; j < lideres.length; j++) {
@@ -123,7 +123,7 @@ function _agregarLideres(hoja, numCols) {
 
     filasNuevas.push([
       email,
-      _derivarNombreDeEmail(email),
+      emailANombre(email, 'COMPLETO'),
       'LIDER',
       0, '', '', false, true
     ]);
@@ -158,7 +158,7 @@ function _agregarAdmin(hoja, numCols) {
   var ultimaFila = hoja.getLastRow();
   hoja.getRange(ultimaFila + 1, 1, 1, numCols).setValues([[
     BCC_AUDITORIA.toLowerCase(),
-    _derivarNombreDeEmail(BCC_AUDITORIA),
+    emailANombre(BCC_AUDITORIA, 'COMPLETO'),
     'ADMIN',
     0, '', '', false, true
   ]]);
@@ -243,22 +243,4 @@ function crearPestanaErroresTerceros() {
 //  UTILIDADES
 // ============================================================
 
-/**
- * Deriva un nombre legible a partir de un email corporativo.
- * Ejemplo: "santiago.garcia@segurosbolivar.com" → "Santiago Garcia"
- * @param {string} email
- * @returns {string}
- */
-function _derivarNombreDeEmail(email) {
-  if (!email || typeof email !== 'string') return '';
-  var local = email.split('@')[0] || '';
-  var partes = local.split('.');
-  var resultado = [];
-  for (var i = 0; i < partes.length; i++) {
-    var p = partes[i].trim();
-    if (p.length > 0) {
-      resultado.push(p.charAt(0).toUpperCase() + p.slice(1).toLowerCase());
-    }
-  }
-  return resultado.join(' ');
-}
+// _derivarNombreDeEmail eliminada — ahora se usa emailANombre(email, 'COMPLETO') de Utilidades_Nombres.js

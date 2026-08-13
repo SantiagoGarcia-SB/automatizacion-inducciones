@@ -408,25 +408,94 @@ function inicializarApp() {
   }
 
   APP_USUARIO = usuario;
+
+  // Preparar header y menú en DOM (boot overlay sigue tapando todo)
   renderizarHeader(usuario);
   renderizarMenu(usuario.rol);
-  _ocultarBootOverlay();
 
-  // Cache local de datos pre-cargados
+  // Cache local de datos pre-cargados desde doGet
   if (initData.resumen) CacheManager.set('dashboard', initData.resumen);
   if (initData.lotes) CacheManager.set('lotes', initData.lotes.datos || initData.lotes);
 
-  // Renderizar dashboard inmediatamente con datos pre-cargados (0 latencia)
+  // ── 1. Dashboard: splash espera solo por esto ──
+  var promesaResumen;
   if (CacheManager.get('dashboard')) {
-    _renderizarDashboardConDatos(CacheManager.get('dashboard'));
-    // Activar Línea de Vida con los datos del resumen
-    if (typeof actualizarLineasDeVida === 'function') {
-      actualizarLineasDeVida(usuario.rol, CacheManager.get('dashboard'));
-    }
+    promesaResumen = Promise.resolve(CacheManager.get('dashboard'));
   } else {
-    _mostrarSkeletonDashboard();
-    cargarDashboard();
+    promesaResumen = callServer('api_obtenerResumenDashboard').then(function(r) {
+      CacheManager.set('dashboard', r);
+      return r;
+    });
   }
+
+  promesaResumen
+    .then(function(resumen) {
+      if (resumen) {
+        _renderizarDashboardConDatos(resumen);
+        if (typeof actualizarLineasDeVida === 'function') {
+          actualizarLineasDeVida(usuario.rol, resumen);
+        }
+      }
+      _ocultarBootOverlay();
+    })
+    .catch(function(err) {
+      console.error('Error cargando dashboard inicial:', err);
+      _ocultarBootOverlay();
+      cargarDashboard();
+    });
+
+  // ── 2. Métricas lotes: background (no bloquea splash) ──
+  var ROLES_METRICAS = ['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER'];
+  if (usuario.rol && ROLES_METRICAS.indexOf(usuario.rol.toUpperCase()) !== -1) {
+    var hoy = new Date();
+    var primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    var fechaDesde = _formatearFechaISOUtil(primerDia);
+    var fechaHasta = _formatearFechaISOUtil(hoy);
+
+    callServer('api_obtenerMetricasLotes', fechaDesde, fechaHasta)
+      .then(function(datos) {
+        CacheManager.set('metricas-lotes', datos);
+        CacheManager.set('metricas-lotes-rango', { fechaDesde: fechaDesde, fechaHasta: fechaHasta });
+      })
+      .catch(function() { /* silencioso — se cargará al navegar */ });
+  }
+
+  // ── 3. Lotes: background (no bloquea splash) ──
+  if (!initData.lotes) {
+    _prefetchLotesEnBackground();
+  }
+}
+
+/** Utilidad: formatea Date a YYYY-MM-DD */
+function _formatearFechaISOUtil(fecha) {
+  var y = fecha.getFullYear();
+  var m = String(fecha.getMonth() + 1).padStart(2, '0');
+  var d = String(fecha.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+/**
+ * Pre-carga los lotes en background cuando doGet no los entregó (cache-miss).
+ * No afecta la UI actual — solo llena CacheManager para que al navegar
+ * a "lotes" el usuario vea los datos sin espera adicional.
+ * Si la carga falla, se ignora silenciosamente (cargarMisLotes lo reintentará).
+ */
+var _prefetchLotesPromise = null;
+
+function _prefetchLotesEnBackground() {
+  _prefetchLotesPromise = callServer('api_obtenerTodosLosLotes')
+    .then(function(datos) {
+      _prefetchLotesPromise = null;
+      if (datos && !CacheManager.get('lotes')) {
+        CacheManager.set('lotes', datos);
+      }
+      return datos;
+    })
+    .catch(function(err) {
+      _prefetchLotesPromise = null;
+      // Silencioso: cargarMisLotes hará su propio intento cuando el usuario navegue
+      return null;
+    });
 }
 
 /** Control de navegación — evita que respuestas tardías sobreescriban la vista actual */
@@ -501,7 +570,10 @@ function navegarA(seccion) {
   _navId++;
   var miNavId = _navId;
 
-  mostrarVista('viewLoading');
+  // Métricas Lotes tiene su propio container HTML pre-renderizado — no necesita viewLoading
+  if (seccion !== 'metricas-lotes') {
+    mostrarVista('viewLoading');
+  }
 
   // Marcar como activo
   var link = document.querySelector('[data-view="' + seccion + '"]');
@@ -996,12 +1068,16 @@ function cargarMisLotes(pagina) {
       + '<button class="btn btn--primary" onclick="cargarMisLotes(1)">Reintentar</button></div>');
   }, 15000);
 
-  // Primera carga: pedir TODOS los lotes al servidor (sin filtro, sin paginación servidor)
-  callServer('api_obtenerTodosLosLotes')
+  // Reutilizar prefetch en vuelo si existe (evita llamada duplicada)
+  var promesa = _prefetchLotesPromise || callServer('api_obtenerTodosLosLotes');
+
+  promesa
     .then(function(datos) {
       clearTimeout(timeoutId);
       if (_seccionActiva !== 'lotes') return;
-      CacheManager.set('lotes', datos || []);
+      if (!CacheManager.get('lotes')) {
+        CacheManager.set('lotes', datos || []);
+      }
       _renderizarLotesFiltrados();
     })
     .catch(function(err) {
@@ -1445,7 +1521,7 @@ function _marcarErrorTerceros(idx) {
   html += '</div>'
     + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;">'
     + '<button class="btn btn--ghost" onclick="_cerrarModalError()">Cancelar</button>'
-    + '<button class="btn btn--danger" onclick="_enviarErrorTerceros(\'' + s.uuid + '\')">Guardar error y notificar</button>'
+    + '<button class="btn btn--danger" onclick="_enviarErrorTerceros(\'' + s.uuid + '\', ' + (s.fila || 0) + ')">Guardar error y notificar</button>'
     + '</div></div>';
 
   modal.innerHTML = html;
@@ -1472,7 +1548,7 @@ function _toggleReqs(id) {
   document.getElementById('et_reqs_' + id).style.display = checked ? 'block' : 'none';
 }
 
-function _enviarErrorTerceros(uuid) {
+function _enviarErrorTerceros(uuid, filaNum) {
   // Recoger datos del formulario
   var participantes = [];
   var checks = document.querySelectorAll('[id^="et_check_"]');
@@ -1502,7 +1578,7 @@ function _enviarErrorTerceros(uuid) {
   var btnErr = document.querySelector('#modalErrorTerceros .btn--danger');
   if (btnErr) { btnErr.disabled = true; btnErr.textContent = '⏳ Guardando...'; }
 
-  callServer('api_marcarErrorTerceros', uuid, participantes, nota)
+  callServer('api_marcarErrorTerceros', uuid, participantes, nota, filaNum || undefined)
     .then(function(res) {
       _cerrarModalError();
       if (res && res.ok) {
