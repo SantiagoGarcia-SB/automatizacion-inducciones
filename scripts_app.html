@@ -377,6 +377,23 @@ var MENUS_POR_ROL = {
     { id: 'sep2', icon: '', label: '---' },
     { id: 'logs', icon: '🔧', label: 'Logs sistema' },
     { id: 'config', icon: '⚙️', label: 'Configuración' }
+  ],
+  ASESOR: [
+    { id: 'dashboard', icon: '📊', label: 'Inicio' },
+    { id: 'radicar', icon: '📤', label: 'Radicar' },
+    { id: 'lotes', icon: '📋', label: 'Lotes' },
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
+    { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
+    { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
+    { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
+    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
+    { id: 'sep1', icon: '', label: '---' },
+    { id: 'usuarios', icon: '👥', label: 'Usuarios' },
+    { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
+    { id: 'reportes', icon: '📈', label: 'Reportes' },
+    { id: 'sep2', icon: '', label: '---' },
+    { id: 'logs', icon: '🔧', label: 'Logs sistema' },
+    { id: 'config', icon: '⚙️', label: 'Configuración' }
   ]
 };
 
@@ -445,7 +462,7 @@ function inicializarApp() {
     });
 
   // ── 2. Métricas: background pre-fetch unificado (no bloquea splash) ──
-  var ROLES_METRICAS = ['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER'];
+  var ROLES_METRICAS = ['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER', 'ASESOR'];
   if (usuario.rol && ROLES_METRICAS.indexOf(usuario.rol.toUpperCase()) !== -1) {
     var hoy = new Date();
     var primerDia = new Date(hoy.getFullYear(), hoy.getMonth(), 1);

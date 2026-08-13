@@ -775,7 +775,7 @@ function _eliminarMotivo(id) {
  */
 function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
   try {
-    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER', 'ASESOR']);
 
     // ── 1. Usuarios para drill-down filters ──
     var usuarios = [];
