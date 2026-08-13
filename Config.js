@@ -221,14 +221,14 @@ function verificarSaludDelSistema() {
       ].join(""));
 
       MailApp.sendEmail({
-        to:       obtenerCorreosLideres().join(","),
+        to:       UsuariosRepo_getCorreosAdmin().join(","),
         bcc:      BCC_AUDITORIA,
         subject:  "⏱️ Lotes estancados · Inducciones El Libertador",
         htmlBody: cuerpoLideres,
         name:     "Inducciones · El Libertador"
       });
 
-      _registrarEvento_("WARN", "Config.js", "Alerta lotes estancados enviada a líderes", "Total: " + totalEstancados);
+      _registrarEvento_("WARN", "Config.js", "Alerta lotes estancados enviada a admins", "Total: " + totalEstancados);
     }
   } catch (e) {
     alertas.push("⚠️ Error al enviar alerta de lotes estancados a líderes: " + e.message);

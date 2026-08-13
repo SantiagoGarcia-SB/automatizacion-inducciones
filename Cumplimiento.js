@@ -162,11 +162,8 @@ function procesarDatosMejorado() {
       return;
     }
 
-    // Destinatarios derivados de la hoja USUARIOS para no perder sincronía
-    // con la lista maestra si alguno de los dos deja de ser líder.
-    const destinatarios = obtenerCorreosLideres().filter(correo =>
-      correo === "jenny.ascanio@segurosbolivar.com" || correo === "kharen.garcia@segurosbolivar.com"
-    ).join(",");
+    // Destinatarios: solo ADMIN activos
+    const destinatarios = UsuariosRepo_getCorreosAdmin().join(",");
 
     // Verificar cuota antes de enviar (Fase 2.2)
     if (!_verificarCuotaEmail_(1)) {

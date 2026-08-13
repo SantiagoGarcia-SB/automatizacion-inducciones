@@ -2,136 +2,121 @@
 
 ## Introduction
 
-Este feature agrega filtros interactivos de drill-down y 3 gráficos analíticos a la sección "Inicio" (dashboard) del sistema El Libertador. Los filtros permiten a roles de supervisión (Director, Gerente, Admin, Asesor) segmentar los KPIs y gráficos por Director y/o Comercial. Los gráficos proporcionan visibilidad sobre ranking de producción, cuellos de botella por estado y tendencia semanal de radicaciones.
+Este feature extiende el dashboard "Métricas Operativas de Lotes" con tres nuevas tarjetas KPI (Total lotes, Lotes en proceso, Total solicitudes) y agrega interactividad de filtrado a todas las tarjetas KPI. Al hacer clic en cualquier tarjeta, la tabla de detalle inferior se filtra para mostrar únicamente las filas relevantes a esa métrica. El filtrado es exclusivamente en el lado del cliente (client-side), operando sobre el array `detallePorLote` ya cargado en memoria.
+
+Los datos adicionales para las nuevas tarjetas (totalLotes, lotesEnProceso, totalSolicitudes) se calculan en el backend como parte de la respuesta existente de `api_obtenerMetricasLotes`, extendiendo el objeto `resumen`.
 
 ## Glossary
 
-- **Dashboard**: Sección "Inicio" de la aplicación SPA que muestra KPIs y ahora también gráficos analíticos.
-- **Filtro_Director**: Dropdown que permite seleccionar un Director específico para filtrar datos.
-- **Filtro_Comercial**: Dropdown que permite seleccionar un Comercial (Consultor) específico para filtrar datos.
-- **Drill_Down_Filters**: Componente de UI que contiene los dropdowns de Director y Comercial con lógica de cascada.
-- **Chart_Ranking**: Gráfico SVG de barras horizontales que muestra ranking de comerciales por volumen de lotes radicados en el mes actual.
-- **Chart_Antiguedad**: Gráfico SVG de barras horizontales que muestra la antigüedad promedio (en días) de lotes por estado.
-- **Chart_Tendencia**: Gráfico SVG de línea que muestra lotes radicados por semana (últimas 8 semanas).
-- **Lote**: Unidad de trabajo en Control_General; cada lote tiene ID, fecha, estado y comercial asociado.
-- **Estado_Lote**: Valor de la columna J (Estado) de Control_General que indica la fase actual del lote.
-- **CacheManager**: Almacén en memoria del frontend que cachea datos de la sesión; la clave 'lotes' contiene los datos de api_obtenerTodosLosLotes.
-- **SVG_Renderer**: Módulo de frontend que genera gráficos como SVG inline sin dependencias externas.
-- **UsuariosRepo**: Repositorio que lee la pestaña USUARIOS y provee datos de jerarquía organizacional.
-- **Equipo_Visible**: Conjunto de emails que un usuario puede ver según su rol y posición jerárquica.
+- **Frontend_Metricas**: Interfaz HTML servida por HtmlService que presenta las métricas operativas de lotes al usuario.
+- **Sistema_Metricas**: Módulo backend (Google Apps Script) que calcula y expone las métricas operativas de lotes.
+- **Tarjeta_KPI**: Componente visual tipo card que muestra una etiqueta y un valor numérico dentro del grid de KPIs del dashboard.
+- **Tabla_Detalle**: Tabla HTML que muestra el desglose por lote (`detallePorLote`) en la vista de métricas.
+- **Filtro_Activo**: Estado en el cual una Tarjeta_KPI está seleccionada y la Tabla_Detalle muestra solo las filas correspondientes a esa métrica.
+- **RESULTADO_LOTE**: Columna de la hoja "registro analisis" que indica el resultado del lote ("APROBADO", "NEGADO", o vacío/otro valor para lotes en proceso).
+- **Lote_En_Proceso**: Lote cuyo RESULTADO_LOTE está vacío o contiene un valor distinto de "APROBADO" y "NEGADO".
+- **DetallePorLote**: Array de objetos retornado por el backend que contiene la información agrupada por lote para el periodo seleccionado.
 
 ## Requirements
 
-### Requirement 1: Visibilidad de filtros según rol
+### Requerimiento 1: Nuevas Tarjetas KPI — Total Lotes
 
-**User Story:** Como usuario con rol de supervisión, quiero ver filtros de drill-down en el dashboard, para poder segmentar los datos por Director o Comercial según mi nivel jerárquico.
+**User Story:** Como director/gerente, quiero ver el total de lotes procesados en el periodo (aprobados + negados + en proceso), para tener una visión global del volumen operativo.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. WHILE el usuario tiene ROL = GERENTE, THE Drill_Down_Filters SHALL renderizar el Filtro_Director y el Filtro_Comercial en la sección de dashboard.
-2. WHILE el usuario tiene ROL = DIRECTOR, THE Drill_Down_Filters SHALL renderizar únicamente el Filtro_Comercial en la sección de dashboard.
-3. WHILE el usuario tiene ROL = ADMIN o ROL = ASESOR, THE Drill_Down_Filters SHALL renderizar el Filtro_Director y el Filtro_Comercial en la sección de dashboard.
-4. WHILE el usuario tiene ROL = CONSULTOR o ROL = COMERCIAL, THE Drill_Down_Filters SHALL permanecer oculto y no renderizar ningún dropdown.
+1. WHEN el usuario consulta las métricas para un Periodo_Mensual, THE Sistema_Metricas SHALL calcular `totalLotes` como la cantidad de valores distintos de "codigo lote" cuya Fecha_Lote pertenezca al periodo seleccionado, independientemente del valor de RESULTADO_LOTE.
+2. WHEN el Sistema_Metricas retorna el objeto resumen, THE Sistema_Metricas SHALL incluir la propiedad `totalLotes` como entero mayor o igual a cero.
+3. THE Frontend_Metricas SHALL presentar una Tarjeta_KPI con la etiqueta "Total Lotes" que muestre el valor de `resumen.totalLotes`.
 
-### Requirement 2: Población del Filtro Director
+### Requerimiento 2: Nuevas Tarjetas KPI — Lotes en Proceso
 
-**User Story:** Como Gerente, quiero que el dropdown de Director se llene con los Directores de mi equipo, para seleccionar cuál Director analizar.
+**User Story:** Como director/gerente, quiero ver cuántos lotes están aún en proceso (sin resultado definitivo), para monitorear el trabajo pendiente.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. WHEN el dashboard carga para un usuario con ROL = GERENTE, THE Filtro_Director SHALL listar los Directores cuyos registros en USUARIOS tienen EMAIL_GERENTE igual al email del Gerente logueado y ACTIVO = TRUE.
-2. WHEN el dashboard carga para un usuario con ROL = ADMIN o ROL = ASESOR, THE Filtro_Director SHALL listar todos los usuarios con ROL = DIRECTOR y ACTIVO = TRUE.
-3. THE Filtro_Director SHALL incluir una opción "Todos" como primera entrada seleccionada por defecto.
-4. THE Filtro_Director SHALL obtener la lista de Directores a partir de los datos de UsuariosRepo ya cacheados en el frontend, sin realizar llamadas adicionales al servidor.
+1. WHEN el usuario consulta las métricas para un Periodo_Mensual, THE Sistema_Metricas SHALL calcular `lotesEnProceso` como la cantidad de valores distintos de "codigo lote" cuya Fecha_Lote pertenezca al periodo seleccionado y cuyo RESULTADO_LOTE, comparado sin distinción de mayúsculas/minúsculas y con trim aplicado, NO sea igual a "APROBADO" ni a "NEGADO" (incluyendo valores vacíos o cualquier otro texto).
+2. WHEN el Sistema_Metricas retorna el objeto resumen, THE Sistema_Metricas SHALL incluir la propiedad `lotesEnProceso` como entero mayor o igual a cero.
+3. THE Frontend_Metricas SHALL presentar una Tarjeta_KPI con la etiqueta "Lotes en Proceso" que muestre el valor de `resumen.lotesEnProceso`.
+4. THE Sistema_Metricas SHALL garantizar que `resumen.totalLotes` sea igual a `resumen.lotesAprobados` + `resumen.lotesNegados` + `resumen.lotesEnProceso` para cualquier periodo consultado.
 
-### Requirement 3: Población del Filtro Comercial
+### Requerimiento 3: Nuevas Tarjetas KPI — Total Solicitudes
 
-**User Story:** Como Director o Gerente, quiero que el dropdown de Comercial se llene con los Consultores del Director seleccionado, para analizar la producción individual.
+**User Story:** Como director/gerente, quiero ver el total de solicitudes individuales procesadas en el periodo, para dimensionar el volumen de trabajo a nivel de solicitud.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. WHEN un Director está seleccionado en el Filtro_Director, THE Filtro_Comercial SHALL listar los usuarios cuyos registros tienen EMAIL_DIRECTOR igual al email del Director seleccionado y ACTIVO = TRUE.
-2. WHEN el usuario logueado tiene ROL = DIRECTOR, THE Filtro_Comercial SHALL listar los usuarios cuyos registros tienen EMAIL_DIRECTOR igual al email del Director logueado y ACTIVO = TRUE.
-3. WHEN la opción "Todos" está seleccionada en el Filtro_Director, THE Filtro_Comercial SHALL listar todos los Comerciales del equipo visible del Gerente logueado.
-4. THE Filtro_Comercial SHALL incluir una opción "Todos" como primera entrada seleccionada por defecto.
-5. THE Filtro_Comercial SHALL obtener la lista de Comerciales a partir de los datos de UsuariosRepo ya cacheados en el frontend, sin realizar llamadas adicionales al servidor.
+1. WHEN el usuario consulta las métricas para un Periodo_Mensual, THE Sistema_Metricas SHALL calcular `totalSolicitudes` como el conteo total de filas del Registro_Analisis cuya Fecha_Lote pertenezca al periodo seleccionado (representando cada solicitud individual procesada).
+2. WHEN el Sistema_Metricas retorna el objeto resumen, THE Sistema_Metricas SHALL incluir la propiedad `totalSolicitudes` como entero mayor o igual a cero.
+3. THE Frontend_Metricas SHALL presentar una Tarjeta_KPI con la etiqueta "Total Solicitudes" que muestre el valor de `resumen.totalSolicitudes`.
 
-### Requirement 4: Comportamiento de cascada de filtros
+### Requerimiento 4: Layout del Grid de KPIs Actualizado
 
-**User Story:** Como Gerente, quiero que al seleccionar un Director se actualice automáticamente la lista de Comerciales, para navegar la jerarquía de forma intuitiva.
+**User Story:** Como director/gerente, quiero que las tarjetas KPI se presenten de forma organizada incluyendo las nuevas métricas, para tener una vista completa del resumen operativo.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. WHEN el usuario selecciona un Director en el Filtro_Director, THE Filtro_Comercial SHALL actualizarse inmediatamente para mostrar solo los Comerciales de ese Director y resetear su selección a "Todos".
-2. WHEN el usuario selecciona "Todos" en el Filtro_Director, THE Filtro_Comercial SHALL actualizarse para mostrar todos los Comerciales del equipo visible completo.
-3. WHEN el usuario selecciona un valor en el Filtro_Director o en el Filtro_Comercial, THE Dashboard SHALL recalcular todos los KPIs y gráficos usando los datos filtrados de CacheManager sin realizar llamadas al servidor.
+1. THE Frontend_Metricas SHALL presentar 8 tarjetas KPI en total, organizadas en el siguiente orden: Total Lotes, Lotes Aprobados, Lotes Negados, Lotes en Proceso, Total Solicitudes, Sol. Aprobadas, Sol. Negadas, Sol. Reconsideradas.
+2. THE Frontend_Metricas SHALL actualizar la regla CSS `grid-template-columns` del contenedor `.metricas-lotes__kpis` para acomodar 4 columnas por fila en pantallas de escritorio (`repeat(4, 1fr)`), distribuyendo las 8 tarjetas en 2 filas de 4.
+3. WHILE la pantalla tenga un ancho menor o igual a 768px, THE Frontend_Metricas SHALL mostrar las tarjetas en un grid de 2 columnas.
+4. WHILE la pantalla tenga un ancho menor o igual a 480px, THE Frontend_Metricas SHALL mostrar las tarjetas en una sola columna.
 
-### Requirement 5: Filtrado local de datos
+### Requerimiento 5: Filtrado Interactivo por Clic en Tarjetas KPI
 
-**User Story:** Como usuario de supervisión, quiero que los filtros operen sobre datos ya cacheados, para obtener resultados instantáneos sin latencia de red.
+**User Story:** Como director/gerente, quiero hacer clic en cualquier tarjeta KPI para filtrar la tabla de detalle y ver solo los lotes relevantes a esa métrica, para analizar rápidamente subconjuntos específicos de datos.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. THE Drill_Down_Filters SHALL aplicar el filtrado sobre los datos obtenidos de CacheManager.get('lotes') sin invocar google.script.run.
-2. WHEN el CacheManager no tiene datos de lotes cacheados, THE Dashboard SHALL solicitar los datos al servidor mediante api_obtenerTodosLosLotes y cachearlos antes de aplicar el filtrado.
-3. THE Drill_Down_Filters SHALL filtrar los lotes comparando el campo "comercial" del lote contra los nombres de los Comerciales del equipo seleccionado.
+1. WHEN el usuario hace clic en la Tarjeta_KPI "Lotes Aprobados", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote cuyo campo `resultadoLote` sea "APROBADO" (comparación case-insensitive).
+2. WHEN el usuario hace clic en la Tarjeta_KPI "Lotes Negados", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote cuyo campo `resultadoLote` sea "NEGADO" (comparación case-insensitive).
+3. WHEN el usuario hace clic en la Tarjeta_KPI "Lotes en Proceso", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote cuyo campo `resultadoLote` NO sea "APROBADO" ni "NEGADO" (incluyendo valores vacíos o cualquier otro texto, comparación case-insensitive).
+4. WHEN el usuario hace clic en la Tarjeta_KPI "Total Lotes", THE Frontend_Metricas SHALL remover cualquier filtro activo y mostrar todas las filas de DetallePorLote.
+5. WHEN el usuario hace clic en la Tarjeta_KPI "Total Solicitudes", THE Frontend_Metricas SHALL remover cualquier filtro activo y mostrar todas las filas de DetallePorLote.
+6. WHEN el usuario hace clic en la Tarjeta_KPI "Sol. Aprobadas", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote donde `solicitudesAprobadasEnLote` sea mayor que 0.
+7. WHEN el usuario hace clic en la Tarjeta_KPI "Sol. Negadas", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote donde `solicitudesNegadas` sea mayor que 0.
+8. WHEN el usuario hace clic en la Tarjeta_KPI "Sol. Reconsideradas", THE Frontend_Metricas SHALL filtrar la Tabla_Detalle para mostrar únicamente filas de DetallePorLote donde `negadaPorLoteReconsideradaPorGerencia` sea mayor que 0.
 
-### Requirement 6: Chart Ranking de Comerciales
+### Requerimiento 6: Comportamiento Toggle de Filtro Activo
 
-**User Story:** Como Director o Gerente, quiero ver un gráfico de barras horizontales que muestre el ranking de Comerciales por volumen de lotes radicados en el mes actual, para identificar quién produce más y quién necesita apoyo.
+**User Story:** Como director/gerente, quiero desactivar un filtro haciendo clic nuevamente en la tarjeta seleccionada, para volver a la vista completa sin necesidad de otro control.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. THE Chart_Ranking SHALL renderizarse como un elemento SVG inline dentro de la sección de dashboard.
-2. THE Chart_Ranking SHALL mostrar una barra horizontal por cada Comercial del equipo filtrado, ordenadas de mayor a menor volumen.
-3. THE Chart_Ranking SHALL contar los lotes cuya fecha pertenezca al mes calendario actual y cuyo estado sea "RADICADO" o posterior en el flujo del proceso.
-4. THE Chart_Ranking SHALL mostrar el nombre del Comercial a la izquierda de cada barra y la cantidad numérica al final de cada barra.
-5. WHEN el usuario cambia la selección en el Filtro_Director o Filtro_Comercial, THE Chart_Ranking SHALL recalcularse y re-renderizarse con los datos del equipo seleccionado.
-6. WHEN un Comercial tiene cero lotes radicados en el mes, THE Chart_Ranking SHALL incluir al Comercial con una barra de longitud cero y valor "0".
+1. WHEN el usuario hace clic en una Tarjeta_KPI que ya tiene Filtro_Activo, THE Frontend_Metricas SHALL desactivar el filtro y mostrar todas las filas de DetallePorLote en la Tabla_Detalle.
+2. WHEN el usuario hace clic en una Tarjeta_KPI diferente a la que tiene Filtro_Activo, THE Frontend_Metricas SHALL reemplazar el filtro anterior por el nuevo filtro correspondiente a la tarjeta clickeada.
+3. WHILE una Tarjeta_KPI tiene Filtro_Activo, THE Frontend_Metricas SHALL aplicar una clase CSS `metricas-lotes__kpi--active` a esa tarjeta para indicar visualmente el estado seleccionado.
+4. WHEN se desactiva un Filtro_Activo, THE Frontend_Metricas SHALL remover la clase CSS `metricas-lotes__kpi--active` de la tarjeta previamente seleccionada.
 
-### Requirement 7: Chart Antigüedad Promedio por Estado
+### Requerimiento 7: Indicador Visual de Tarjeta Activa
 
-**User Story:** Como Director o Gerente, quiero ver un gráfico de barras horizontales con la antigüedad promedio de los lotes en cada estado, para identificar cuellos de botella en el pipeline.
+**User Story:** Como director/gerente, quiero ver claramente cuál tarjeta está seleccionada, para saber qué filtro estoy aplicando a la tabla.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. THE Chart_Antiguedad SHALL renderizarse como un elemento SVG inline dentro de la sección de dashboard.
-2. THE Chart_Antiguedad SHALL mostrar una barra horizontal por cada estado que tenga al menos un lote activo (no terminado) en el equipo filtrado.
-3. THE Chart_Antiguedad SHALL calcular la antigüedad de cada lote como la diferencia en días entre la fecha actual y la fecha del lote (columna C de Control_General).
-4. THE Chart_Antiguedad SHALL mostrar el nombre del estado a la izquierda de cada barra y el promedio en días (redondeado a 1 decimal) al final de cada barra.
-5. WHEN el usuario cambia la selección en los filtros, THE Chart_Antiguedad SHALL recalcularse y re-renderizarse con los datos del equipo seleccionado.
-6. IF un estado tiene un promedio de antigüedad superior a 5 días, THEN THE Chart_Antiguedad SHALL resaltar esa barra con un color de alerta diferenciado.
+1. THE Frontend_Metricas SHALL aplicar a la Tarjeta_KPI con Filtro_Activo un borde inferior de 3px sólido usando el color `var(--color-primary-navy)` como indicador visual.
+2. THE Frontend_Metricas SHALL aplicar a la Tarjeta_KPI con Filtro_Activo un efecto de elevación usando `var(--shadow-2)` para diferenciarla de las tarjetas inactivas.
+3. THE Frontend_Metricas SHALL aplicar a la Tarjeta_KPI con Filtro_Activo una propiedad `cursor: pointer` para indicar interactividad, y esta misma propiedad a todas las tarjetas KPI en estado normal.
+4. WHILE ninguna Tarjeta_KPI tiene Filtro_Activo, THE Frontend_Metricas SHALL mostrar la Tabla_Detalle con todas las filas sin filtrar.
 
-### Requirement 8: Chart Tendencia Semanal
+### Requerimiento 8: Filtrado Client-Side sin Afectar Datos en Memoria
 
-**User Story:** Como Director o Gerente, quiero ver un gráfico de línea con la cantidad de lotes radicados por semana en las últimas 8 semanas, para entender si la operación tiene tendencia positiva o negativa.
+**User Story:** Como desarrollador, quiero que el filtrado sea exclusivamente client-side operando sobre los datos ya cargados, para evitar llamadas innecesarias al backend y mantener la experiencia fluida.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. THE Chart_Tendencia SHALL renderizarse como un elemento SVG inline dentro de la sección de dashboard.
-2. THE Chart_Tendencia SHALL mostrar un punto por cada una de las últimas 8 semanas calendario completas, conectados por una línea.
-3. THE Chart_Tendencia SHALL contar los lotes cuya fecha caiga dentro de cada semana y cuyo estado sea "RADICADO" o posterior.
-4. THE Chart_Tendencia SHALL mostrar etiquetas del rango de fechas de cada semana en el eje X y la cantidad de lotes en el eje Y.
-5. WHEN el usuario cambia la selección en los filtros, THE Chart_Tendencia SHALL recalcularse y re-renderizarse con los datos del equipo seleccionado.
-6. THE Chart_Tendencia SHALL incluir puntos (marcadores circulares) en cada intersección de datos para facilitar la lectura del valor exacto.
+1. THE Frontend_Metricas SHALL almacenar el array completo de DetallePorLote en una variable de módulo al recibir la respuesta del backend, preservando los datos originales sin mutarlos.
+2. WHEN se aplica un Filtro_Activo, THE Frontend_Metricas SHALL generar un nuevo array filtrado a partir de los datos originales y re-renderizar únicamente el cuerpo (`tbody`) de la Tabla_Detalle sin modificar el array original.
+3. THE Frontend_Metricas SHALL ejecutar el filtrado sin invocar `google.script.run` ni realizar ninguna llamada al backend.
+4. WHEN el usuario cambia el Periodo_Mensual y se cargan nuevos datos del backend, THE Frontend_Metricas SHALL desactivar cualquier Filtro_Activo y mostrar los nuevos datos completos.
 
-### Requirement 9: Renderizado SVG sin dependencias externas
+### Requerimiento 9: Extensión del Objeto Resumen del Backend
 
-**User Story:** Como desarrollador, quiero que los gráficos se rendericen como SVG inline generado por código vanilla JS, para mantener el bundle size en cero dependencias externas.
+**User Story:** Como desarrollador del frontend, quiero que el backend retorne los nuevos conteos (totalLotes, lotesEnProceso, totalSolicitudes) junto con los existentes, para no necesitar calcularlos en el cliente.
 
-#### Acceptance Criteria
+#### Criterios de Aceptación
 
-1. THE SVG_Renderer SHALL generar los elementos SVG usando document.createElementNS con el namespace 'http://www.w3.org/2000/svg'.
-2. THE SVG_Renderer SHALL utilizar únicamente JavaScript nativo del navegador, sin importar ni referenciar bibliotecas de gráficos externas.
-3. THE SVG_Renderer SHALL adaptar el ancho del SVG al 100% del contenedor padre para mantener responsividad.
-4. THE SVG_Renderer SHALL aplicar un viewBox que permita escalado proporcional en diferentes tamaños de pantalla.
-
-### Requirement 10: Accesibilidad de gráficos
-
-**User Story:** Como usuario con discapacidad visual que usa lector de pantalla, quiero que los gráficos tengan texto alternativo descriptivo, para comprender la información presentada.
-
-#### Acceptance Criteria
-
-1. THE SVG_Renderer SHALL incluir un elemento `<title>` dentro de cada SVG con una descripción del tipo de gráfico y los datos que muestra.
-2. THE SVG_Renderer SHALL asignar role="img" y aria-labelledby apuntando al `<title>` en cada elemento SVG raíz.
-3. THE SVG_Renderer SHALL utilizar contraste de color mínimo WCAG AA (relación 4.5:1) entre el color de las barras/líneas y el fondo del gráfico.
+1. THE Sistema_Metricas SHALL extender el objeto `resumen` retornado por `api_obtenerMetricasLotes` para incluir las propiedades adicionales: `totalLotes` (entero >= 0), `lotesEnProceso` (entero >= 0) y `totalSolicitudes` (entero >= 0), sin eliminar ni modificar las propiedades existentes (`lotesAprobados`, `lotesNegados`, `solicitudesAprobadas`, `solicitudesNegadas`, `solicitudesReconsideradas`).
+2. THE Sistema_Metricas SHALL calcular `totalLotes` como el conteo de valores distintos de "codigo lote" cuya Fecha_Lote pertenezca al periodo, sin importar el valor de RESULTADO_LOTE.
+3. THE Sistema_Metricas SHALL calcular `lotesEnProceso` como `totalLotes` menos `lotesAprobados` menos `lotesNegados`.
+4. THE Sistema_Metricas SHALL calcular `totalSolicitudes` como el número total de filas (registros) del Registro_Analisis cuya Fecha_Lote pertenezca al periodo seleccionado.
+5. IF ocurre un error o los parámetros son inválidos, THEN THE Sistema_Metricas SHALL retornar los valores safe-default incluyendo `totalLotes: 0`, `lotesEnProceso: 0` y `totalSolicitudes: 0` junto con los safe-defaults existentes.

@@ -500,9 +500,10 @@ if (10 < colStart || 10 > colEnd) return;
 
   const correoDirector  = obtenerCorreoDeDirector(emailFinal);
   const nombreComercial = obtenerNombreDeComercial(emailFinal);
-  const correoSuperiores = obtenerCorreosSuperiores().join(',');
-  const ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
-  const correosCC = ccParts.join(',');
+  const cadenaJerarquica = obtenerCadenaJerarquica(emailFinal);
+  const ccParts = [correoDirector, ...cadenaJerarquica].filter(function(c) { return c && c.length > 0; });
+  // Eliminar duplicados (el director ya viene en la cadena jerárquica)
+  const correosCC = [...new Set(ccParts)].join(',');
 
   const htmlBody = _envolver_([
 
@@ -662,12 +663,10 @@ function enviarRecordatoriosPazYSalvoDiario() {
       }
 
       const nombreComercial = _correoANombre(emailReal);
-      const correoDirector = obtenerCorreoDeDirector(emailReal);
-      const correoSuperiores = obtenerCorreosSuperiores().join(',');
+      const cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
       
-      // A3: CCs escalan según nivel — Director + roles superiores activos
-      const ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
-      const ccs = ccParts.join(",");
+      // CC solo a la cadena jerárquica directa del comercial (Director + Gerente)
+      const ccs = [...new Set(cadenaJerarquica)].filter(function(c) { return c && c.length > 0; }).join(",");
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
 
@@ -820,10 +819,9 @@ function enviarRecordatoriosErrorTercerosDiario() {
       }
 
       const nombreComercial = _correoANombre(emailReal);
-      var correoDirector = obtenerCorreoDeDirector(emailReal);
-      var correoSuperiores = obtenerCorreosSuperiores().join(',');
-      var ccParts = [correoDirector, correoSuperiores].filter(function(c) { return c && c.length > 0; });
-      var ccs = ccParts.join(',');
+      var cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
+      // CC solo a la cadena jerárquica directa del comercial (Director + Gerente)
+      var ccs = [...new Set(cadenaJerarquica)].filter(function(c) { return c && c.length > 0; }).join(',');
 
       const barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
 
@@ -934,11 +932,10 @@ function obtenerNombreCompletoDeComercial(email) {
 function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, urlDrive, filasParaInsertar) {
 
   const nombreComercial = obtenerNombreDeComercial(emailComercial);
-  const correoDirector  = obtenerCorreoDeDirector(emailComercial);
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
 
-  // ── Unificar destinatarios CC (director + superiores), filtrando vacíos ──
-  const correosCC = [...obtenerCorreosLideres(), correoDirector]
+  // ── CC solo a la cadena jerárquica directa del comercial (Director + Gerente) ──
+  const correosCC = [...new Set(obtenerCadenaJerarquica(emailComercial))]
     .filter(e => e && e.includes("@"))
     .join(",");
 

@@ -360,9 +360,10 @@ function enviarReporteGestionInducciones() {
 
     const m = _recolectarMetricasGestion_();
     const correo = _construirCorreoReporteGestion_(m);
+    const destinatarios = UsuariosRepo_getCorreosAdmin();
 
     MailApp.sendEmail({
-      to:       obtenerCorreosLideres().join(","),
+      to:       destinatarios.join(","),
       bcc:      BCC_AUDITORIA,
       subject:  correo.asunto,
       htmlBody: correo.htmlBody,
@@ -370,8 +371,8 @@ function enviarReporteGestionInducciones() {
       name:     "Inducciones · El Libertador"
     });
 
-    Logger.log("✅ Reporte de gestión enviado a líderes.");
-    _registrarEvento_("INFO", "Reportes.js", "Reporte de gestión enviado", "Destinatarios: " + obtenerCorreosLideres().length);
+    Logger.log("✅ Reporte de gestión enviado a admins.");
+    _registrarEvento_("INFO", "Reportes.js", "Reporte de gestión enviado", "Destinatarios: " + destinatarios.length);
   } catch (err) {
     console.error("Error en enviarReporteGestionInducciones: " + err.message);
     _registrarEvento_("ERROR", "Reportes.js", "Error al enviar reporte de gestión", err.message);
@@ -778,9 +779,15 @@ function enviarReportesCierreMes() {
     return;
   }
 
-  if (!_verificarCuotaEmail_(comerciales.length)) {
+  // Estimar cuota necesaria: consultores + directores + gerentes (aprox)
+  var todosUsuarios = UsuariosRepo_leerTodos();
+  var numDirectores = todosUsuarios.filter(function(u) { return u.activo && u.rol === 'DIRECTOR'; }).length;
+  var numGerentes = todosUsuarios.filter(function(u) { return u.activo && u.rol === 'GERENTE'; }).length;
+  var cuotaRequerida = comerciales.length + numDirectores + numGerentes;
+
+  if (!_verificarCuotaEmail_(cuotaRequerida)) {
     Logger.log('⚠️ Cuota de email insuficiente para reportes de cierre de mes.');
-    _registrarEvento_('WARN', 'Reportes.js', 'Reportes de cierre de mes no enviados: cuota insuficiente', 'Comerciales: ' + comerciales.length);
+    _registrarEvento_('WARN', 'Reportes.js', 'Reportes de cierre de mes no enviados: cuota insuficiente', 'Requeridos: ' + cuotaRequerida);
     return;
   }
 
@@ -861,6 +868,246 @@ function enviarReportesCierreMes() {
 
   Logger.log('✅ Reportes de cierre de mes: ' + enviados + ' enviados, ' + fallidos + ' fallidos, de ' + comerciales.length + ' comerciales.');
   _registrarEvento_('INFO', 'Reportes.js', 'Reportes de cierre de mes enviados', enviados + '/' + comerciales.length + ' comerciales (' + fallidos + ' fallidos)');
+
+  // ── Reportes consolidados por equipo (DIRECTOR y GERENTE) ──
+  _enviarReportesCierreMesEquipo_(comerciales, rangos, inicioMesMenos2, finMesMenos2);
+}
+
+
+// ============================================================
+//  REPORTE CIERRE DE MES — CONSOLIDADO POR EQUIPO
+//  Envía a cada DIRECTOR un resumen de su equipo de consultores
+//  y a cada GERENTE un resumen de los equipos de sus directores.
+// ============================================================
+
+/**
+ * Agrupa métricas de los consultores por DIRECTOR y GERENTE, y envía
+ * un correo consolidado a cada uno con el resumen de su equipo.
+ *
+ * @param {UsuarioRecord[]} comerciales - Lista de consultores activos ya procesados
+ * @param {Object} rangos - Rangos de fecha del mes (mesReporte, mesComparacion)
+ * @param {Date} inicioMesMenos2 - Inicio del mes -2
+ * @param {Date} finMesMenos2 - Fin del mes -2
+ */
+function _enviarReportesCierreMesEquipo_(comerciales, rangos, inicioMesMenos2, finMesMenos2) {
+  // 1. Agrupar consultores por DIRECTOR
+  var equiposPorDirector = {};
+
+  comerciales.forEach(function(u) {
+    var emailDir = u.emailDirector;
+    if (!emailDir || !emailDir.includes('@')) return;
+
+    if (!equiposPorDirector[emailDir]) {
+      equiposPorDirector[emailDir] = [];
+    }
+
+    try {
+      var radicadosEsteMes = contarLotesRadicadosEnRango(u.email, rangos.mesReporte.inicio, rangos.mesReporte.fin);
+      var radicadosMesAnt  = contarLotesRadicadosEnRango(u.email, rangos.mesComparacion.inicio, rangos.mesComparacion.fin);
+      var resumen          = obtenerResumenComercial(u.email);
+
+      equiposPorDirector[emailDir].push({
+        email: u.email,
+        nombre: obtenerNombreCompletoDeComercial(u.email),
+        radicadosEsteMes: radicadosEsteMes,
+        radicadosMesAnt: radicadosMesAnt,
+        terminados: resumen.terminados || 0,
+        enAnalisis: resumen.enAnalisis || 0,
+        pendientePS: resumen.pendientePS || 0,
+        errorTerceros: resumen.errorTerceros || 0
+      });
+    } catch (e) {
+      console.warn('Error recolectando métricas de ' + u.email + ' para equipo: ' + e.message);
+    }
+  });
+
+  // 2. Enviar a cada DIRECTOR
+  var nombreMesCap = rangos.mesReporte.nombre.charAt(0).toUpperCase() + rangos.mesReporte.nombre.slice(1);
+  var anioActual = new Date().getFullYear();
+  var enviadosEquipo = 0;
+
+  Object.keys(equiposPorDirector).forEach(function(emailDirector) {
+    var equipo = equiposPorDirector[emailDirector];
+    if (equipo.length === 0) return;
+
+    var director = UsuariosRepo_buscarPorEmail(emailDirector);
+    if (!director || !director.activo) return;
+
+    var correo = _construirCorreoCierreMesEquipo_({
+      nombreDestinatario: obtenerNombreDeComercial(emailDirector),
+      rolDestinatario: 'Director',
+      nombreMes: rangos.mesReporte.nombre,
+      equipo: equipo
+    });
+
+    try {
+      MailApp.sendEmail({
+        to:       emailDirector,
+        bcc:      BCC_AUDITORIA,
+        subject:  correo.asunto,
+        htmlBody: correo.htmlBody,
+        replyTo:  "noreply@ellibertador.co",
+        name:     "Inducciones · El Libertador"
+      });
+      enviadosEquipo++;
+    } catch (e) {
+      console.error('Error enviando reporte equipo a director ' + emailDirector + ': ' + e.message);
+      _registrarEvento_('ERROR', 'Reportes.js', 'Error reporte equipo director', emailDirector + ' | ' + e.message);
+    }
+  });
+
+  // 3. Agrupar por GERENTE (equipos de sus directores)
+  var equiposPorGerente = {};
+
+  Object.keys(equiposPorDirector).forEach(function(emailDirector) {
+    var director = UsuariosRepo_buscarPorEmail(emailDirector);
+    if (!director || !director.emailGerente || !director.emailGerente.includes('@')) return;
+
+    var emailGerente = director.emailGerente;
+    if (!equiposPorGerente[emailGerente]) {
+      equiposPorGerente[emailGerente] = [];
+    }
+    // Agregar todos los consultores de este director al equipo del gerente
+    equiposPorDirector[emailDirector].forEach(function(consultor) {
+      equiposPorGerente[emailGerente].push(consultor);
+    });
+  });
+
+  // 4. Enviar a cada GERENTE
+  Object.keys(equiposPorGerente).forEach(function(emailGerente) {
+    var equipo = equiposPorGerente[emailGerente];
+    if (equipo.length === 0) return;
+
+    var gerente = UsuariosRepo_buscarPorEmail(emailGerente);
+    if (!gerente || !gerente.activo) return;
+
+    var correo = _construirCorreoCierreMesEquipo_({
+      nombreDestinatario: obtenerNombreDeComercial(emailGerente),
+      rolDestinatario: 'Gerente',
+      nombreMes: rangos.mesReporte.nombre,
+      equipo: equipo
+    });
+
+    try {
+      MailApp.sendEmail({
+        to:       emailGerente,
+        bcc:      BCC_AUDITORIA,
+        subject:  correo.asunto,
+        htmlBody: correo.htmlBody,
+        replyTo:  "noreply@ellibertador.co",
+        name:     "Inducciones · El Libertador"
+      });
+      enviadosEquipo++;
+    } catch (e) {
+      console.error('Error enviando reporte equipo a gerente ' + emailGerente + ': ' + e.message);
+      _registrarEvento_('ERROR', 'Reportes.js', 'Error reporte equipo gerente', emailGerente + ' | ' + e.message);
+    }
+  });
+
+  if (enviadosEquipo > 0) {
+    Logger.log('✅ Reportes de equipo: ' + enviadosEquipo + ' enviados (directores + gerentes).');
+    _registrarEvento_('INFO', 'Reportes.js', 'Reportes cierre mes equipo enviados', 'Total: ' + enviadosEquipo);
+  }
+}
+
+/**
+ * Construye el HTML del correo consolidado de cierre de mes para un
+ * DIRECTOR o GERENTE, con la tabla de rendimiento de su equipo.
+ *
+ * @param {Object} datos
+ * @param {string} datos.nombreDestinatario - Nombre del director/gerente
+ * @param {string} datos.rolDestinatario - "Director" o "Gerente"
+ * @param {string} datos.nombreMes - Nombre del mes en español
+ * @param {Array} datos.equipo - [{nombre, radicadosEsteMes, radicadosMesAnt, terminados, enAnalisis, pendientePS, errorTerceros}]
+ * @returns {{asunto: string, htmlBody: string}}
+ */
+function _construirCorreoCierreMesEquipo_(datos) {
+  var nombreMesCap = datos.nombreMes.charAt(0).toUpperCase() + datos.nombreMes.slice(1);
+  var anioActual = new Date().getFullYear();
+
+  // Totales del equipo
+  var totalRadicados = 0;
+  var totalMesAnt = 0;
+  var totalTerminados = 0;
+  var totalEnAnalisis = 0;
+  var totalPendientePS = 0;
+  var totalErrorTerceros = 0;
+
+  datos.equipo.forEach(function(c) {
+    totalRadicados += c.radicadosEsteMes;
+    totalMesAnt += c.radicadosMesAnt;
+    totalTerminados += c.terminados;
+    totalEnAnalisis += c.enAnalisis;
+    totalPendientePS += c.pendientePS;
+    totalErrorTerceros += c.errorTerceros;
+  });
+
+  // Delta vs mes anterior
+  var deltaHtml = '';
+  if (totalMesAnt > 0) {
+    var diff = totalRadicados - totalMesAnt;
+    var pct = Math.round((Math.abs(diff) / totalMesAnt) * 100);
+    if (diff > 0) {
+      deltaHtml = ' <span style="font-size:11px;font-weight:700;color:#3B6D11;">&#9650; ' + pct + '%</span>';
+    } else if (diff < 0) {
+      deltaHtml = ' <span style="font-size:11px;font-weight:700;color:#BD0F14;">&#9660; ' + pct + '%</span>';
+    }
+  }
+
+  // Tabla de consultores
+  var filasTabla = datos.equipo
+    .sort(function(a, b) { return b.radicadosEsteMes - a.radicadosEsteMes; })
+    .map(function(c) {
+      var pendientes = c.pendientePS + c.errorTerceros;
+      var pendienteColor = pendientes > 0 ? '#BD0F14' : '#3B6D11';
+      return '<tr>'
+        + '<td style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;color:#253150;">' + c.nombre + '</td>'
+        + '<td align="center" style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;font-weight:700;color:#253150;">' + c.radicadosEsteMes + '</td>'
+        + '<td align="center" style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;color:#64748b;">' + c.terminados + '</td>'
+        + '<td align="center" style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;color:#64748b;">' + c.enAnalisis + '</td>'
+        + '<td align="center" style="padding:10px 8px;border-bottom:1px solid #f1f5f9;font-family:Arial,sans-serif;font-size:12px;font-weight:700;color:' + pendienteColor + ';">' + pendientes + '</td>'
+        + '</tr>';
+    }).join('');
+
+  var tablaEquipo = '<tr><td style="padding:20px 28px 0;">'
+    + '<div style="height:1px;background:#f1f5f9;margin-bottom:14px;"></div>'
+    + '<div style="font-size:9px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#94a3b8;margin-bottom:10px;font-family:Arial,sans-serif;">Detalle por consultor</div>'
+    + '<table width="100%" cellpadding="0" cellspacing="0" border="0">'
+    + '<tr>'
+    + '<td style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Consultor</td>'
+    + '<td align="center" style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Radicados</td>'
+    + '<td align="center" style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Terminados</td>'
+    + '<td align="center" style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">En análisis</td>'
+    + '<td align="center" style="padding:0 8px 8px;font-family:Arial,sans-serif;font-size:9px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#94a3b8;">Pendientes</td>'
+    + '</tr>'
+    + filasTabla
+    + '</table></td></tr>';
+
+  var htmlBody = _envolver_([
+    _bloque_cabecera_('Reporte de equipo'),
+    _bloque_barra_estado_(_C_NAVY, '&#128202;', 'Cierre de ' + nombreMesCap + ' ' + anioActual),
+    _bloque_cuerpo_inicio_(
+      'Hola, ' + datos.nombreDestinatario,
+      'Este es el resumen de cierre de <strong>' + datos.nombreMes + '</strong> de tu equipo (' + datos.equipo.length + ' consultor' + (datos.equipo.length !== 1 ? 'es' : '') + ').'
+    ),
+    _bloque_chips_([
+      { label: 'Lotes radicados (equipo)', valor: String(totalRadicados) + deltaHtml, full: true },
+      { label: 'Terminados', valor: String(totalTerminados), colorVal: '#3B6D11' },
+      { label: 'En análisis', valor: String(totalEnAnalisis), colorVal: '#253150' },
+      { label: 'Pendiente P&S', valor: String(totalPendientePS), colorVal: '#E65100' },
+      { label: 'Error terceros', valor: String(totalErrorTerceros), colorVal: '#BD0F14' }
+    ]),
+    tablaEquipo,
+    totalPendientePS + totalErrorTerceros > 0
+      ? _bloque_nota_('<strong style="color:#BD0F14;">Atención:</strong> Tu equipo tiene ' + (totalPendientePS + totalErrorTerceros) + ' lote(s) que requieren acción (paz y salvo o corrección de terceros).')
+      : _bloque_nota_('<strong style="color:#3B6D11;">&#10003; Tu equipo está al día. No hay pendientes que requieran acción.</strong>'),
+    _bloque_pie_()
+  ].join(''));
+
+  return {
+    asunto: '📊 Cierre de ' + datos.nombreMes + ' · Equipo ' + datos.rolDestinatario + ' · ' + anioActual,
+    htmlBody: htmlBody
+  };
 }
 
 /**

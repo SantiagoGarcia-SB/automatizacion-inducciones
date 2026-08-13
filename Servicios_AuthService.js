@@ -216,6 +216,49 @@ function obtenerCorreosLideres() {
 }
 
 /**
+ * Obtiene la cadena jerárquica directa de un usuario de la jerarquía comercial
+ * más los ADMIN activos (jerarquía de análisis, siempre en copia).
+ * 
+ * Para CONSULTOR: sube a su DIRECTOR + ADMIN.
+ * Para otros roles: solo retorna ADMIN activos.
+ * (GERENTE no recibe CC en correos individuales — solo recibe su reporte de equipo)
+ *
+ * @param {string} emailUsuario - Email del usuario
+ * @returns {string[]} Array de emails para CC (sin duplicados)
+ */
+function obtenerCadenaJerarquica(emailUsuario) {
+  var resultado = [];
+  var vistos = {};
+
+  // 1. Buscar al usuario
+  var usuario = UsuariosRepo_buscarPorEmail(emailUsuario);
+
+  // 2. Si es CONSULTOR, resolver cadena comercial (solo DIRECTOR)
+  if (usuario && (usuario.rol === 'CONSULTOR' || usuario.rol === 'COMERCIAL')) {
+    if (usuario.emailDirector) {
+      var emailDirector = usuario.emailDirector;
+      var director = UsuariosRepo_buscarPorEmail(emailDirector);
+
+      if (director && director.activo && emailDirector.includes('@')) {
+        resultado.push(emailDirector);
+        vistos[emailDirector] = true;
+      }
+    }
+  }
+
+  // 3. Siempre incluir ADMIN activos en CC
+  var admins = UsuariosRepo_getCorreosAdmin();
+  for (var i = 0; i < admins.length; i++) {
+    if (!vistos[admins[i]]) {
+      resultado.push(admins[i]);
+      vistos[admins[i]] = true;
+    }
+  }
+
+  return resultado;
+}
+
+/**
  * Retorna la lista de emails visible para el usuario autenticado.
  * Wrapper cacheado sobre UsuariosRepo_getEmailsEquipoVisible.
  *

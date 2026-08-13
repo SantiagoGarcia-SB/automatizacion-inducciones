@@ -16,13 +16,14 @@
  */
 
 // ─── Constantes de columnas (índices 0-based) ───────────────
+// Orden real en la hoja: EMAIL, ROL, ACTIVO, EMAIL_DIRECTOR, EMAIL_GERENTE, EMAILS_ALTERNOS, CUPO
 var COL_EMAIL          = 0;
 var COL_ROL            = 1;
 var COL_ACTIVO         = 2;
-var COL_CUPO           = 3;
-var COL_EMAIL_DIRECTOR = 4;
-var COL_EMAIL_GERENTE  = 5;
-var COL_EMAILS_ALTERNOS = 6;
+var COL_EMAIL_DIRECTOR = 3;
+var COL_EMAIL_GERENTE  = 4;
+var COL_EMAILS_ALTERNOS = 5;
+var COL_CUPO           = 6;
 
 /** Roles válidos en el sistema */
 var ROLES_VALIDOS = ['CONSULTOR', 'ANALISTA', 'AUXILIAR', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR'];
@@ -123,15 +124,15 @@ function UsuariosRepo_guardar(datos, esNuevo) {
         }
       }
 
-      // Escribir nueva fila con 7 campos
+      // Escribir nueva fila con 7 campos (orden: EMAIL, ROL, ACTIVO, EMAIL_DIRECTOR, EMAIL_GERENTE, EMAILS_ALTERNOS, CUPO)
       var nuevaFila = [
         emailNuevo,
         rolNormalizado,
         datos.activo === true || datos.activo === 'TRUE' || datos.activo === 'true',
-        Number(datos.cupo) || 0,
         String(datos.emailDirector || '').toLowerCase().trim(),
         String(datos.emailGerente || '').toLowerCase().trim(),
-        alternosNormalizados.join(',')
+        alternosNormalizados.join(','),
+        Number(datos.cupo) || 0
       ];
 
       hoja.appendRow(nuevaFila);
@@ -152,15 +153,15 @@ function UsuariosRepo_guardar(datos, esNuevo) {
         return { ok: false, mensaje: 'Usuario no encontrado: ' + emailNuevo };
       }
 
-      // Actualizar los 7 campos de la fila
+      // Actualizar los 7 campos de la fila (orden: EMAIL, ROL, ACTIVO, EMAIL_DIRECTOR, EMAIL_GERENTE, EMAILS_ALTERNOS, CUPO)
       var datosActualizados = [[
         emailNuevo,
         rolNormalizado,
         datos.activo === true || datos.activo === 'TRUE' || datos.activo === 'true',
-        Number(datos.cupo) || 0,
         String(datos.emailDirector || '').toLowerCase().trim(),
         String(datos.emailGerente || '').toLowerCase().trim(),
-        alternosNormalizados.join(',')
+        alternosNormalizados.join(','),
+        Number(datos.cupo) || 0
       ]];
 
       hoja.getRange(filaEncontrada, 1, 1, 7).setValues(datosActualizados);
@@ -246,6 +247,26 @@ function UsuariosRepo_getCorreosSuperiores() {
         emailsSet[usuario.email] = true;
         resultado.push(usuario.email);
       }
+    }
+  }
+
+  return resultado;
+}
+
+/**
+ * Retorna emails de usuarios con rol ADMIN activos.
+ * Usado para alertas de sistema (lotes estancados, salud) que solo
+ * deben llegar a administradores.
+ * @returns {string[]}
+ */
+function UsuariosRepo_getCorreosAdmin() {
+  var usuarios = UsuariosRepo_leerTodos();
+  var resultado = [];
+
+  for (var i = 0; i < usuarios.length; i++) {
+    var usuario = usuarios[i];
+    if (usuario.activo === true && usuario.rol === 'ADMIN') {
+      resultado.push(usuario.email);
     }
   }
 
