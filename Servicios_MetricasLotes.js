@@ -140,9 +140,10 @@ function _obtenerHeadersMetricasLotes() {
 /**
  * Mapea las columnas requeridas para métricas a sus índices en el array de headers.
  * Si alguna columna requerida no se encuentra, registra un ERROR y retorna null.
+ * La columna 'sucursal' es opcional — si no existe, se asigna -1.
  *
  * @param {string[]} headers - Array de headers de la hoja
- * @returns {{fechaLote:number, solicitudInquilino:number, codigoLote:number, resultadoLote:number, resultadoSolicitud:number, registroAnalistaSai:number}|null}
+ * @returns {{fechaLote:number, solicitudInquilino:number, codigoLote:number, resultadoLote:number, resultadoSolicitud:number, registroAnalistaSai:number, sucursal:number}|null}
  *   Objeto con los índices de cada columna, o null si falta alguna columna requerida
  */
 function _mapearColumnasMetricasLotes(headers) {
@@ -157,7 +158,8 @@ function _mapearColumnasMetricasLotes(headers) {
     codigoLote: headersLower.indexOf('codigo lote'),
     resultadoLote: headersLower.indexOf('resultado lote'),
     resultadoSolicitud: headersLower.indexOf('resultado solicitud'),
-    registroAnalistaSai: headersLower.indexOf('registro analista sai')
+    registroAnalistaSai: headersLower.indexOf('registro analista sai'),
+    sucursal: headersLower.indexOf('sucursal')  // Opcional — no falla si no existe
   };
 
   // Verificar que todas las columnas requeridas fueron encontradas
@@ -255,7 +257,8 @@ function _filtrarFilasPorPeriodo(datos, mapa, fechaDesde, fechaHasta) {
       codigoLote: String(fila[mapa.codigoLote] || '').trim().toUpperCase(),
       resultadoLote: String(fila[mapa.resultadoLote] || '').trim().toUpperCase(),
       resultadoSolicitud: String(fila[mapa.resultadoSolicitud] || '').trim().toUpperCase(),
-      registroAnalistaSai: String(fila[mapa.registroAnalistaSai] || '').trim().toUpperCase()
+      registroAnalistaSai: String(fila[mapa.registroAnalistaSai] || '').trim().toUpperCase(),
+      sucursal: mapa.sucursal !== -1 ? String(fila[mapa.sucursal] || '').trim().toUpperCase() : ''
     });
   }
 
@@ -375,7 +378,8 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
       grupos[codigo] = {
         filas: [],
         fechaLote: null,
-        resultadoLote: ''
+        resultadoLote: '',
+        sucursal: ''
       };
     }
 
@@ -390,6 +394,11 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
     // Determinar resultadoLote: primer valor no vacío encontrado
     if (grupo.resultadoLote === '' && fila.resultadoLote !== '') {
       grupo.resultadoLote = fila.resultadoLote;
+    }
+
+    // Determinar sucursal: primer valor no vacío encontrado
+    if (grupo.sucursal === '' && fila.sucursal !== '') {
+      grupo.sucursal = fila.sucursal;
     }
   }
 
@@ -466,6 +475,7 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
       fechaLote: grupoLote.fechaLote,
       codigoLote: codigoLote,
       resultadoLote: grupoLote.resultadoLote,
+      sucursal: grupoLote.sucursal,
       cantidadSolicitudes: cantidadSolicitudes,
       solicitudesAprobadasEnLote: solicitudesAprobadasEnLote,
       solicitudesAprobadasIndividualNegadaPorLote: solicitudesAprobadasIndividualNegadaPorLote,
@@ -579,6 +589,14 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     }
 
     // 3h. Construir resultado
+    // Extraer sucursales únicas del detalle para chips de filtro en frontend
+    var sucursalesMap = {};
+    for (var s = 0; s < detalle.length; s++) {
+      var suc = detalle[s].sucursal || '';
+      if (suc) sucursalesMap[suc] = true;
+    }
+    var sucursalesUnicas = Object.keys(sucursalesMap).sort();
+
     var resultado = {
       resumen: {
         totalLotes: lotesCount.totalLotes,
@@ -591,6 +609,7 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
         solicitudesReconsideradas: solicitudesCount.solicitudesReconsideradas,
         solicitudesEnProceso: solicitudesCount.solicitudesEnProceso
       },
+      sucursales: sucursalesUnicas,
       detallePorLote: detalle
     };
 
@@ -617,6 +636,240 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', 'calcularMetricasLotes', 'Error al calcular métricas: ' + e.message);
     return _metricasLotesVacias();
   }
+}
+
+
+// ============================================================
+//  TENDENCIA HISTÓRICA (últimos N meses)
+// ============================================================
+
+/**
+ * Calcula métricas históricas resumidas para los últimos N meses.
+ * Reutiliza la lógica existente de filtrado y conteo, pero lee los datos UNA sola vez
+ * y filtra por mes en memoria (mucho más rápido que N llamadas a calcularMetricasLotes).
+ *
+ * @param {number} cantidadMeses - Cantidad de meses hacia atrás (1-12)
+ * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number, solicitudesReconsideradas:number}>}
+ */
+function calcularMetricasLotesHistorico(cantidadMeses) {
+  var n = parseInt(cantidadMeses, 10);
+  if (isNaN(n) || n < 1 || n > 12) return [];
+
+  try {
+    // Intentar cache hit
+    var cacheKey = 'METRICAS_HIST_' + n;
+    try {
+      var cached = CacheWrapper_getJSON(cacheKey);
+      if (cached) return cached;
+    } catch (e) { /* degradación elegante */ }
+
+    // Leer headers y mapear columnas
+    var headers = _obtenerHeadersMetricasLotes();
+    if (!headers) return [];
+
+    var mapa = _mapearColumnasMetricasLotes(headers);
+    if (!mapa) return [];
+
+    // Leer datos completos UNA vez
+    var ss = SpreadsheetApp.openById(getArchivoAnalisisId());
+    var hoja = ss.getSheetByName('registro analisis');
+    if (!hoja || hoja.getLastRow() < 2) return [];
+
+    var datos = hoja.getDataRange().getValues();
+
+    // Calcular rangos de meses
+    var hoy = new Date();
+    var meses = [];
+    for (var i = 1; i <= n; i++) {
+      var d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+      var primerDia = new Date(d.getFullYear(), d.getMonth(), 1);
+      var ultimoDia = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      primerDia.setHours(0, 0, 0, 0);
+      ultimoDia.setHours(0, 0, 0, 0);
+
+      var nombresMeses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+      meses.push({
+        mes: d.getMonth() + 1,
+        anio: d.getFullYear(),
+        etiqueta: nombresMeses[d.getMonth()] + ' ' + d.getFullYear(),
+        desde: primerDia,
+        hasta: ultimoDia
+      });
+    }
+
+    // Invertir para orden cronológico (más antiguo primero)
+    meses.reverse();
+
+    // Para cada mes, filtrar filas y calcular conteos
+    var resultado = [];
+    for (var m = 0; m < meses.length; m++) {
+      var mesDatos = meses[m];
+      var filasFiltradas = _filtrarFilasPorPeriodo(datos, mapa, mesDatos.desde, mesDatos.hasta);
+      var lotesCount = _calcularLotesAprobadosNegados(filasFiltradas);
+      var solCount = _calcularSolicitudesAprobNegReconsideradas(filasFiltradas);
+
+      resultado.push({
+        mes: mesDatos.mes,
+        anio: mesDatos.anio,
+        etiqueta: mesDatos.etiqueta,
+        lotesAprobados: lotesCount.lotesAprobados,
+        lotesNegados: lotesCount.lotesNegados,
+        solicitudesAprobadas: solCount.solicitudesAprobadas + solCount.solicitudesReconsideradas,
+        solicitudesNegadas: solCount.solicitudesNegadas
+      });
+    }
+
+    // Cachear resultado (TTL 300s — datos históricos cambian poco)
+    try {
+      CacheWrapper_putJSON(cacheKey, resultado, 300);
+    } catch (e) { /* degradación elegante */ }
+
+    return resultado;
+
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', 'calcularMetricasLotesHistorico', 'Error: ' + e.message);
+    return [];
+  }
+}
+
+
+// ============================================================
+//  DISTRIBUCIÓN EN PROCESO (pipeline)
+// ============================================================
+
+/**
+ * Obtiene la distribución de estados operativos para solicitudes en proceso.
+ *
+ * Lógica:
+ * 1. Lee Control_General y construye mapa {UUID_SISTEMA → Estado}
+ * 2. Lee registro analisis, filtra por Fecha Lote en rango
+ * 3. Para filas con REGISTRO ANALISTA SAI vacío (en proceso),
+ *    cruza su UUID_SISTEMA con el mapa para obtener el Estado de Control_General
+ * 4. Retorna distribución de estados
+ *
+ * @param {string} fechaDesde - YYYY-MM-DD
+ * @param {string} fechaHasta - YYYY-MM-DD
+ * @returns {{desglose: Object, detalle: Array}}
+ */
+function _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta) {
+  var resultado = {
+    desglose: {
+      pendienteRadicar: 0,
+      radicado: 0,
+      pendienteAsignar: 0,
+      enAnalisis: 0,
+      errorTerceros: 0,
+      envioFormatoLMI: 0,
+      envioCartaLMI: 0,
+      pendientePS: 0,
+      otros: 0,
+      total: 0
+    },
+    detalle: []
+  };
+
+  if (!fechaDesde || !fechaHasta) return resultado;
+
+  var desde = new Date(fechaDesde + 'T00:00:00');
+  var hasta = new Date(fechaHasta + 'T00:00:00');
+  if (isNaN(desde.getTime()) || isNaN(hasta.getTime())) return resultado;
+
+  // ── Paso 1: Leer Control_General y construir mapa UUID → Estado ──
+  var mapaEstados = {}; // { uuid: estado }
+
+  try {
+    var ssControl = SpreadsheetApp.openById(getHojaControlId());
+    var hojaControl = ssControl.getSheetByName('Control_General');
+
+    if (hojaControl && hojaControl.getLastRow() >= 2) {
+      var ultimaFila = hojaControl.getLastRow();
+      // Col J=9 (Estado), Col BJ=61 (UUID_SISTEMA)
+      var datosControl = hojaControl.getRange(2, 1, ultimaFila - 1, 62).getValues();
+
+      for (var c = 0; c < datosControl.length; c++) {
+        var uuid = String(datosControl[c][61] || '').trim();
+        if (!uuid) continue;
+        var estado = String(datosControl[c][9] || '').trim().toUpperCase();
+        mapaEstados[uuid] = estado;
+      }
+    }
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', '_obtenerEstadosOperativosEnProceso', 'Error leyendo Control_General: ' + e.message);
+    return resultado;
+  }
+
+  if (Object.keys(mapaEstados).length === 0) return resultado;
+
+  // ── Paso 2: Leer registro analisis, filtrar por fecha, cruzar UUIDs en proceso ──
+  var headers = _obtenerHeadersMetricasLotes();
+  if (!headers) return resultado;
+
+  var mapa = _mapearColumnasMetricasLotes(headers);
+  if (!mapa) return resultado;
+
+  // Buscar columna UUID_SISTEMA
+  var headersLower = headers.map(function(h) { return String(h || '').toLowerCase(); });
+  var colUuid = headersLower.indexOf('uuid_sistema');
+  if (colUuid === -1) {
+    _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', '_obtenerEstadosOperativosEnProceso', 'Columna UUID_SISTEMA no encontrada en registro analisis');
+    return resultado;
+  }
+
+  var ssAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId());
+  var hojaAnalisis = ssAnalisis.getSheetByName('registro analisis');
+  if (!hojaAnalisis || hojaAnalisis.getLastRow() < 2) return resultado;
+
+  var datosAnalisis = hojaAnalisis.getDataRange().getValues();
+  var desdeTime = desde.getTime();
+  var hastaTime = hasta.getTime();
+
+  // ── Paso 3: Filtrar por fecha + en proceso + cruzar con mapa ──
+  // De-duplicar por solicitudInquilino (misma llave que usa el KPI para cantidadSolicitudes)
+  var solicitudesContadas = {};
+
+  for (var i = 1; i < datosAnalisis.length; i++) {
+    var fila = datosAnalisis[i];
+
+    // Filtrar por Fecha Lote
+    var fechaRaw = fila[mapa.fechaLote];
+    if (!fechaRaw) continue;
+    var fechaLote = (fechaRaw instanceof Date) ? new Date(fechaRaw.getTime()) : new Date(fechaRaw);
+    if (isNaN(fechaLote.getTime())) continue;
+    fechaLote.setHours(0, 0, 0, 0);
+    if (fechaLote.getTime() < desdeTime || fechaLote.getTime() > hastaTime) continue;
+
+    // Solo en proceso (REGISTRO ANALISTA SAI vacío)
+    var registroSai = String(fila[mapa.registroAnalistaSai] || '').trim();
+    if (registroSai) continue;
+
+    // De-duplicar por solicitudInquilino
+    var solInq = String(fila[mapa.solicitudInquilino] || '').trim().toUpperCase();
+    var codigoLote = String(fila[mapa.codigoLote] || '').trim().toUpperCase();
+    var claveUnica = codigoLote + '|' + solInq; // Llave compuesta lote+solicitud
+    if (solicitudesContadas[claveUnica]) continue;
+    solicitudesContadas[claveUnica] = true;
+
+    // Cruzar UUID con mapa de estados
+    var uuidFila = String(fila[colUuid] || '').trim();
+    if (!uuidFila) continue;
+
+    var estadoControl = mapaEstados[uuidFila];
+    if (estadoControl === undefined) continue;
+
+    resultado.desglose.total++;
+
+    if (estadoControl === 'PENDIENTE RADICAR') resultado.desglose.pendienteRadicar++;
+    else if (estadoControl === 'RADICADO') resultado.desglose.radicado++;
+    else if (estadoControl === 'PENDIENTE ASIGNAR') resultado.desglose.pendienteAsignar++;
+    else if (estadoControl.indexOf('ANÁLISIS') !== -1 || estadoControl.indexOf('ANALISIS') !== -1) resultado.desglose.enAnalisis++;
+    else if (estadoControl.indexOf('ERROR') !== -1) resultado.desglose.errorTerceros++;
+    else if (estadoControl.indexOf('FORMATO LMI') !== -1) resultado.desglose.envioFormatoLMI++;
+    else if (estadoControl.indexOf('CARTA LMI') !== -1) resultado.desglose.envioCartaLMI++;
+    else if (estadoControl.indexOf('PAZ Y SALVO') !== -1) resultado.desglose.pendientePS++;
+    else resultado.desglose.otros++;
+  }
+
+  return resultado;
 }
 
 

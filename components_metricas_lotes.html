@@ -186,7 +186,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: var(--text-sm);
-  min-width: 850px;
+  min-width: 950px;
 }
 
 .metricas-lotes__tabla thead {
@@ -513,6 +513,132 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Desglose de solicitudes En Proceso — estilo pipeline */
+.metricas-lotes__desglose {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-mono-0);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  animation: metricas-fadeIn 0.3s ease-out;
+}
+
+.metricas-lotes__desglose-title {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-mono-500);
+  margin-bottom: var(--space-3);
+}
+
+.metricas-lotes__desglose-grid {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  position: relative;
+}
+
+.metricas-lotes__desglose-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4) var(--space-5);
+  position: relative;
+  min-width: 130px;
+  text-align: center;
+  clip-path: polygon(0% 0%, calc(100% - 16px) 0%, 100% 50%, calc(100% - 16px) 100%, 0% 100%, 16px 50%);
+  margin-left: -8px;
+}
+
+.metricas-lotes__desglose-item:first-child {
+  clip-path: polygon(0% 0%, calc(100% - 16px) 0%, 100% 50%, calc(100% - 16px) 100%, 0% 100%);
+  margin-left: 0;
+  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
+}
+
+.metricas-lotes__desglose-item:last-child {
+  clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 16px 50%);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+}
+
+/* Colores de pipeline por posición */
+.metricas-lotes__desglose-item:nth-child(1) { background: #253150; }
+.metricas-lotes__desglose-item:nth-child(2) { background: #344163; }
+.metricas-lotes__desglose-item:nth-child(3) { background: #4a5a7a; }
+.metricas-lotes__desglose-item:nth-child(4) { background: #607291; }
+.metricas-lotes__desglose-item:nth-child(5) { background: #7a8da8; }
+.metricas-lotes__desglose-item:nth-child(6) { background: #94a7bf; }
+.metricas-lotes__desglose-item:nth-child(7) { background: #aec0d5; }
+.metricas-lotes__desglose-item:nth-child(8) { background: #c8d8e8; }
+
+.metricas-lotes__desglose-label {
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: var(--space-1);
+  white-space: nowrap;
+}
+
+.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-label {
+  color: var(--color-mono-700);
+}
+
+.metricas-lotes__desglose-value {
+  font-size: var(--text-h2);
+  font-weight: var(--font-extrabold);
+  color: var(--color-mono-0);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-value {
+  color: var(--color-mono-800);
+}
+
+.metricas-lotes__desglose-pct {
+  font-size: var(--text-xs);
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+}
+
+.metricas-lotes__desglose-item:nth-child(n+5) .metricas-lotes__desglose-pct {
+  color: var(--color-mono-500);
+}
+
+.metricas-lotes__desglose-loading {
+  font-size: var(--text-sm);
+  color: var(--color-mono-400);
+  text-align: center;
+  padding: var(--space-4);
+}
+
+@media (max-width: 768px) {
+  .metricas-lotes__desglose-grid {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .metricas-lotes__desglose-item {
+    clip-path: none;
+    border-radius: var(--radius-xs);
+    margin-left: 0;
+    min-width: calc(50% - var(--space-1));
+    padding: var(--space-3);
+  }
+  .metricas-lotes__desglose-item:first-child {
+    clip-path: none;
+    border-radius: var(--radius-xs);
+  }
+  .metricas-lotes__desglose-item:last-child {
+    clip-path: none;
+    border-radius: var(--radius-xs);
+  }
+}
 </style>
 
 <div id="viewMetricasLotes" style="display:none;">
@@ -551,6 +677,11 @@
         <button class="metricas-lotes__chip" data-segmento="201-300" type="button">201 – 300</button>
         <button class="metricas-lotes__chip" data-segmento="301+" type="button">≥ 301</button>
       </div>
+      <!-- Chips de sucursal (se llenan dinámicamente) -->
+      <div class="metricas-lotes__chips" id="metricasLotesChipsSucursal" style="display:none;">
+        <span class="metricas-lotes__chips-label">Sucursal:</span>
+        <button class="metricas-lotes__chip metricas-lotes__chip--active" data-sucursal="todas" type="button">Todas</button>
+      </div>
     </div>
 
     <!-- Contenedor de resultados -->
@@ -582,6 +713,8 @@ var MetricasLotesView = (function() {
   var _paginaActual = 1;
   var _filasPorPagina = 10;
   var _segmentoActivo = 'todos';
+  var _sucursalActiva = 'todas';
+  var _datosHistorico = null;
   var _MAX_RANGO_DIAS = 183;
 
   /**
@@ -753,6 +886,17 @@ var MetricasLotesView = (function() {
         console.error('Error cargando métricas de lotes:', err);
         _renderizarResultados(null);
       });
+
+    // Cargar histórico en paralelo (no bloquea la vista principal)
+    callServer('api_obtenerMetricasLotesHistorico', 6)
+      .then(function(historico) {
+        _datosHistorico = historico;
+        _dibujarGraficasTendencia(historico);
+      })
+      .catch(function(err) {
+        console.error('Error cargando histórico:', err);
+        _datosHistorico = null;
+      });
   }
 
   /**
@@ -817,8 +961,12 @@ var MetricasLotesView = (function() {
 
     if (!datos || !datos.detallePorLote || datos.detallePorLote.length === 0) {
       contenedor.innerHTML = '<div class="metricas-lotes__fade-in">' + _htmlEstadoVacio() + '</div>';
+      _ocultarChipsSucursal();
       return;
     }
+
+    // Llenar chips de sucursal dinámicamente
+    _llenarChipsSucursal(datos.sucursales || []);
 
     _renderizarVista();
   }
@@ -843,6 +991,7 @@ var MetricasLotesView = (function() {
 
     var html = '<div class="metricas-lotes__fade-in">'
       + _htmlResumen(resumenVista)
+      + '<div id="metricasLotesDesglose"></div>'
       + _htmlCharts()
       + '<div class="metricas-lotes__tabla-header">'
       + '<span class="metricas-lotes__tabla-title">Detalle por Lote</span>'
@@ -858,6 +1007,14 @@ var MetricasLotesView = (function() {
     _conectarEventoCsv();
     _actualizarEstadoActivoKpis();
     _dibujarGraficas(resumenVista);
+
+    // Redibujar tendencia histórica si los datos están disponibles
+    if (_datosHistorico) {
+      _dibujarGraficasTendencia(_datosHistorico);
+    }
+
+    // Cargar pipeline de distribución En Proceso (siempre visible)
+    _cargarDesgloseEnProceso();
   }
 
   /**
@@ -873,7 +1030,7 @@ var MetricasLotesView = (function() {
   }
 
   /**
-   * Recalcula el resumen (cards) considerando el segmento de solicitudes activo.
+   * Recalcula el resumen (cards) considerando el segmento de solicitudes activo + sucursal.
    * @returns {Object} resumen recalculado
    */
   function _calcularResumenFiltrado() {
@@ -894,6 +1051,13 @@ var MetricasLotesView = (function() {
           case '301+': return cant >= 301;
           default: return true;
         }
+      });
+    }
+
+    // Filtrar por sucursal (si aplica)
+    if (_sucursalActiva && _sucursalActiva !== 'todas') {
+      detalleSegmentado = detalleSegmentado.filter(function(d) {
+        return (d.sucursal || '').toUpperCase() === _sucursalActiva.toUpperCase();
       });
     }
 
@@ -921,8 +1085,10 @@ var MetricasLotesView = (function() {
       solicitudesNegadas += (d.solicitudesNegadas || 0)
                           + (d.aprobadaPorLoteNegadaPorAnalista || 0);
       solicitudesReconsideradas += d.negadaPorLoteReconsideradaPorGerencia || 0;
-      solicitudesEnProceso += d.solicitudesEnProcesoEnLote || 0;
     }
+
+    // En proceso = total - evaluadas (derivado, no conteo independiente)
+    solicitudesEnProceso = Math.max(0, totalSolicitudes - solicitudesAprobadas - solicitudesNegadas - solicitudesReconsideradas);
 
     return {
       totalLotes: detalleSegmentado.length,
@@ -1058,6 +1224,7 @@ var MetricasLotesView = (function() {
     var headers = [
       'Fecha Lote',
       'Código Lote',
+      'Sucursal',
       'Resultado Lote',
       'No. Solicitud',
       'Estado SAI'
@@ -1074,6 +1241,7 @@ var MetricasLotesView = (function() {
         filas.push([
           d.fechaLote || '',
           d.codigoLote || '',
+          d.sucursal || '',
           d.resultadoLote || '',
           '',
           ''
@@ -1083,6 +1251,7 @@ var MetricasLotesView = (function() {
           filas.push([
             d.fechaLote || '',
             d.codigoLote || '',
+            d.sucursal || '',
             d.resultadoLote || '',
             solicitudes[j].numero || '',
             solicitudes[j].estadoSAI || 'EN PROCESO'
@@ -1112,7 +1281,7 @@ var MetricasLotesView = (function() {
   }
 
   /**
-   * Retorna el detalle filtrado según el filtro de card activo + segmentación por solicitudes.
+   * Retorna el detalle filtrado según el filtro de card activo + segmentación por solicitudes + sucursal.
    * @returns {Array}
    */
   function _obtenerDetalleFiltrado() {
@@ -1154,6 +1323,13 @@ var MetricasLotesView = (function() {
       });
     }
 
+    // 3. Filtro por sucursal
+    if (_sucursalActiva && _sucursalActiva !== 'todas') {
+      detalle = detalle.filter(function(d) {
+        return (d.sucursal || '').toUpperCase() === _sucursalActiva.toUpperCase();
+      });
+    }
+
     return detalle;
   }
 
@@ -1170,6 +1346,14 @@ var MetricasLotesView = (function() {
       + '<div class="metricas-lotes__chart-card">'
       + '<div class="metricas-lotes__chart-title">Distribución de Solicitudes</div>'
       + '<div id="metricasLotesChartBarras" style="width:100%;height:240px;"></div>'
+      + '</div>'
+      + '<div class="metricas-lotes__chart-card">'
+      + '<div class="metricas-lotes__chart-title">Tendencia Lotes (últimos 6 meses)</div>'
+      + '<div id="metricasLotesChartTendLotes" style="width:100%;height:240px;"></div>'
+      + '</div>'
+      + '<div class="metricas-lotes__chart-card">'
+      + '<div class="metricas-lotes__chart-title">Tendencia Solicitudes (últimos 6 meses)</div>'
+      + '<div id="metricasLotesChartTendSol" style="width:100%;height:240px;"></div>'
       + '</div>'
       + '</div>';
   }
@@ -1264,14 +1448,29 @@ var MetricasLotesView = (function() {
       + '<div class="metricas-lotes__skeleton-card"></div>'
       + '</div></div>'
       + '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis--5">'
+      + '<div class="metricas-lotes__kpis--4">'
       + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '</div></div>'
+      + '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis--4">'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '<div class="metricas-lotes__skeleton-card"></div>'
+      + '</div></div>'
+      + '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis--4">'
       + '<div class="metricas-lotes__skeleton-card"></div>'
       + '<div class="metricas-lotes__skeleton-card"></div>'
       + '<div class="metricas-lotes__skeleton-card"></div>'
       + '<div class="metricas-lotes__skeleton-card"></div>'
       + '</div></div>'
       + '<div class="metricas-lotes__charts">'
+      + '<div class="metricas-lotes__skeleton-chart"></div>'
+      + '<div class="metricas-lotes__skeleton-chart"></div>'
       + '<div class="metricas-lotes__skeleton-chart"></div>'
       + '<div class="metricas-lotes__skeleton-chart"></div>'
       + '</div>'
@@ -1301,28 +1500,51 @@ var MetricasLotesView = (function() {
     var tl = parseInt(r.totalLotes, 10) || 0;
     var ts = parseInt(r.totalSolicitudes, 10) || 0;
 
-    // Grupo 1: Lotes (4 cards)
-    var htmlLotes = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Lotes</div>'
+    // Cálculos derivados
+    var lotesEvaluados = (parseInt(r.lotesAprobados, 10) || 0) + (parseInt(r.lotesNegados, 10) || 0);
+    var lotesEnProceso = parseInt(r.lotesEnProceso, 10) || 0;
+
+    var solicitudesAprobTotal = (parseInt(r.solicitudesAprobadas, 10) || 0) + (parseInt(r.solicitudesReconsideradas, 10) || 0);
+    var solicitudesEvaluadas = solicitudesAprobTotal + (parseInt(r.solicitudesNegadas, 10) || 0);
+    var solicitudesEnProceso = parseInt(r.solicitudesEnProceso, 10) || 0;
+
+    // ═══ Sección 1: Lotes Ingresados ═══
+    var htmlLotesIngresados = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Lotes Ingresados</div>'
       + '<div class="metricas-lotes__kpis--4">'
       + _kpi('Total Lotes', _num(r.totalLotes), '', 'totalLotes', '')
-      + _kpi('Aprobados', _num(r.lotesAprobados), 'success', 'lotesAprobados', _pct(r.lotesAprobados, tl))
-      + _kpi('Negados', _num(r.lotesNegados), 'danger', 'lotesNegados', _pct(r.lotesNegados, tl))
-      + _kpi('En Proceso', _num(r.lotesEnProceso), 'warning', 'lotesEnProceso', _pct(r.lotesEnProceso, tl))
+      + _kpi('Total Evaluados', _num(lotesEvaluados), '', '', _pct(lotesEvaluados, tl))
+      + _kpi('En Proceso', _num(lotesEnProceso), 'warning', 'lotesEnProceso', _pct(lotesEnProceso, tl))
       + '</div></div>';
 
-    // Grupo 2: Solicitudes (5 cards)
-    var htmlSol = '<div class="metricas-lotes__kpis-group">'
-      + '<div class="metricas-lotes__kpis-group-title">Solicitudes</div>'
-      + '<div class="metricas-lotes__kpis--5">'
-      + _kpi('Total', _num(r.totalSolicitudes), '', 'totalSolicitudes', '')
-      + _kpi('Aprobadas', _num(r.solicitudesAprobadas), 'success', 'solicitudesAprobadas', _pct(r.solicitudesAprobadas, ts))
-      + _kpi('Negadas', _num(r.solicitudesNegadas), 'danger', 'solicitudesNegadas', _pct(r.solicitudesNegadas, ts))
-      + _kpi('Reconsideradas', _num(r.solicitudesReconsideradas), 'warning', 'solicitudesReconsideradas', _pct(r.solicitudesReconsideradas, ts))
-      + _kpi('En Proceso', _num(r.solicitudesEnProceso), 'warning', 'solicitudesEnProceso', _pct(r.solicitudesEnProceso, ts))
+    // ═══ Sección 2: Lotes Evaluados ═══
+    var htmlLotesEvaluados = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Lotes Evaluados</div>'
+      + '<div class="metricas-lotes__kpis--4">'
+      + _kpi('Total Evaluados', _num(lotesEvaluados), '', '', '')
+      + _kpi('Aprobados', _num(r.lotesAprobados), 'success', 'lotesAprobados', _pct(r.lotesAprobados, lotesEvaluados))
+      + _kpi('Negados', _num(r.lotesNegados), 'danger', 'lotesNegados', _pct(r.lotesNegados, lotesEvaluados))
       + '</div></div>';
 
-    return htmlLotes + htmlSol;
+    // ═══ Sección 3: Solicitudes Ingresadas ═══
+    var htmlSolIngresadas = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Solicitudes Ingresadas</div>'
+      + '<div class="metricas-lotes__kpis--4">'
+      + _kpi('Total Solicitudes', _num(r.totalSolicitudes), '', 'totalSolicitudes', '')
+      + _kpi('Total Evaluadas', _num(solicitudesEvaluadas), '', '', _pct(solicitudesEvaluadas, ts))
+      + _kpi('En Proceso', _num(solicitudesEnProceso), 'warning', 'solicitudesEnProceso', _pct(solicitudesEnProceso, ts))
+      + '</div></div>';
+
+    // ═══ Sección 4: Solicitudes Evaluadas ═══
+    var htmlSolEvaluadas = '<div class="metricas-lotes__kpis-group">'
+      + '<div class="metricas-lotes__kpis-group-title">Solicitudes Evaluadas</div>'
+      + '<div class="metricas-lotes__kpis--4">'
+      + _kpi('Total Aprobadas', _num(r.solicitudesAprobadas), 'success', 'solicitudesAprobadas', _pct(r.solicitudesAprobadas, solicitudesEvaluadas))
+      + _kpi('Total Negadas', _num(r.solicitudesNegadas), 'danger', 'solicitudesNegadas', _pct(r.solicitudesNegadas, solicitudesEvaluadas))
+      + _kpi('Total Reconsideradas', _num(r.solicitudesReconsideradas), 'warning', 'solicitudesReconsideradas', _pct(r.solicitudesReconsideradas, solicitudesEvaluadas))
+      + '</div></div>';
+
+    return htmlLotesIngresados + htmlLotesEvaluados + htmlSolIngresadas + htmlSolEvaluadas;
   }
 
   /**
@@ -1370,6 +1592,7 @@ var MetricasLotesView = (function() {
       + '<thead><tr>'
       + '<th scope="col">Fecha</th>'
       + '<th scope="col">Código Lote</th>'
+      + '<th scope="col">Sucursal</th>'
       + '<th scope="col">Resultado</th>'
       + '<th scope="col" class="num-cell">Solicitudes</th>'
       + '<th scope="col" class="num-cell">Aprobadas<br><small>en Lote</small></th>'
@@ -1399,6 +1622,7 @@ var MetricasLotesView = (function() {
       html += '<tr>'
         + '<td>' + _escapeHtml(d.fechaLote || '') + '</td>'
         + '<td style="font-family:var(--font-mono);font-size:var(--text-xs);">' + _escapeHtml(d.codigoLote || '') + '</td>'
+        + '<td style="font-size:var(--text-xs);">' + _escapeHtml(d.sucursal || '') + '</td>'
         + '<td><span class="' + badgeClass + '">' + badgeText + '</span></td>'
         + '<td class="num-cell num-cell--highlight">' + _num(d.cantidadSolicitudes) + '</td>'
         + '<td class="num-cell">' + _num(d.solicitudesAprobadasEnLote) + '</td>'
@@ -1437,6 +1661,229 @@ var MetricasLotesView = (function() {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  /**
+   * Llena dinámicamente los chips de sucursal basado en los datos recibidos.
+   * @param {string[]} sucursales - Array de sucursales únicas
+   */
+  function _llenarChipsSucursal(sucursales) {
+    var contenedor = document.getElementById('metricasLotesChipsSucursal');
+    if (!contenedor) return;
+
+    if (!sucursales || sucursales.length === 0) {
+      contenedor.style.display = 'none';
+      return;
+    }
+
+    var html = '<span class="metricas-lotes__chips-label">Sucursal:</span>';
+    var activaTodas = (!_sucursalActiva || _sucursalActiva === 'todas') ? ' metricas-lotes__chip--active' : '';
+    html += '<button class="metricas-lotes__chip' + activaTodas + '" data-sucursal="todas" type="button">Todas</button>';
+
+    for (var i = 0; i < sucursales.length; i++) {
+      var activa = (_sucursalActiva === sucursales[i]) ? ' metricas-lotes__chip--active' : '';
+      html += '<button class="metricas-lotes__chip' + activa + '" data-sucursal="' + _escapeHtml(sucursales[i]) + '" type="button">' + _escapeHtml(sucursales[i]) + '</button>';
+    }
+
+    contenedor.innerHTML = html;
+    contenedor.style.display = 'flex';
+
+    // Conectar eventos
+    var chips = contenedor.querySelectorAll('.metricas-lotes__chip[data-sucursal]');
+    for (var j = 0; j < chips.length; j++) {
+      chips[j].addEventListener('click', function() {
+        _sucursalActiva = this.getAttribute('data-sucursal');
+        var allChips = document.querySelectorAll('#metricasLotesChipsSucursal .metricas-lotes__chip');
+        for (var k = 0; k < allChips.length; k++) {
+          allChips[k].classList.remove('metricas-lotes__chip--active');
+        }
+        this.classList.add('metricas-lotes__chip--active');
+        _paginaActual = 1;
+        _renderizarVista();
+      });
+    }
+  }
+
+  /**
+   * Oculta los chips de sucursal cuando no hay datos.
+   */
+  function _ocultarChipsSucursal() {
+    var contenedor = document.getElementById('metricasLotesChipsSucursal');
+    if (contenedor) contenedor.style.display = 'none';
+  }
+
+  /**
+   * Dibuja las gráficas de tendencia histórica (lotes y solicitudes).
+   * Se llama cuando se reciben los datos del endpoint de histórico.
+   * @param {Array} historico - Array de datos mensuales
+   */
+  function _dibujarGraficasTendencia(historico) {
+    if (!historico || historico.length === 0) return;
+    if (typeof google === 'undefined' || !google.visualization) {
+      if (typeof google !== 'undefined' && google.charts) {
+        google.charts.setOnLoadCallback(function() {
+          _dibujarGraficasTendenciaInterno(historico);
+        });
+      }
+      return;
+    }
+    _dibujarGraficasTendenciaInterno(historico);
+  }
+
+  /**
+   * Dibuja las gráficas de tendencia (internamente, google.visualization disponible).
+   * @param {Array} historico
+   */
+  function _dibujarGraficasTendenciaInterno(historico) {
+    if (!google || !google.visualization) return;
+
+    // Verificar que los contenedores existan (se renderizan en _htmlCharts)
+    var contLotes = document.getElementById('metricasLotesChartTendLotes');
+    var contSolicitudes = document.getElementById('metricasLotesChartTendSol');
+
+    if (!contLotes || !contSolicitudes) return;
+
+    // ── Tendencia de Lotes (barras agrupadas) ──
+    var dataLotes = [['Mes', 'Aprobados', 'Negados']];
+    for (var i = 0; i < historico.length; i++) {
+      dataLotes.push([
+        historico[i].etiqueta,
+        historico[i].lotesAprobados || 0,
+        historico[i].lotesNegados || 0
+      ]);
+    }
+
+    var chartDataLotes = google.visualization.arrayToDataTable(dataLotes);
+    var optionsLotes = {
+      legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+      colors: ['#0fbdb7', '#bd0f14'],
+      chartArea: { width: '85%', height: '70%' },
+      bar: { groupWidth: '60%' },
+      backgroundColor: 'transparent',
+      vAxis: { minValue: 0, textStyle: { fontSize: 10 } },
+      hAxis: { textStyle: { fontSize: 10 }, slantedText: true, slantedTextAngle: 30 },
+      tooltip: { textStyle: { fontSize: 12 } },
+      animation: { startup: true, duration: 400, easing: 'out' }
+    };
+
+    var chartLotes = new google.visualization.ColumnChart(contLotes);
+    chartLotes.draw(chartDataLotes, optionsLotes);
+
+    // ── Tendencia de Solicitudes (barras agrupadas) ──
+    var dataSol = [['Mes', 'Aprobadas', 'Negadas']];
+    for (var j = 0; j < historico.length; j++) {
+      dataSol.push([
+        historico[j].etiqueta,
+        historico[j].solicitudesAprobadas || 0,
+        historico[j].solicitudesNegadas || 0
+      ]);
+    }
+
+    var chartDataSol = google.visualization.arrayToDataTable(dataSol);
+    var optionsSol = {
+      legend: { position: 'bottom', textStyle: { fontSize: 11 } },
+      colors: ['#0fbdb7', '#bd0f14'],
+      chartArea: { width: '85%', height: '70%' },
+      bar: { groupWidth: '60%' },
+      backgroundColor: 'transparent',
+      vAxis: { minValue: 0, textStyle: { fontSize: 10 } },
+      hAxis: { textStyle: { fontSize: 10 }, slantedText: true, slantedTextAngle: 30 },
+      tooltip: { textStyle: { fontSize: 12 } },
+      animation: { startup: true, duration: 400, easing: 'out' }
+    };
+
+    var chartSol = new google.visualization.ColumnChart(contSolicitudes);
+    chartSol.draw(chartDataSol, optionsSol);
+  }
+
+  /**
+   * Carga el pipeline de distribución En Proceso.
+   * Envía el rango de fechas al backend que filtra Control_General
+   * por Fecha Lote (col C) y excluye TERMINADO.
+   */
+  function _cargarDesgloseEnProceso() {
+    if (!_datosActuales || !_datosActuales.detallePorLote) return;
+
+    var inputDesde = document.getElementById('metricasLotesFechaDesde');
+    var inputHasta = document.getElementById('metricasLotesFechaHasta');
+    var fechaDesde = inputDesde ? inputDesde.value : '';
+    var fechaHasta = inputHasta ? inputHasta.value : '';
+
+    if (!fechaDesde || !fechaHasta) return;
+
+    var contenedorDesglose = document.getElementById('metricasLotesDesglose');
+
+    if (contenedorDesglose) {
+      contenedorDesglose.innerHTML = '<div class="metricas-lotes__desglose"><div class="metricas-lotes__desglose-loading">Cargando distribución...</div></div>';
+    }
+
+    callServer('api_obtenerDetalleEnProceso', fechaDesde, fechaHasta)
+      .then(function(datos) {
+        _renderizarDesglose(datos);
+      })
+      .catch(function(err) {
+        console.error('Error cargando pipeline:', err);
+        if (contenedorDesglose) contenedorDesglose.innerHTML = '';
+      });
+  }
+
+  /**
+   * Renderiza el desglose de sub-estados de solicitudes en proceso.
+   * @param {Object|null} datos - Respuesta de api_obtenerDetalleEnProceso
+   */
+  function _renderizarDesglose(datos) {
+    var contenedorDesglose = document.getElementById('metricasLotesDesglose');
+    if (!contenedorDesglose) return;
+
+    if (!datos || !datos.desglose) {
+      contenedorDesglose.innerHTML = '<div class="metricas-lotes__desglose">'
+        + '<div class="metricas-lotes__desglose-title">Desglose En Proceso</div>'
+        + '<p style="font-size:var(--text-sm);color:var(--color-mono-400);margin:0;">No se encontraron solicitudes en proceso para desglosar.</p>'
+        + '</div>';
+      return;
+    }
+
+    var d = datos.desglose;
+    var items = [
+      { label: 'Pendiente Radicar', value: d.pendienteRadicar || 0 },
+      { label: 'Radicado', value: d.radicado || 0 },
+      { label: 'Pendiente Asignar', value: d.pendienteAsignar || 0 },
+      { label: 'En Análisis', value: d.enAnalisis || 0 },
+      { label: 'Error en Terceros', value: d.errorTerceros || 0 },
+      { label: 'Envío Formato LMI', value: d.envioFormatoLMI || 0 },
+      { label: 'Envío Carta LMI', value: d.envioCartaLMI || 0 },
+      { label: 'Pendiente Paz y Salvo', value: d.pendientePS || 0 },
+      { label: 'Otros', value: d.otros || 0 }
+    ];
+
+    // Solo mostrar items con valor > 0, ordenados de mayor a menor
+    var itemsConValor = items.filter(function(item) { return item.value > 0; });
+    itemsConValor.sort(function(a, b) { return b.value - a.value; });
+    var totalItems = datos.desglose.total || itemsConValor.reduce(function(s, it) { return s + it.value; }, 0);
+
+    if (itemsConValor.length === 0) {
+      contenedorDesglose.innerHTML = '<div class="metricas-lotes__desglose">'
+        + '<div class="metricas-lotes__desglose-title">Desglose En Proceso</div>'
+        + '<p style="font-size:var(--text-sm);color:var(--color-mono-400);margin:0;">No se encontraron coincidencias en Control General.</p>'
+        + '</div>';
+      return;
+    }
+
+    var html = '<div class="metricas-lotes__desglose">'
+      + '<div class="metricas-lotes__desglose-title">Distribución En Proceso — ' + totalItems + ' solicitudes en Control General</div>'
+      + '<div class="metricas-lotes__desglose-grid">';
+
+    for (var i = 0; i < itemsConValor.length; i++) {
+      var pct = totalItems > 0 ? Math.round((itemsConValor[i].value / totalItems) * 100) : 0;
+      html += '<div class="metricas-lotes__desglose-item">'
+        + '<span class="metricas-lotes__desglose-label">' + _escapeHtml(itemsConValor[i].label) + '</span>'
+        + '<span class="metricas-lotes__desglose-value">' + itemsConValor[i].value + '</span>'
+        + '<span class="metricas-lotes__desglose-pct">' + pct + '%</span>'
+        + '</div>';
+    }
+
+    html += '</div></div>';
+    contenedorDesglose.innerHTML = html;
   }
 
   // API pública del módulo

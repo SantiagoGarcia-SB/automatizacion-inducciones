@@ -722,6 +722,46 @@ function api_obtenerMetricasLotes(fechaDesde, fechaHasta) {
   }
 }
 
+/**
+ * API: Obtiene el desglose de estados operativos para el pipeline.
+ * Filtra Control_General por rango de fechas (col C) y excluye TERMINADO.
+ *
+ * @param {string} fechaDesde - YYYY-MM-DD
+ * @param {string} fechaHasta - YYYY-MM-DD
+ * @returns {{desglose: Object, detalle: Array}}
+ */
+function api_obtenerDetalleEnProceso(fechaDesde, fechaHasta) {
+  try {
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+
+    if (!fechaDesde || !fechaHasta) {
+      return { desglose: {}, detalle: [] };
+    }
+
+    return _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta);
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDetalleEnProceso', e.message);
+    return { desglose: {}, detalle: [] };
+  }
+}
+
+/**
+ * API: Obtiene métricas históricas de lotes/solicitudes para los últimos N meses.
+ * Usado para la gráfica de tendencia. Se llama bajo demanda (en paralelo con métricas).
+ *
+ * @param {number} cantidadMeses - Cantidad de meses hacia atrás (1-12, default 6)
+ * @returns {Array<{mes:number, anio:number, etiqueta:string, lotesAprobados:number, lotesNegados:number, solicitudesAprobadas:number, solicitudesNegadas:number}>}
+ */
+function api_obtenerMetricasLotesHistorico(cantidadMeses) {
+  try {
+    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    return calcularMetricasLotesHistorico(cantidadMeses || 6);
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMetricasLotesHistorico', e.message);
+    return [];
+  }
+}
+
 // ── Funciones internas de Api.js ──
 
 /**
