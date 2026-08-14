@@ -9,6 +9,11 @@ var ID_HOJA_CONTROL      = "1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI";
 var ID_ARCHIVO_ANALISIS  = "1ph9pgf-ADc2hE6U4KaKXAGY8ghh5Z940PuLVU_PlOQ0";
 var ID_CARPETA_RAIZ      = "1PrL4T5hYGvmjpDPUVUjUkuC2iTFXFPBW";
 
+var ID_RADICACION_SHEET       = ID_HOJA_CONTROL; // Mismo libro que Hoja_Control (contiene CORREOS y datos de ejecutivos)
+var ID_PLANTILLA_COMERCIAL    = "1MOX85WmLWLw0q-NIDaGQNn6-oii3KvS_94vto9vZT2o";
+var ID_PLANTILLA_INMOBILIARIA = "19OFLK3j3B8rYZxU9vn5uYwwEj7xJNDFlrcmRoQ7MW_g";
+var ID_CARPETA_DESTINO        = "1KWleXWNteUrmTOqNJV5J8-hGhAd6q6KQ";
+
 var MIME_EXCEL_VALIDOS = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/vnd.ms-excel"
@@ -28,6 +33,21 @@ const DESTINOS_INVALIDOS = new Set([
   "-","--","---",".","..","...","_","__","?","??","0","00"
 ]);
 
+
+// ============================================================
+//  MENÚ PERSONALIZADO
+// ============================================================
+
+/**
+ * Trigger automático: Se ejecuta al abrir el libro de cálculo.
+ * Registra el menú personalizado con las opciones disponibles.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('📋 Inducciones')
+    .addItem('📧 Enviar resultados del lote activo', 'menuEnviarResultadosLote')
+    .addToUi();
+}
 
 // ============================================================
 //  PUNTO DE ENTRADA WEB

@@ -472,3 +472,110 @@ function PRUEBA_todosLosCorreos() {
   Logger.log("  RESULTADO: " + enviados + "/8 correos enviados a " + emailDestino);
   Logger.log("═══════════════════════════════════════════════");
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RESULTADOS — Prueba del flujo completo de generación de PDFs y envío
+// Ejecutar manualmente desde el editor. Envía SOLO a quien ejecuta la función.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Prueba completa del flujo de resultados:
+ *   1. Lee datos REALES del lote en "Calculo Lote"
+ *   2. Resuelve contactos (ejecutivo, director, backup)
+ *   3. Genera los 2 PDFs (comercial + inmobiliaria)
+ *   4. Construye el correo HTML
+ *   5. PERO envía solo a TU email (no al comercial)
+ *   6. NO registra en Historico_Envios
+ *
+ * Requisitos:
+ *   - La hoja "Calculo Lote" del libro de análisis debe tener datos de un lote
+ *   - Las plantillas deben existir (ID_PLANTILLA_COMERCIAL, ID_PLANTILLA_INMOBILIARIA)
+ *
+ * Ejecutar desde el desplegable "Ejecutar" del editor de Apps Script.
+ */
+function PRUEBA_enviarResultadosLote() {
+  var emailDestino = Session.getActiveUser().getEmail();
+
+  Logger.log("═══════════════════════════════════════════════");
+  Logger.log("  PRUEBA — Envío de Resultados de Lote");
+  Logger.log("  Destino: " + emailDestino + " (solo tú)");
+  Logger.log("═══════════════════════════════════════════════\n");
+
+  // 1. Leer y validar datos del lote
+  Logger.log("1️⃣ Leyendo datos de Calculo Lote...");
+  var resultado = _leerDatosLote_();
+  if (!resultado.ok) {
+    Logger.log("❌ Error al leer datos del lote: " + resultado.error);
+    return;
+  }
+  var datosLote = resultado.datos;
+  Logger.log("   ✅ Lote: " + datosLote.idLote + " | Inmobiliaria: " + datosLote.inmobiliaria);
+  Logger.log("   Aprobadas: " + datosLote.cantAprobadas + " | Negadas: " + datosLote.cantNegadas);
+  Logger.log("   Solicitudes encontradas: " + (datosLote.solicitudes ? datosLote.solicitudes.length : 0));
+
+  // 2. Resolver contactos
+  Logger.log("\n2️⃣ Resolviendo contactos...");
+  var contacto = _resolverContactoComercial_(datosLote.idLote);
+  if (!contacto.ok) {
+    Logger.log("❌ Error al resolver contactos: " + contacto.error);
+    return;
+  }
+  Logger.log("   ✅ Ejecutivo: " + contacto.ejecutivo);
+  Logger.log("   Director: " + (contacto.director || "(no encontrado)"));
+
+  // 3. Resolver backup
+  Logger.log("\n3️⃣ Resolviendo backup...");
+  var backup = _resolverBackupEmail_(contacto.ejecutivo);
+  Logger.log("   Backup: " + (backup || "(no aplica)"));
+
+  // 4. Generar PDFs
+  Logger.log("\n4️⃣ Generando PDF Comercial...");
+  var pdfComercial;
+  try {
+    pdfComercial = _generarPdfDesdeTemplate_(ID_PLANTILLA_COMERCIAL, datosLote, datosLote.solicitudes);
+    Logger.log("   ✅ PDF Comercial generado (" + pdfComercial.getBytes().length + " bytes)");
+  } catch (e) {
+    Logger.log("   ❌ Error generando PDF Comercial: " + e.message);
+    return;
+  }
+
+  Logger.log("   Generando PDF Inmobiliaria...");
+  var pdfInmobiliaria;
+  try {
+    pdfInmobiliaria = _generarPdfDesdeTemplate_(ID_PLANTILLA_INMOBILIARIA, datosLote, datosLote.solicitudes);
+    Logger.log("   ✅ PDF Inmobiliaria generado (" + pdfInmobiliaria.getBytes().length + " bytes)");
+  } catch (e) {
+    Logger.log("   ❌ Error generando PDF Inmobiliaria: " + e.message);
+    return;
+  }
+
+  // 5. Construir CC (para logging, no se usa en el envío de prueba)
+  var cadenaCC = obtenerCadenaJerarquica(contacto.ejecutivo);
+  var listaCC = _construirListaCC_(contacto.director, backup, cadenaCC);
+  Logger.log("\n5️⃣ CC que se usaría en producción: " + (listaCC.length > 0 ? listaCC.join(", ") : "(vacío)"));
+
+  // 6. Construir HTML y enviar SOLO a ti
+  Logger.log("\n6️⃣ Enviando correo de prueba a " + emailDestino + "...");
+  datosLote._nombreComercial = emailANombre(contacto.ejecutivo, "PRIMER_NOMBRE") || "Ejecutivo Comercial";
+  var htmlBody = _construirHtmlResultados_(datosLote);
+
+  MailApp.sendEmail({
+    to: emailDestino,
+    subject: "[PRUEBA] \u2705 Resultados de inducci\u00F3n \u00B7 Lote " + datosLote.idLote,
+    htmlBody: htmlBody,
+    attachments: [pdfComercial, pdfInmobiliaria],
+    replyTo: "noreply@ellibertador.co",
+    name: "Inducciones · El Libertador (PRUEBA)"
+  });
+
+  // 7. Resumen
+  Logger.log("\n═══════════════════════════════════════════════");
+  Logger.log("  ✅ PRUEBA EXITOSA");
+  Logger.log("  Correo enviado a: " + emailDestino);
+  Logger.log("  Lote: " + datosLote.idLote);
+  Logger.log("  PDFs adjuntos: 2 (comercial + inmobiliaria)");
+  Logger.log("  ⚠️  NO se registró en Historico_Envios");
+  Logger.log("  ⚠️  NO se envió al comercial real (" + contacto.ejecutivo + ")");
+  Logger.log("═══════════════════════════════════════════════");
+}

@@ -1082,3 +1082,24 @@ function _hashEquipoVisible(emailsEquipo) {
   }
   return 'EQ_' + (hash >>> 0).toString(36);
 }
+
+// ============================================================
+//  API — RESULTADOS (Generación PDFs y envío)
+// ============================================================
+
+/**
+ * API: Genera PDFs de resultados y envía correo al comercial.
+ * Roles autorizados: ADMIN, DIRECTOR, GERENTE, LIDER.
+ * @returns {{ok: boolean, mensaje: string}}
+ * @sheets_read 3-4
+ * @sheets_write 1
+ */
+function api_enviarResultadosLote() {
+  try {
+    verificarRol(['ADMIN', 'DIRECTOR', 'GERENTE', 'LIDER']);
+    return enviarResultadosLote();
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_enviarResultadosLote', e.message);
+    return { ok: false, mensaje: 'Error al procesar el envío de resultados.' };
+  }
+}
