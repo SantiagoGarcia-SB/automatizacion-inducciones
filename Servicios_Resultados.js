@@ -79,12 +79,11 @@ function enviarResultadosLote() {
     // 8. Construir HTML del correo y enviar
     datosLote._nombreComercial = emailANombre(contacto.ejecutivo, "PRIMER_NOMBRE") || "Ejecutivo Comercial";
     var htmlBody = _construirHtmlResultados_(datosLote);
-    var bccAuditoria = PropertiesService.getScriptProperties().getProperty("BCC_AUDITORIA") || "";
 
     MailApp.sendEmail({
       to: contacto.ejecutivo,
       cc: listaCC.join(","),
-      bcc: bccAuditoria,
+      bcc: BCC_AUDITORIA,
       subject: "\u2705 Resultados de inducci\u00F3n \u00B7 Lote " + datosLote.idLote,
       htmlBody: htmlBody,
       attachments: [pdfComercial, pdfInmobiliaria],
