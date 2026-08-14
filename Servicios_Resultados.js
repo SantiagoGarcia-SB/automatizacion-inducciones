@@ -942,7 +942,7 @@ function _registrarEnHistorico_(datosLote, destinatarios) {
     }
 
     // Formatear fecha en zona horaria de Colombia
-    var fechaEmision = Utilities.formatDate(new Date(), "America/Bogota", "dd/MM/yyyy HH:mm:ss");
+    var fechaEmision = datosLote.fechaEmision || Utilities.formatDate(new Date(), "America/Bogota", "dd/MM/yyyy HH:mm:ss");
 
     // Construir lista de destinatarios como cadena separada por coma
     var listaDestinatarios = "";
@@ -950,17 +950,24 @@ function _registrarEnHistorico_(datosLote, destinatarios) {
       listaDestinatarios = destinatarios.join(", ");
     }
 
-    // Construir fila con 9 columnas según el diseño
+    // Construir fila con 16 columnas (mismo orden que el script antiguo)
     var fila = [
-      fechaEmision,
-      datosLote.idLote || "",
-      datosLote.inmobiliaria || "",
-      datosLote.poliza || "",
-      datosLote.sucursal || "",
-      datosLote.cantAprobadas || 0,
-      datosLote.cantNegadas || 0,
-      datosLote.resultadoFinal || "",
-      listaDestinatarios
+      fechaEmision,                            // Fecha de Emisión
+      datosLote.poliza || "",                  // Póliza
+      datosLote.inmobiliaria || "",            // Nombre de Inmobiliaria
+      datosLote.sucursal || "",                // Sucursal
+      datosLote.solicitudesPresentadas || "",  // Cantidad Solicitudes Presentadas
+      datosLote.tasaSolicitada || "",          // Tasa Inducción Solicitada (IVA Incluido)
+      datosLote.valorPresentado || "",         // Valor Asegurado Presentado
+      String(datosLote.cantAprobadas || 0),    // Cantidad Solicitudes Aprobadas
+      String(datosLote.cantNegadas || 0),      // Cantidad Solicitudes Negadas
+      datosLote.valorAprobado || "",           // Valor Asegurado Aprobado
+      datosLote.tasaAprobada || "",            // Tasa Inducción Aprobada (IVA Incluido)
+      datosLote.idLote || "",                  // Código Lote
+      datosLote.resultadoFinal || "",          // Resultado Final Lote
+      datosLote.margenLote || "",              // Margen Lote
+      datosLote.margenGlobal || "",            // Margen Global
+      datosLote.aseguradoraAnterior || ""      // Aseguradora Anterior
     ];
 
     // Append envuelto en retry para manejar fallos transitorios
