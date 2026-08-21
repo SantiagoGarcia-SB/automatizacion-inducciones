@@ -55,6 +55,12 @@ var CacheManager = {
 
   esValido: function(key) {
     return this.get(key) !== null;
+  },
+
+  /** Momento (Date.now()) en que se guardó el dato, o null si no hay entrada. */
+  getTimestamp: function(key) {
+    var entry = this._store[key];
+    return entry ? entry.timestamp : null;
   }
 };
 
@@ -152,10 +158,11 @@ var SkeletonSystem = {
   _generarSkeletonDashboard: function() {
     var html = '<div class="stack">';
     // Hero card placeholder
-    html += '<div class="card card--hero" style="padding:var(--space-6);">'
+    html += '<div class="metric-hero-card metric-hero-azul" style="cursor:default;">'
+      + '<div style="width:100%;">'
       + '<div class="skeleton-line" style="height:24px;width:50%;background:rgba(255,255,255,0.15);margin-bottom:var(--space-2);"></div>'
       + '<div class="skeleton-line" style="height:14px;width:35%;background:rgba(255,255,255,0.1);"></div>'
-      + '</div>';
+      + '</div></div>';
     // 4 KPI placeholders
     html += '<div class="grid grid--4" style="gap:var(--space-3);">';
     for (var i = 0; i < 4; i++) {
@@ -410,8 +417,13 @@ var MENUS_POR_ROL = {
 function _ocultarBootOverlay() {
   var overlay = document.getElementById('bootOverlay');
   if (!overlay) return;
+  // Mensaje final antes de desaparecer — feedback de completitud
+  var statusEl = document.getElementById('bootStatus');
+  if (statusEl) statusEl.textContent = '¡Listo!';
+  var hintEl = document.getElementById('bootHint');
+  if (hintEl) hintEl.textContent = '';
   overlay.classList.add('boot-overlay--oculto');
-  setTimeout(function() { overlay.style.display = 'none'; }, 350);
+  setTimeout(function() { overlay.style.display = 'none'; }, 500);
 }
 
 function inicializarApp() {
@@ -445,20 +457,34 @@ function inicializarApp() {
     });
   }
 
+  // Recordar la última sección visitada (sessionStorage) para que un
+  // refresh de página no bote siempre a "Inicio" — ver navegarA().
+  var seccionRecordada = null;
+  try { seccionRecordada = sessionStorage.getItem('ultimaSeccion'); } catch (e) { /* Storage bloqueado (ej. modo incógnito estricto) */ }
+  var menuUsuario = MENUS_POR_ROL[usuario.rol] || [];
+  var seccionRecordadaValida = seccionRecordada && menuUsuario.some(function(m) { return m.id === seccionRecordada; });
+
   promesaResumen
     .then(function(resumen) {
-      if (resumen) {
-        _renderizarDashboardConDatos(resumen);
-        if (typeof actualizarLineasDeVida === 'function') {
-          actualizarLineasDeVida(usuario.rol, resumen);
-        }
+      if (resumen && typeof actualizarLineasDeVida === 'function') {
+        actualizarLineasDeVida(usuario.rol, resumen);
       }
-      _ocultarBootOverlay();
+      if (seccionRecordadaValida && seccionRecordada !== 'dashboard') {
+        _ocultarBootOverlay();
+        navegarA(seccionRecordada);
+      } else {
+        if (resumen) _renderizarDashboardConDatos(resumen);
+        _ocultarBootOverlay();
+      }
     })
     .catch(function(err) {
       console.error('Error cargando dashboard inicial:', err);
       _ocultarBootOverlay();
-      cargarDashboard();
+      if (seccionRecordadaValida && seccionRecordada !== 'dashboard') {
+        navegarA(seccionRecordada);
+      } else {
+        cargarDashboard();
+      }
     });
 
   // ── 2. Métricas: background pre-fetch unificado (no bloquea splash) ──
@@ -551,25 +577,66 @@ function renderizarMenu(rol) {
   for (var i = 0; i < menu.length; i++) {
     var item = menu[i];
     if (item.label === '---') {
-      html += '<li class="app-sidebar__separator"></li>';
+      html += '<li class="sidebar-separator"></li>';
     } else {
-      html += '<li><a class="app-sidebar__link" href="#/' + item.id + '" data-view="' + item.id + '">'
-        + '<span class="app-sidebar__icon">' + item.icon + '</span>'
-        + '<span>' + item.label + '</span>'
+      html += '<li><a class="nav-link-admin" href="#/' + item.id + '" data-view="' + item.id + '">'
+        + '<i>' + item.icon + '</i>'
+        + '<span class="nav-text">' + item.label + '</span>'
         + '</a></li>';
     }
   }
   nav.innerHTML = html;
 
   // Event listeners para navegación
-  var links = nav.querySelectorAll('.app-sidebar__link');
+  var links = nav.querySelectorAll('.nav-link-admin');
   for (var j = 0; j < links.length; j++) {
     links[j].addEventListener('click', function(e) {
       e.preventDefault();
       var view = this.getAttribute('data-view');
       navegarA(view);
     });
+    // El sidebar ya se expande con hover — aprovechar ese mismo gesto para
+    // precargar en segundo plano los datos de la sección (ver _prefetchSeccion).
+    links[j].addEventListener('mouseenter', function() {
+      _prefetchSeccion(this.getAttribute('data-view'));
+    });
   }
+}
+
+/**
+ * Precarga en CacheManager los datos de una sección al pasar el mouse
+ * por su link del sidebar, para que si el usuario hace clic momentos
+ * después, la vista aparezca sin loading. No toca el DOM — solo llena
+ * caché. Si la sección ya está en caché o ya hay una carga en curso,
+ * no hace nada (evita pedidos duplicados).
+ */
+var _prefetchEnCurso = {};
+
+var _HOVER_PREFETCH = {
+  'lotes': function() {
+    if (!CacheManager.get('lotes')) _prefetchLotesEnBackground();
+  },
+  'errores': function() {
+    if (CacheManager.get('errores')) return;
+    return callServer('api_obtenerMisErroresPendientes').then(function(d) {
+      CacheManager.set('errores', d || []);
+    }).catch(function() { /* silencioso — se reintenta al navegar */ });
+  },
+  'cola-auxiliar': function() {
+    if (CacheManager.get('cola-auxiliar')) return;
+    return callServer('api_obtenerColaAuxiliar').then(function(d) {
+      CacheManager.set('cola-auxiliar', d || []);
+    }).catch(function() { /* silencioso — se reintenta al navegar */ });
+  }
+};
+
+function _prefetchSeccion(seccion) {
+  var loader = _HOVER_PREFETCH[seccion];
+  if (!loader || _prefetchEnCurso[seccion]) return;
+  _prefetchEnCurso[seccion] = true;
+  Promise.resolve(loader()).then(function() {
+    _prefetchEnCurso[seccion] = false;
+  });
 }
 
 function mostrarVista(vistaId) {
@@ -580,12 +647,12 @@ function mostrarVista(vistaId) {
   }
   // Mostrar la solicitada
   var vista = document.getElementById(vistaId);
-  if (vista) vista.style.display = 'block';
+  if (vista) { vista.style.display = 'block'; vista.classList.add('tab-panel'); }
 
   // Marcar item activo en sidebar
-  var links = document.querySelectorAll('.app-sidebar__link');
+  var links = document.querySelectorAll('.nav-link-admin');
   for (var j = 0; j < links.length; j++) {
-    links[j].classList.remove('app-sidebar__link--active');
+    links[j].classList.remove('active');
   }
 }
 
@@ -601,14 +668,17 @@ function navegarA(seccion) {
 
   // Marcar como activo
   var link = document.querySelector('[data-view="' + seccion + '"]');
-  if (link) link.classList.add('app-sidebar__link--active');
+  if (link) link.classList.add('active');
 
   // Cerrar sidebar en mobile
   var sidebar = document.getElementById('sidebar');
-  if (sidebar) sidebar.classList.remove('app-layout__sidebar--open');
+  var backdrop = document.getElementById('sidebarBackdrop');
+  if (sidebar) sidebar.classList.remove('sidebar-open');
+  if (backdrop) backdrop.classList.remove('show');
 
-  // Guardar sección activa
+  // Guardar sección activa (memoria + sessionStorage para sobrevivir un refresh)
   _seccionActiva = seccion;
+  try { sessionStorage.setItem('ultimaSeccion', seccion); } catch (e) { /* Storage bloqueado */ }
 
   switch (seccion) {
     case 'dashboard':
@@ -719,17 +789,46 @@ function cargarDashboard() {
     });
 }
 
+/**
+ * Texto relativo tipo "hace unos segundos" / "hace 4 min" / "hace 2 h"
+ * a partir de un timestamp (Date.now()).
+ */
+function _tiempoRelativo(timestampMs) {
+  if (!timestampMs) return '';
+  var segundos = Math.round((Date.now() - timestampMs) / 1000);
+  if (segundos < 10) return 'justo ahora';
+  if (segundos < 60) return 'hace ' + segundos + ' s';
+  var minutos = Math.round(segundos / 60);
+  if (minutos < 60) return 'hace ' + minutos + ' min';
+  var horas = Math.round(minutos / 60);
+  return 'hace ' + horas + ' h';
+}
+
+/** Fuerza una recarga del dashboard ignorando la caché. */
+function _refrescarDashboard() {
+  CacheManager.invalidar('dashboard');
+  cargarDashboard();
+}
+
 function _renderizarDashboardConDatos(r) {
       var hora = new Date().getHours();
       var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
       var nombre = (APP_USUARIO && APP_USUARIO.nombre) ? APP_USUARIO.nombre : '';
       var esAdmin = APP_USUARIO && (APP_USUARIO.rol === 'LIDER' || APP_USUARIO.rol === 'ADMIN' || APP_USUARIO.rol === 'DIRECTOR' || APP_USUARIO.rol === 'GERENTE' || APP_USUARIO.rol === 'ASESOR');
 
+      var actualizadoTs = CacheManager.getTimestamp('dashboard');
+      var actualizadoTexto = actualizadoTs ? _tiempoRelativo(actualizadoTs) : 'justo ahora';
+
       var html = '<div class="stack">'
         // Hero compacto
-        + '<div class="card card--hero" style="padding:var(--space-6);">'
-        + '<h2 style="margin-bottom:var(--space-1);">' + saludo + ', ' + nombre + '</h2>'
-        + '<p style="margin:0;font-size:var(--text-sm);">Panel de gestión de inducciones</p>'
+        + '<div class="metric-hero-card metric-hero-azul" style="cursor:default;">'
+        + '<div><div class="metric-hero-label" style="text-transform:none;letter-spacing:normal;font-size:1.1rem;">' + saludo + ', ' + nombre + '</div>'
+        + '<div class="metric-hero-sub">Panel de gestión de inducciones</div></div>'
+        + '<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
+        + '<span style="font-size:0.72rem;color:rgba(255,255,255,0.75);white-space:nowrap;" id="dashboardFreshness">Actualizado ' + actualizadoTexto + '</span>'
+        + '<button type="button" class="btn-action" onclick="event.stopPropagation();_refrescarDashboard();" title="Actualizar" style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.3);color:#fff;">'
+        + '&#8635;</button>'
+        + '</div>'
         + '</div>';
 
       if (esAdmin) {
@@ -786,16 +885,16 @@ function _renderizarDashboardConDatos(r) {
             + '</div>';
         }
 
-        // Accesos rápidos como cards compactas
-        html += '<div class="grid grid--2" style="gap:var(--space-3);">'
-          + '<div class="card" onclick="navegarA(\'radicar\')" style="cursor:pointer;padding:var(--space-5);display:flex;align-items:center;gap:var(--space-3);">'
-          + '<div style="font-size:1.5rem;">📤</div>'
-          + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">Radicar nuevo lote</strong>'
-          + '<p style="margin:0;font-size:var(--text-xs);color:var(--color-mono-500);">Carga tu planilla y envía a radicación</p></div></div>'
-          + '<div class="card" onclick="navegarA(\'lotes\')" style="cursor:pointer;padding:var(--space-5);display:flex;align-items:center;gap:var(--space-3);">'
-          + '<div style="font-size:1.5rem;">📋</div>'
-          + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">Consultar mis lotes</strong>'
-          + '<p style="margin:0;font-size:var(--text-xs);color:var(--color-mono-500);">Busca y filtra por estado</p></div></div>'
+        // Accesos rápidos como metric-detail-card (icono + texto + flecha al hover)
+        html += '<div class="metrics-row-detail" style="grid-template-columns:1fr 1fr;">'
+          + '<div class="metric-detail-card" onclick="navegarA(\'radicar\')">'
+          + '<div class="metric-detail-dot" style="background:var(--rojo);width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">📤</div>'
+          + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);">Radicar nuevo lote</span>'
+          + '<span style="font-size:0.78rem;color:var(--text-muted);">Carga tu planilla y envía a radicación</span></div></div>'
+          + '<div class="metric-detail-card" onclick="navegarA(\'lotes\')">'
+          + '<div class="metric-detail-dot" style="background:var(--azul);width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">📋</div>'
+          + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);">Consultar mis lotes</span>'
+          + '<span style="font-size:0.78rem;color:var(--text-muted);">Busca y filtra por estado</span></div></div>'
           + '</div>';
       }
 
@@ -805,212 +904,111 @@ function _renderizarDashboardConDatos(r) {
 }
 
 /**
- * Inicializa los filtros drill-down y los gráficos analíticos de la vista Métricas.
- * Carga datos de usuarios-dash (si no están en cache), renderiza filtros,
- * conecta handlers de cambio de filtro al re-render de gráficos.
+ * Inicializa los filtros drill-down de la vista Métricas (Director/Comercial).
+ * Carga datos de usuarios-dash (si no están en cache), renderiza los filtros
+ * y conecta el handler de cambio para que filtren toda la sección (resumen,
+ * análisis y tabla — vía MetricasLotesView.aplicarFiltroComercial).
+ * Ruta de respaldo: solo se usa si api_obtenerDatosMetricas falló y
+ * _renderizarMetricasCompleta no llegó a ejecutarse.
  * Usa patrón _navId para descartar respuestas tardías si el usuario navega fuera.
  */
 function _inicializarFiltrosYGraficos() {
   var navIdLocal = _navId;
-  var filtersContainer = document.getElementById('drilldown-filters-container');
 
-  // Mostrar skeleton en gráficos mientras se cargan datos
-  var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
-  for (var i = 0; i < chartContainers.length; i++) {
-    var el = document.getElementById(chartContainers[i]);
-    if (el) {
-      el.innerHTML = '<div class="skeleton-line" style="height:120px;width:100%;border-radius:var(--radius-sm);"></div>';
-    }
-  }
-
-  // Cargar usuarios-dash y luego renderizar filtros + gráficos
+  // Cargar usuarios-dash y luego renderizar filtros
   _cargarUsuariosDash(function(usuarios) {
     if (!_sigueVigente(navIdLocal)) return;
 
-    // Verificar que los containers aún existen en el DOM (fail-safe)
-    filtersContainer = document.getElementById('drilldown-filters-container');
+    // Verificar que el container aún existe en el DOM (fail-safe)
+    var filtersContainer = document.getElementById('drilldown-filters-container');
     if (!filtersContainer) return;
 
     var rol = APP_USUARIO ? APP_USUARIO.rol : '';
     var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
 
-    // Renderizar filtros en el contenedor
     var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
     filtersContainer.innerHTML = filtrosHtml;
+    _actualizarVisibilidadFiltroEquipo(filtrosHtml !== '');
 
-    // Conectar handler de cambio de filtro al re-render de gráficos
     DrillDownFilters._onFiltroChange = function() {
       if (!_sigueVigente(navIdLocal)) return;
-      _renderizarGraficosConFiltro(usuarios, navIdLocal);
+      _aplicarFiltroDirectorComercial(CacheManager.get('lotes'), usuarios);
     };
 
-    // Render inicial de gráficos con datos actuales
-    _renderizarGraficosConFiltro(usuarios, navIdLocal);
+    // Aplicar estado inicial (sin filtro de equipo todavía)
+    _aplicarFiltroDirectorComercial(CacheManager.get('lotes'), usuarios);
   });
 }
 
 /**
- * Filtra lotes según el estado actual de DrillDownFilters y renderiza los 3 gráficos.
- * Si los lotes no están en cache, los solicita al servidor.
+ * Traduce la selección actual de Director/Comercial (DrillDownFilters) a un
+ * conjunto de códigos de lote permitidos, y se lo pasa a MetricasLotesView
+ * para que filtre el resumen, el análisis y la tabla — no solo un gráfico.
+ * Si no hay lotes en cache todavía, los pide al servidor primero.
+ * @param {Array|null} lotes - Lotes del equipo visible (o null si aún no están en cache)
  * @param {Array} usuarios - Lista de UsuarioDash
- * @param {number} navIdLocal - ID de navegación para descartar respuestas tardías
  */
-function _renderizarGraficosConFiltro(usuarios, navIdLocal) {
-  // Verificar que los containers de gráficos existen (fail-safe por race condition)
-  if (!document.getElementById('chart-ranking') &&
-      !document.getElementById('chart-antiguedad') &&
-      !document.getElementById('chart-tendencia')) {
+function _aplicarFiltroDirectorComercial(lotes, usuarios) {
+  if (typeof MetricasLotesView === 'undefined' || !MetricasLotesView.aplicarFiltroComercial) return;
+
+  if (!lotes) {
+    callServer('api_obtenerTodosLosLotes')
+      .then(function(datos) {
+        CacheManager.set('lotes', datos || []);
+        _aplicarFiltroDirectorComercial(datos || [], usuarios);
+      })
+      .catch(function(err) {
+        console.error('Error cargando lotes para filtro Director/Comercial:', err);
+        _toast('No se pudo aplicar el filtro de equipo.', 'error');
+      });
     return;
   }
 
-  var lotes = CacheManager.get('lotes');
-
-  if (lotes) {
-    _aplicarFiltroYRenderizarCharts(lotes, usuarios);
-  } else {
-    // Cache miss: solicitar lotes al servidor
-    callServer('api_obtenerTodosLosLotes')
-      .then(function(datos) {
-        if (!_sigueVigente(navIdLocal)) return;
-        CacheManager.set('lotes', datos || []);
-        _aplicarFiltroYRenderizarCharts(datos || [], usuarios);
-      })
-      .catch(function(err) {
-        if (!_sigueVigente(navIdLocal)) return;
-        console.error('Error cargando lotes para gráficos:', err);
-        // Mostrar error con opción de reintentar
-        var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
-        for (var i = 0; i < chartContainers.length; i++) {
-          var el = document.getElementById(chartContainers[i]);
-          if (el) {
-            el.innerHTML = '<div style="padding:16px;text-align:center;color:var(--color-mono-500);font-size:var(--text-sm);">'
-              + 'Error al cargar datos. <a href="#" onclick="_inicializarFiltrosYGraficos();return false;" style="color:var(--color-primary-navy);text-decoration:underline;">Reintentar</a>'
-              + '</div>';
-          }
-        }
-        _toast('No se pudieron cargar los datos de lotes para los gráficos.', 'error');
-      });
-  }
-}
-
-/**
- * Aplica el filtrado de lotes según los emails filtrados por DrillDownFilters
- * y renderiza los gráficos con DashboardCharts.
- * @param {Array} lotes - Todos los lotes del equipo visible
- * @param {Array} usuarios - Lista de UsuarioDash
- */
-function _aplicarFiltroYRenderizarCharts(lotes, usuarios) {
-  // Verificar que los containers existen antes de renderizar (fail-safe)
-  if (!document.getElementById('chart-ranking')) return;
-
   var emailsFiltrados = DrillDownFilters.getEmailsFiltrados(usuarios);
-  var lotesFiltrados;
-  var usuariosFiltrados;
 
   if (emailsFiltrados === null) {
-    // Sin filtro: usar todos los lotes y usuarios
-    lotesFiltrados = lotes;
-    usuariosFiltrados = usuarios;
-  } else {
-    // Filtrar lotes por nombre de comercial (case-insensitive)
-    // Construir mapa de nombres desde emails filtrados
-    var nombresPorEmail = {};
-    for (var i = 0; i < usuarios.length; i++) {
-      var u = usuarios[i];
-      if (u && u.email) {
-        nombresPorEmail[u.email.toLowerCase()] = (u.nombre || '').toUpperCase();
-      }
-    }
+    MetricasLotesView.aplicarFiltroComercial(null);
+    return;
+  }
 
-    // Set de nombres de comerciales a incluir
-    var nombresPermitidos = {};
-    for (var j = 0; j < emailsFiltrados.length; j++) {
-      var emailNorm = emailsFiltrados[j].toLowerCase();
-      if (nombresPorEmail[emailNorm]) {
-        nombresPermitidos[nombresPorEmail[emailNorm]] = true;
-      }
-    }
+  // Mapear email → nombre (en MAYÚSCULAS, como viene lote.comercial)
+  var nombresPorEmail = {};
+  for (var i = 0; i < usuarios.length; i++) {
+    var u = usuarios[i];
+    if (u && u.email) nombresPorEmail[u.email.toLowerCase()] = (u.nombre || '').toUpperCase();
+  }
+  var nombresPermitidos = {};
+  for (var j = 0; j < emailsFiltrados.length; j++) {
+    var nombre = nombresPorEmail[emailsFiltrados[j].toLowerCase()];
+    if (nombre) nombresPermitidos[nombre] = true;
+  }
 
-    // Filtrar lotes cuyo campo 'comercial' (MAYÚSCULAS) coincida
-    lotesFiltrados = [];
-    for (var k = 0; k < lotes.length; k++) {
-      var lote = lotes[k];
-      if (!lote) continue;
-      var comercialLote = (lote.comercial || '').toUpperCase();
-      if (nombresPermitidos[comercialLote]) {
-        lotesFiltrados.push(lote);
-      }
-    }
-
-    // Filtrar usuarios para pasar solo los del equipo seleccionado
-    usuariosFiltrados = [];
-    for (var m = 0; m < usuarios.length; m++) {
-      var usr = usuarios[m];
-      if (usr && usr.email && emailsFiltrados.indexOf(usr.email) !== -1) {
-        usuariosFiltrados.push(usr);
-      }
+  // Códigos de lote (idLote) que pertenecen a un comercial permitido —
+  // detallePorLote de Métricas se cruza por este mismo identificador
+  // (mismo patrón que ya se usaba para cruzar sucursal por idLote).
+  var loteIdsPermitidos = {};
+  for (var k = 0; k < lotes.length; k++) {
+    var lote = lotes[k];
+    if (!lote || !lote.idLote) continue;
+    var comercialLote = (lote.comercial || '').toUpperCase();
+    if (nombresPermitidos[comercialLote]) {
+      loteIdsPermitidos[lote.idLote.toUpperCase().trim()] = true;
     }
   }
 
-  // Filtrar por sucursal si hay un chip activo (distinto de "todas")
-  var chipSucursalActivo = document.querySelector('#metricasLotesChipsSucursal .metricas-lotes__chip--active');
-  if (chipSucursalActivo) {
-    var sucursalSeleccionada = (chipSucursalActivo.getAttribute('data-sucursal') || '').toUpperCase().trim();
-    if (sucursalSeleccionada && sucursalSeleccionada !== 'TODAS') {
-      // Estrategia 1: filtrar por lote.sucursal si existe (backend nuevo)
-      // Estrategia 2: cruzar con detallePorLote de métricas (fallback)
-      var mapaSucursalPorLote = {};
-      var metricasCache = (typeof CacheManager !== 'undefined')
-        ? (CacheManager.get('metricas-lotes-ref') || CacheManager.get('metricas-lotes'))
-        : null;
-      if (metricasCache && metricasCache.detallePorLote) {
-        for (var dp = 0; dp < metricasCache.detallePorLote.length; dp++) {
-          var det = metricasCache.detallePorLote[dp];
-          if (det.codigoLote && det.sucursal) {
-            mapaSucursalPorLote[det.codigoLote.toUpperCase()] = det.sucursal.toUpperCase()
-              .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          }
-        }
-      }
-
-      var sucFiltroNorm = sucursalSeleccionada.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      var lotesPorSucursal = [];
-      for (var s = 0; s < lotesFiltrados.length; s++) {
-        var loteSuc = lotesFiltrados[s];
-        if (!loteSuc) continue;
-
-        // Intentar con campo directo del lote
-        var sucDirecta = (loteSuc.sucursal || '').toUpperCase().trim()
-          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-        if (sucDirecta && sucDirecta === sucFiltroNorm) {
-          lotesPorSucursal.push(loteSuc);
-          continue;
-        }
-
-        // Fallback: cruzar por idLote con mapa de métricas
-        var idLoteNorm = (loteSuc.idLote || '').toUpperCase().trim();
-        if (mapaSucursalPorLote[idLoteNorm] === sucFiltroNorm) {
-          lotesPorSucursal.push(loteSuc);
-        }
-      }
-      lotesFiltrados = lotesPorSucursal;
-    }
-  }
-
-  // Renderizar gráficos con los datos filtrados
-  DashboardCharts.renderizar(lotesFiltrados, usuariosFiltrados);
+  MetricasLotesView.aplicarFiltroComercial(loteIdsPermitidos);
 }
 
 function _kpiCompacto(titulo, valor, tema, filtroEstado) {
-  var bgMap = { navy: 'var(--color-primary-navy)', red: 'var(--color-primary-red)', orange: 'var(--color-accent-orange)', green: 'var(--color-success)', teal: 'var(--color-accent-teal)' };
-  var bg = bgMap[tema] || bgMap.navy;
+  var colorMap = { navy: 'var(--azul)', red: 'var(--rojo)', orange: 'var(--amarillo)', green: 'var(--verde)', teal: 'var(--azul-mid)' };
+  var color = colorMap[tema] || colorMap.navy;
   var esClickable = filtroEstado && filtroEstado.length > 0;
   var onclick = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
   var cursor = esClickable ? 'cursor:pointer;' : '';
 
-  return '<div class="kpi-card"' + onclick + ' style="background:' + bg + ';color:var(--color-mono-0);' + cursor + 'padding:var(--space-4) var(--space-3);">'
-    + '<div style="font-size:var(--text-xs);font-weight:var(--font-semibold);text-transform:uppercase;letter-spacing:var(--tracking-caps);opacity:0.8;margin-bottom:var(--space-1);">' + titulo + '</div>'
-    + '<div style="font-size:var(--text-h1);font-weight:var(--font-extrabold);line-height:1;letter-spacing:var(--tracking-tight);">' + _fmtNum(valor) + '</div>'
+  return '<div class="metric-card"' + onclick + ' style="padding:16px;' + cursor + '">'
+    + '<div class="metric-label" style="margin-bottom:8px;">' + titulo + '</div>'
+    + '<div class="metric-value" style="font-size:1.6rem;margin-bottom:0;color:' + color + ';">' + _fmtNum(valor) + '</div>'
     + '</div>';
 }
 
@@ -1070,13 +1068,23 @@ function _filtrarLotesPorEstado(estado) {
 
 var _filtroEstadoActivo = '';
 
-// Hamburger menu toggle (mobile)
+// Hamburger menu toggle (mobile) — el sidebar nuevo se expande con hover
+// en desktop (CSS puro); en móvil no hay hover, así que este botón fuerza
+// la clase .sidebar-open y muestra un backdrop para cerrarlo al tocar fuera.
 document.addEventListener('DOMContentLoaded', function() {
   var toggle = document.getElementById('menuToggle');
   var sidebar = document.getElementById('sidebar');
+  var backdrop = document.getElementById('sidebarBackdrop');
   if (toggle && sidebar) {
     toggle.addEventListener('click', function() {
-      sidebar.classList.toggle('app-layout__sidebar--open');
+      sidebar.classList.toggle('sidebar-open');
+      if (backdrop) backdrop.classList.toggle('show');
+    });
+  }
+  if (backdrop && sidebar) {
+    backdrop.addEventListener('click', function() {
+      sidebar.classList.remove('sidebar-open');
+      backdrop.classList.remove('show');
     });
   }
 });
@@ -3040,14 +3048,34 @@ function cargarVistaMetricasLotes() {
   }
   mostrarVista('viewMetricasLotes');
 
-  // Mostrar skeletons mientras carga
-  var chartContainers = ['chart-ranking', 'chart-antiguedad', 'chart-tendencia'];
-  for (var i = 0; i < chartContainers.length; i++) {
-    var el = document.getElementById(chartContainers[i]);
-    if (el) {
-      el.innerHTML = '<div class="skeleton-line" style="height:120px;width:100%;border-radius:var(--radius-sm);"></div>';
-    }
+  // Reservar el espacio de los filtros Director/Comercial y del chip de
+  // Sucursal ANTES de que lleguen los datos — evitan que la barra de
+  // filtros cambie de tamaño (y empuje todo lo de abajo) cuando aparecen.
+  _mostrarSkeletonFiltrosMetricas();
+
+  // Mostrar loading state centralizado en el área de contenido inmediatamente
+  var contenedorMetricas = document.getElementById('metricasLotesContenido');
+  if (contenedorMetricas) {
+    contenedorMetricas.innerHTML = '<div class="metricas-lotes__loading-fullstate">'
+      + '<div class="metricas-lotes__loading-dots-bg" aria-hidden="true"></div>'
+      + '<div class="metricas-lotes__loading-center">'
+      + '<div class="metricas-lotes__spinner-ring" aria-hidden="true"></div>'
+      + '<p class="metricas-lotes__loading-msg">Cargando métricas operativas...</p>'
+      + '<p class="metricas-lotes__loading-sub">Preparando datos del periodo actual</p>'
+      + '</div></div>';
   }
+
+  // Ocultar filtros durante la carga para evitar interacción prematura
+  var filtrosCard = document.getElementById('metricasLotesFiltrosCard');
+  if (filtrosCard) filtrosCard.style.display = 'none';
+
+  // Pre-llenar inputs de fecha para que no se vean vacíos durante la carga
+  var hoyDate = new Date();
+  var primerDiaDate = new Date(hoyDate.getFullYear(), hoyDate.getMonth(), 1);
+  var inputDesdeEl = document.getElementById('metricasLotesFechaDesde');
+  var inputHastaEl = document.getElementById('metricasLotesFechaHasta');
+  if (inputDesdeEl && !inputDesdeEl.value) inputDesdeEl.value = _formatearFechaISOUtil(primerDiaDate);
+  if (inputHastaEl && !inputHastaEl.value) inputHastaEl.value = _formatearFechaISOUtil(hoyDate);
 
   var navIdLocal = _navId;
 
@@ -3095,10 +3123,76 @@ function cargarVistaMetricasLotes() {
     .catch(function(err) {
       if (!_sigueVigente(navIdLocal)) return;
       console.error('Error cargando datos de métricas:', err);
-      // Fallback: intentar cargar por separado con la lógica anterior
+      // Fallback: mostrar filtros y cargar por separado
+      var filtrosCardFb = document.getElementById('metricasLotesFiltrosCard');
+      if (filtrosCardFb) filtrosCardFb.style.display = '';
       _inicializarFiltrosYGraficos();
       MetricasLotesView.init();
     });
+}
+
+/**
+ * Reserva el espacio de la fila de filtros (Director/Comercial + Sucursal)
+ * de la vista Métricas ANTES de tener los datos, para que la barra de
+ * filtros no cambie de altura cuando los dropdowns/chips reales aparecen
+ * (evita el salto visual entre "mientras carga" y "ya cargó").
+ * La visibilidad de Director/Comercial es puramente por rol (DrillDownFilters
+ * ya expone esa lógica) — no depende de datos, así que se puede saber de una.
+ */
+/**
+ * Muestra/oculta el grupo "Equipo" (Director/Comercial) y su divisor
+ * visual junto al grupo "Período" — para roles sin acceso a esos filtros
+ * (COMERCIAL, AUXILIAR, ANALISTA, CONSULTOR) no queda una caja vacía.
+ */
+function _actualizarVisibilidadFiltroEquipo(visible) {
+  var filtersContainer = document.getElementById('drilldown-filters-container');
+  var divisor = document.getElementById('metricasLotesFiltroDivisor');
+  if (filtersContainer) filtersContainer.style.display = visible ? 'flex' : 'none';
+  if (divisor) divisor.style.display = visible ? 'block' : 'none';
+}
+
+function _mostrarSkeletonFiltrosMetricas() {
+  var filtersContainer = document.getElementById('drilldown-filters-container');
+  if (filtersContainer && typeof DrillDownFilters !== 'undefined' && APP_USUARIO) {
+    var visibilidad = DrillDownFilters._getVisibilidad(APP_USUARIO.rol);
+
+    // Skeleton moderno: placeholder animado con icono pulsante y texto contextual
+    var skeletonEquipo = '<div class="drilldown-filters__group">'
+      + '<label class="drilldown-filters__label" style="color:var(--color-mono-400);font-size:0.7rem;">Equipo</label>'
+      + '<div class="metricas-lotes__skeleton-select">'
+      + '<span class="metricas-lotes__skeleton-select__icon"></span>'
+      + '<span class="metricas-lotes__skeleton-select__text" style="width:70px;"></span>'
+      + '</div></div>';
+
+    var skeletonComercial = '<div class="drilldown-filters__group">'
+      + '<label class="drilldown-filters__label" style="color:var(--color-mono-400);font-size:0.7rem;">Comercial</label>'
+      + '<div class="metricas-lotes__skeleton-select">'
+      + '<span class="metricas-lotes__skeleton-select__icon"></span>'
+      + '<span class="metricas-lotes__skeleton-select__text" style="width:90px;"></span>'
+      + '</div></div>';
+
+    if (visibilidad === 'ambos') {
+      filtersContainer.innerHTML = skeletonEquipo + skeletonComercial;
+      _actualizarVisibilidadFiltroEquipo(true);
+    } else if (visibilidad === 'solo-comercial') {
+      filtersContainer.innerHTML = skeletonComercial;
+      _actualizarVisibilidadFiltroEquipo(true);
+    } else {
+      _actualizarVisibilidadFiltroEquipo(false);
+    }
+  }
+
+  // Skeleton para chips de sucursal — placeholders con forma de chip real
+  var chipsSucursal = document.getElementById('metricasLotesChipsSucursal');
+  if (chipsSucursal && chipsSucursal.innerHTML.indexOf('data-sucursal') === -1) {
+    chipsSucursal.innerHTML = '<span class="metricas-lotes__chips-label">Sucursal:</span>'
+      + '<span class="metricas-lotes__skeleton-chips">'
+      + '<span class="metricas-lotes__skeleton-chip" style="width:60px;"></span>'
+      + '<span class="metricas-lotes__skeleton-chip" style="width:75px;"></span>'
+      + '<span class="metricas-lotes__skeleton-chip" style="width:50px;"></span>'
+      + '</span>';
+    chipsSucursal.style.display = 'flex';
+  }
 }
 
 /**
@@ -3114,25 +3208,28 @@ function cargarVistaMetricasLotes() {
 function _renderizarMetricasCompleta(usuarios, lotes, metricasLotes, historico, desglose, navIdLocal) {
   if (!_sigueVigente(navIdLocal)) return;
 
-  // ── 1. Filtros drill-down ──
+  // Mostrar la card de filtros (se ocultó durante la carga inicial)
+  var filtrosCardEl = document.getElementById('metricasLotesFiltrosCard');
+  if (filtrosCardEl) filtrosCardEl.style.display = '';
+
+  // ── 1. Filtros drill-down (Director/Comercial) — filtran TODA la sección ──
   var filtersContainer = document.getElementById('drilldown-filters-container');
   if (filtersContainer) {
     var rol = APP_USUARIO ? APP_USUARIO.rol : '';
     var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
     var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
     filtersContainer.innerHTML = filtrosHtml;
+    _actualizarVisibilidadFiltroEquipo(filtrosHtml !== '');
 
-    // Conectar handler de cambio de filtro
-    // Director/Comercial → re-renderizan gráficos (ranking, antigüedad, tendencia)
-    // Fecha/Segmento/Sucursal → controlan métricas de lotes (KPIs, pipeline, tabla)
+    // Director/Comercial → filtran resumen, análisis y tabla de Métricas
     DrillDownFilters._onFiltroChange = function() {
       if (!_sigueVigente(navIdLocal)) return;
-      _aplicarFiltroYRenderizarCharts(CacheManager.get('lotes') || lotes, usuarios);
+      _aplicarFiltroDirectorComercial(CacheManager.get('lotes') || lotes, usuarios);
     };
   }
 
-  // ── 2. Gráficos analíticos (ranking, antigüedad, tendencia) ──
-  _aplicarFiltroYRenderizarCharts(lotes, usuarios);
+  // ── 2. Aplicar filtro de equipo inicial (ninguno seleccionado = sin filtro) ──
+  _aplicarFiltroDirectorComercial(lotes, usuarios);
 
   // ── 3. Métricas de lotes (tabla + KPIs) — delegar a MetricasLotesView ──
   if (metricasLotes && metricasLotes.detallePorLote && metricasLotes.detallePorLote.length > 0) {
@@ -3296,73 +3393,101 @@ function _eliminarMotivo(id) {
 
 function mostrarVistaRadicar() {
   var container = document.getElementById('viewDashboard');
-  container.innerHTML = '<div class="stack">'
-    + '<h2>Ingreso de Inducciones</h2>'
-    // Barra de consulta de lotes
-    + '<div class="card card--flat" style="padding:14px 16px;">'
-    + '<div class="flex flex--gap-sm" style="align-items:center;">'
-    + '<span style="color:var(--color-mono-500);">🔍</span>'
-    + '<input class="input" id="rad_consultaLote" type="text" placeholder="Ingresa el ID de tu lote para consultar su estado, ej: 7/4/2026-1985-1456" style="flex:1;padding:10px 14px;">'
-    + '<button class="btn btn--primary" style="padding:10px 18px;" onclick="_consultarLoteRadicar()">Consultar lote</button>'
-    + '</div></div>'
-    // Formatos de apoyo
-    + '<div class="card card--flat" style="padding:12px 16px;">'
-    + '<div class="flex flex--between" style="align-items:center;flex-wrap:wrap;gap:10px;">'
-    + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);font-weight:600;">📥 FORMATOS DE APOYO:</span>'
-    + '<div class="flex flex--gap-sm">'
-    + '<a href="https://docs.google.com/spreadsheets/d/1gqD--fm9B6xtlQHTiKtN8mcH9QNokuKvCy0MLKbATRo/export?format=xlsx" target="_blank" class="btn btn--primary" style="padding:8px 14px;font-size:var(--text-sm);background:#16A34A;">📊 Planilla de Radicación</a>'
-    + '<a href="https://docs.google.com/document/d/1-L7mwwyHxkicsOMSpgCctJRqExgC9qMq/export?format=docx" target="_blank" class="btn btn--primary" style="padding:8px 14px;font-size:var(--text-sm);">📄 Formato Paz y Salvo</a>'
-    + '</div></div></div>'
-    // Información del lote
-    + '<div class="card card--flat">'
-    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:14px;">📋 Información del Lote</h4>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
-    + '<div><label>Número de póliza *</label><input class="input" id="rad_poliza" type="number" placeholder="Ej: 483"></div>'
-    + '<div><label>Tasa de inducción IVA incluido (%) *</label><input class="input" id="rad_tasa" type="text" placeholder="Ej: 2,3"></div>'
+  container.innerHTML = '<div class="rad-wrapper">'
+    // Header compacto
+    + '<div class="rad-header">'
+    + '<h2 class="rad-title">Ingreso de Inducciones</h2>'
+    + '<p class="rad-subtitle">Completa la información para radicar un nuevo lote</p>'
     + '</div>'
-    + '<div style="margin-top:14px;"><label>Notas de radicación</label><textarea class="input" id="rad_observaciones" rows="3" placeholder="Información adicional que consideres importante para el equipo de inducciones..." style="resize:vertical;"></textarea></div>'
+    // Formatos de apoyo (arriba, acceso rápido)
+    + '<div class="rad-formats">'
+    + '<span class="rad-formats__label">Formatos de apoyo:</span>'
+    + '<a href="https://docs.google.com/spreadsheets/d/1gqD--fm9B6xtlQHTiKtN8mcH9QNokuKvCy0MLKbATRo/export?format=xlsx" target="_blank" class="rad-formats__link rad-formats__link--green">📊 Planilla de Radicación</a>'
+    + '<a href="https://docs.google.com/document/d/1-L7mwwyHxkicsOMSpgCctJRqExgC9qMq/export?format=docx" target="_blank" class="rad-formats__link">📄 Formato Paz y Salvo</a>'
     + '</div>'
-    // Certificación de Paz y Salvo
-    + '<div class="card card--flat" style="border:2px solid var(--color-primary-red);background:rgba(189,15,20,0.02);">'
-    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-red);margin-bottom:8px;">📝 Certificación de Paz y Salvo</h4>'
-    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:0 0 14px;">Selecciona cómo deseas certificar el estado de cartera de los contratos:</p>'
-    + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">'
-    // Opción A
-    + '<label style="cursor:pointer;padding:16px;border:2px solid var(--color-mono-300);border-radius:var(--radius-md);background:white;display:flex;align-items:flex-start;gap:10px;" id="rad_labelA" onclick="_selPS(\'A\')">'
-    + '<input type="radio" name="rad_tipoPS" value="checkbox" style="margin-top:3px;flex-shrink:0;">'
-    + '<div><strong style="display:block;font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:4px;text-transform:none;letter-spacing:0;">✓ Certificación manual</strong>'
-    + '<span style="font-size:12px;color:var(--color-mono-500);line-height:1.4;text-transform:none;letter-spacing:0;">Como comercial, certifico que los contratos de este lote se encuentran al día sin obligaciones pendientes. <strong style="color:var(--color-primary-red);">El soporte será solicitado en caso de aprobación.</strong></span></div></label>'
-    // Opción B
-    + '<label style="cursor:pointer;padding:16px;border:2px solid var(--color-mono-300);border-radius:var(--radius-md);background:white;display:flex;align-items:flex-start;gap:10px;" id="rad_labelB" onclick="_selPS(\'B\')">'
-    + '<input type="radio" name="rad_tipoPS" value="adjunto" style="margin-top:3px;flex-shrink:0;">'
-    + '<div><strong style="display:block;font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:4px;text-transform:none;letter-spacing:0;">📄 Adjuntar paz y salvo (no mayor a 30 días)</strong>'
-    + '<span style="font-size:12px;color:var(--color-mono-500);line-height:1.4;text-transform:none;letter-spacing:0;">Adjunta el documento emitido por la inmobiliaria en PDF. <strong style="color:#16A34A;">Agiliza la gestión al incluir el soporte desde el inicio.</strong></span></div></label>'
+    // Barra de consulta de lotes (separada del formulario)
+    + '<div class="rad-search-bar">'
+    + '<span class="rad-search-icon">🔍</span>'
+    + '<input class="rad-search-input" id="rad_consultaLote" type="text" placeholder="Consultar estado de un lote existente (ej: 7/4/2026-1985-1456)">'
+    + '<button class="rad-search-btn" onclick="_consultarLoteRadicar()">Consultar</button>'
+    + '</div>'
+    // Stepper visual
+    + '<div class="rad-stepper">'
+    + '<div class="rad-step rad-step--active" data-step="1"><span class="rad-step__num">1</span><span class="rad-step__label">Información</span></div>'
+    + '<div class="rad-step__line"></div>'
+    + '<div class="rad-step" data-step="2"><span class="rad-step__num">2</span><span class="rad-step__label">Paz y Salvo</span></div>'
+    + '<div class="rad-step__line"></div>'
+    + '<div class="rad-step" data-step="3"><span class="rad-step__num">3</span><span class="rad-step__label">Planilla</span></div>'
+    + '<div class="rad-step__line"></div>'
+    + '<div class="rad-step" data-step="4"><span class="rad-step__num">4</span><span class="rad-step__label">Enviar</span></div>'
+    + '</div>'
+    // Card principal del formulario
+    + '<div class="rad-form-card">'
+    // — Sección 1: Información del Lote
+    + '<div class="rad-section" id="rad_sec1">'
+    + '<div class="rad-section__header"><span class="rad-section__icon">📋</span> Información del Lote</div>'
+    + '<div class="rad-fields">'
+    + '<div class="rad-field">'
+    + '<label class="rad-label" for="rad_poliza">Número de póliza <span class="rad-required">*</span></label>'
+    + '<input class="rad-input" id="rad_poliza" type="number" placeholder="Ej: 483">'
+    + '</div>'
+    + '<div class="rad-field">'
+    + '<label class="rad-label" for="rad_tasa">Tasa IVA incluido (%) <span class="rad-required">*</span></label>'
+    + '<input class="rad-input" id="rad_tasa" type="text" placeholder="Ej: 2,3">'
+    + '</div>'
+    + '</div>'
+    + '<div class="rad-field rad-field--full">'
+    + '<label class="rad-label" for="rad_observaciones">Notas de radicación</label>'
+    + '<textarea class="rad-input rad-textarea" id="rad_observaciones" rows="3" placeholder="Información adicional para el equipo de inducciones..."></textarea>'
+    + '</div>'
+    + '</div>'
+    // — Sección 2: Paz y Salvo
+    + '<div class="rad-divider"></div>'
+    + '<div class="rad-section" id="rad_sec2">'
+    + '<div class="rad-section__header"><span class="rad-section__icon">📝</span> Certificación de Paz y Salvo</div>'
+    + '<p class="rad-section__desc">Selecciona cómo certificar el estado de cartera:</p>'
+    + '<div class="rad-options">'
+    + '<label class="rad-option" id="rad_labelA" onclick="_selPS(\'A\')">'
+    + '<input type="radio" name="rad_tipoPS" value="checkbox" class="rad-option__radio">'
+    + '<div class="rad-option__content">'
+    + '<strong class="rad-option__title">✓ Certificación manual</strong>'
+    + '<span class="rad-option__desc">Certifico que los contratos están al día. <span class="rad-option__alert">El soporte será solicitado en caso de aprobación.</span></span>'
+    + '</div></label>'
+    + '<label class="rad-option" id="rad_labelB" onclick="_selPS(\'B\')">'
+    + '<input type="radio" name="rad_tipoPS" value="adjunto" class="rad-option__radio">'
+    + '<div class="rad-option__content">'
+    + '<strong class="rad-option__title">📄 Adjuntar paz y salvo</strong>'
+    + '<span class="rad-option__desc">Documento de la inmobiliaria en PDF (no mayor a 30 días). <span class="rad-option__success">Agiliza la gestión.</span></span>'
+    + '</div></label>'
     + '</div>'
     + '<div id="rad_pdfZone" style="display:none;margin-top:14px;">'
-    + '<div id="rad_dropZonePdf" onclick="document.getElementById(\'rad_filePdf\').click()" style="cursor:pointer;border:2px dashed var(--color-mono-300);border-radius:var(--radius-md);padding:var(--space-5);display:flex;align-items:center;gap:var(--space-4);transition:border-color var(--duration-fast),background var(--duration-fast);">'
-    + '<div style="width:44px;height:44px;border-radius:var(--radius-sm);background:rgba(189,15,20,0.06);color:var(--color-primary-red);display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0;">📄</div>'
-    + '<div><strong style="display:block;color:var(--color-primary-navy);text-transform:none;letter-spacing:0;">Paz y Salvo (PDF)</strong>'
-    + '<span id="rad_pdfLabel" style="font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic o arrastra el archivo aquí</span></div>'
+    + '<div class="rad-dropzone rad-dropzone--pdf" id="rad_dropZonePdf" onclick="document.getElementById(\'rad_filePdf\').click()">'
+    + '<div class="rad-dropzone__icon rad-dropzone__icon--pdf">📄</div>'
+    + '<div class="rad-dropzone__text"><strong>Paz y Salvo (PDF)</strong><span id="rad_pdfLabel">Haz clic o arrastra el archivo</span></div>'
     + '</div>'
     + '<input type="file" id="rad_filePdf" accept=".pdf" style="display:none;">'
     + '</div>'
     + '</div>'
-    // Planilla de inducción
-    + '<div class="card card--flat">'
-    + '<h4 style="font-size:var(--text-sm);color:var(--color-primary-navy);margin-bottom:14px;">📤 Documentos de Soporte</h4>'
-    + '<div id="rad_dropZone" onclick="document.getElementById(\'rad_fileExcel\').click()" style="cursor:pointer;border:2px dashed var(--color-mono-300);border-radius:var(--radius-md);padding:24px;display:flex;align-items:center;gap:16px;transition:border-color 0.2s;">'
-    + '<div style="width:50px;height:50px;border-radius:var(--radius-md);background:#DCFCE7;color:#16A34A;display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0;">📊</div>'
-    + '<div><strong style="display:block;color:var(--color-primary-navy);text-transform:none;letter-spacing:0;">Planilla de Inducción</strong>'
-    + '<span id="rad_dropLabel" style="font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic o arrastra el archivo aquí (.xlsx)</span></div>'
+    // — Sección 3: Planilla
+    + '<div class="rad-divider"></div>'
+    + '<div class="rad-section" id="rad_sec3">'
+    + '<div class="rad-section__header"><span class="rad-section__icon">📤</span> Planilla de Inducción</div>'
+    + '<div class="rad-dropzone rad-dropzone--excel" id="rad_dropZone" onclick="document.getElementById(\'rad_fileExcel\').click()">'
+    + '<div class="rad-dropzone__icon rad-dropzone__icon--excel">📊</div>'
+    + '<div class="rad-dropzone__text"><strong>Planilla de Inducción (.xlsx)</strong><span id="rad_dropLabel">Haz clic o arrastra el archivo</span></div>'
     + '</div>'
     + '<input type="file" id="rad_fileExcel" accept=".xlsx,.xls" style="display:none;">'
-    + '<p id="rad_excelInfo" style="margin:8px 0 0;font-size:var(--text-sm);color:var(--color-mono-500);"></p>'
-    + '<p style="text-align:center;font-size:12px;color:#92400E;background:#FFFBEB;border:1px solid #FDE68A;border-radius:var(--radius-sm);padding:8px 14px;margin-top:14px;">Recuerda usar la <strong>planilla actualizada (formato rojo)</strong> disponible en la barra de descargas</p>'
+    + '<p id="rad_excelInfo" class="rad-file-info"></p>'
+    + '<div class="rad-tip">Recuerda usar la <strong>planilla actualizada (formato rojo)</strong> disponible abajo</div>'
     + '</div>'
-    // Botones
-    + '<button class="btn btn--primary" id="rad_btnEnviar" onclick="_procesarRadicacion()" style="width:100%;padding:16px;font-size:var(--text-base);">⚡ Revisar y enviar a radicación</button>'
-    + '<button class="btn btn--ghost" onclick="_limpiarFormRadicacion()" style="width:100%;padding:12px;font-size:var(--text-sm);">🧹 Limpiar formulario</button>'
-    + '<div id="rad_errores" style="display:none;"></div>'
+    // — Acciones
+    + '<div class="rad-divider"></div>'
+    + '<div class="rad-actions">'
+    + '<button class="rad-btn-submit" id="rad_btnEnviar" onclick="_procesarRadicacion()">⚡ Revisar y enviar a radicación</button>'
+    + '<button class="rad-btn-clear" onclick="_limpiarFormRadicacion()">🧹 Limpiar formulario</button>'
+    + '</div>'
+    + '<div id="rad_errores" class="rad-errores" style="display:none;"></div>'
+    + '</div>'
     + '</div>';
   mostrarVista('viewDashboard');
 
@@ -3375,17 +3500,17 @@ function mostrarVistaRadicar() {
       var dropPdf = document.getElementById('rad_dropZonePdf');
       var labelPdf = document.getElementById('rad_pdfLabel');
       if (this.files[0] && dropPdf && labelPdf) {
-        dropPdf.style.borderColor = 'var(--color-success)';
+        dropPdf.style.borderColor = 'var(--verde)';
         dropPdf.style.borderStyle = 'solid';
-        dropPdf.style.background = 'var(--color-success-bg)';
+        dropPdf.style.background = 'rgba(5,150,105,0.04)';
         labelPdf.textContent = this.files[0].name + ' ✓';
       }
     });
     // Drag & drop PDF
     var dropPdfZone = document.getElementById('rad_dropZonePdf');
     if (dropPdfZone) {
-      dropPdfZone.ondragover = function(e) { e.preventDefault(); dropPdfZone.style.borderColor='var(--color-primary-red)'; dropPdfZone.style.background='rgba(189,15,20,0.02)'; };
-      dropPdfZone.ondragleave = function() { dropPdfZone.style.borderColor='var(--color-mono-300)'; dropPdfZone.style.background=''; };
+      dropPdfZone.ondragover = function(e) { e.preventDefault(); dropPdfZone.style.borderColor='var(--rojo)'; dropPdfZone.style.background='rgba(189,15,20,0.02)'; };
+      dropPdfZone.ondragleave = function() { dropPdfZone.style.borderColor=''; dropPdfZone.style.background=''; };
       dropPdfZone.ondrop = function(e) { e.preventDefault(); dropPdfZone.style.borderColor=''; dropPdfZone.style.background='';
         if (e.dataTransfer.files[0]) { document.getElementById('rad_filePdf').files = e.dataTransfer.files; document.getElementById('rad_filePdf').dispatchEvent(new Event('change')); }
       };
@@ -3396,7 +3521,7 @@ function mostrarVistaRadicar() {
     var dropZone = document.getElementById('rad_dropZone');
     if (dropZone) {
       dropZone.ondragover = function(e) { e.preventDefault(); dropZone.style.borderColor = 'var(--color-primary-navy)'; dropZone.style.background = 'rgba(37,49,80,0.03)'; };
-      dropZone.ondragleave = function() { dropZone.style.borderColor = 'var(--color-mono-300)'; dropZone.style.background = ''; };
+      dropZone.ondragleave = function() { dropZone.style.borderColor = ''; dropZone.style.background = ''; };
       dropZone.ondrop = function(e) { e.preventDefault(); dropZone.style.borderColor = ''; dropZone.style.background = '';
         if (e.dataTransfer.files[0]) { document.getElementById('rad_fileExcel').files = e.dataTransfer.files; _leerExcelRad(e.dataTransfer.files[0]); }
       };
@@ -3406,7 +3531,47 @@ function mostrarVistaRadicar() {
       var el = document.getElementById(id);
       if (el) el.addEventListener('input', _guardarBorradorRad);
     });
+    // Stepper visual: marcar pasos completos según campos llenos
+    _actualizarStepper();
+    ['rad_poliza', 'rad_tasa'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.addEventListener('input', _actualizarStepper);
+    });
   }, 100);
+}
+
+/** Actualiza visualmente el stepper según campos completados */
+function _actualizarStepper() {
+  var steps = document.querySelectorAll('.rad-step');
+  if (!steps.length) return;
+  var poliza = (document.getElementById('rad_poliza') || {}).value;
+  var tasa = (document.getElementById('rad_tasa') || {}).value;
+  var ps = document.querySelector('input[name="rad_tipoPS"]:checked');
+  var excel = document.getElementById('rad_fileExcel');
+  var tieneExcel = excel && excel.files && excel.files.length > 0;
+
+  // Step 1: info
+  _marcarStep(steps[0], !!(poliza && tasa));
+  // Step 2: paz y salvo
+  _marcarStep(steps[1], !!ps);
+  // Step 3: planilla
+  _marcarStep(steps[2], tieneExcel);
+  // Step 4: enviar (siempre pendiente hasta que se envíe)
+  _marcarStep(steps[3], false);
+}
+
+function _marcarStep(stepEl, completo) {
+  if (!stepEl) return;
+  if (completo) {
+    stepEl.classList.add('rad-step--done');
+    stepEl.classList.remove('rad-step--active');
+  } else if (!stepEl.classList.contains('rad-step--done')) {
+    // El primer paso no-completo es el activo
+    var prev = stepEl.previousElementSibling;
+    var esActivo = !prev || prev.classList.contains('rad-step__line') || 
+                   (prev.previousElementSibling && prev.previousElementSibling.classList.contains('rad-step--done'));
+    if (esActivo) stepEl.classList.add('rad-step--active');
+  }
 }
 
 function _archivoABase64(file) {
@@ -3424,10 +3589,10 @@ function _limpiarFormRadicacion() {
   document.getElementById('rad_observaciones').value = '';
   var radios = document.querySelectorAll('input[name="rad_tipoPS"]');
   for (var i = 0; i < radios.length; i++) radios[i].checked = false;
-  document.getElementById('rad_labelA').style.borderColor = 'var(--color-mono-300)';
-  document.getElementById('rad_labelA').style.background = 'white';
-  document.getElementById('rad_labelB').style.borderColor = 'var(--color-mono-300)';
-  document.getElementById('rad_labelB').style.background = 'white';
+  document.getElementById('rad_labelA').style.borderColor = 'var(--color-mono-200)';
+  document.getElementById('rad_labelA').style.background = '#fff';
+  document.getElementById('rad_labelB').style.borderColor = 'var(--color-mono-200)';
+  document.getElementById('rad_labelB').style.background = '#fff';
   document.getElementById('rad_pdfZone').style.display = 'none';
   document.getElementById('rad_fileExcel').value = '';
   document.getElementById('rad_excelInfo').textContent = '';
@@ -3452,8 +3617,9 @@ function _selPS(op) {
   var lA = document.getElementById('rad_labelA');
   var lB = document.getElementById('rad_labelB');
   var pz = document.getElementById('rad_pdfZone');
-  if (op === 'A') { lA.style.borderColor='var(--color-primary-navy)'; lA.style.background='rgba(37,49,80,0.03)'; lB.style.borderColor='var(--color-mono-300)'; lB.style.background=''; pz.style.display='none'; }
-  else { lB.style.borderColor='var(--color-primary-navy)'; lB.style.background='rgba(37,49,80,0.03)'; lA.style.borderColor='var(--color-mono-300)'; lA.style.background=''; pz.style.display='block'; }
+  if (op === 'A') { lA.style.borderColor='var(--color-primary-navy)'; lA.style.background='rgba(37,49,80,0.03)'; lB.style.borderColor='var(--color-mono-200)'; lB.style.background=''; pz.style.display='none'; }
+  else { lB.style.borderColor='var(--color-primary-navy)'; lB.style.background='rgba(37,49,80,0.03)'; lA.style.borderColor='var(--color-mono-200)'; lA.style.background=''; pz.style.display='block'; }
+  if (typeof _actualizarStepper === 'function') _actualizarStepper();
 }
 
 // ── Carga diferida de la librería de lectura de Excel (sheetjs) ────────────
