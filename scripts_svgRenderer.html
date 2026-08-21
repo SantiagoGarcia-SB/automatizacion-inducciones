@@ -89,9 +89,11 @@ var SVGRenderer = {
    * @param {string} config.titulo - Título descriptivo para accesibilidad
    * @param {Array<{label: string, valor: number}>} config.datos - Datos a graficar
    * @param {Object} [config.opciones]
-   * @param {string} [config.opciones.colorBarra] - Color CSS de las barras (default: #1a3a5c)
-   * @param {number} [config.opciones.umbralAlerta] - Valor encima del cual se resalta
-   * @param {string} [config.opciones.colorAlerta] - Color para barras que superen umbral (default: #c0392b)
+   * @param {string} [config.opciones.colorBarra] - Color CSS de las barras (default: #253150, azul de marca)
+   * @param {number} [config.opciones.umbralAlerta] - Valor encima del cual se resalta en rojo (crítico)
+   * @param {string} [config.opciones.colorAlerta] - Color para barras que superen umbralAlerta (default: #BD0F14, rojo de marca)
+   * @param {number} [config.opciones.umbralAdvertencia] - Valor encima del cual se resalta en ámbar (atención, por debajo de umbralAlerta)
+   * @param {string} [config.opciones.colorAdvertencia] - Color para barras que superen umbralAdvertencia (default: #d97706)
    * @param {string} [config.opciones.sufijo] - Sufijo para los valores (ej: " días")
    */
   barrasHorizontales: function(config) {
@@ -100,10 +102,13 @@ var SVGRenderer = {
 
     var datos = config.datos || [];
     var opciones = config.opciones || {};
-    var colorBarra = opciones.colorBarra || '#1a3a5c';
-    var colorAlerta = opciones.colorAlerta || '#c0392b';
+    var colorBarra = opciones.colorBarra || '#253150';   // --azul de marca
+    var colorAlerta = opciones.colorAlerta || '#BD0F14'; // --rojo de marca
+    var colorAdvertencia = opciones.colorAdvertencia || '#d97706';
     var umbralAlerta = opciones.umbralAlerta;
+    var umbralAdvertencia = opciones.umbralAdvertencia;
     var sufijo = opciones.sufijo || '';
+    var anchoMinBarra = 4; // stub visible incluso cuando el valor es 0, para que todas las filas se lean igual
 
     // Dimensiones lógicas
     var margenIzq = 120;
@@ -132,8 +137,13 @@ var SVGRenderer = {
     for (var j = 0; j < datos.length; j++) {
       var item = datos[j];
       var y = margenTop + j * (alturaBarra + espacioBarra);
-      var anchoBarra = (item.valor / maxValor) * anchoDisponible;
-      var color = (umbralAlerta !== undefined && item.valor > umbralAlerta) ? colorAlerta : colorBarra;
+      var anchoBarra = Math.max(anchoMinBarra, (item.valor / maxValor) * anchoDisponible);
+      var color = colorBarra;
+      if (umbralAlerta !== undefined && item.valor > umbralAlerta) {
+        color = colorAlerta;
+      } else if (umbralAdvertencia !== undefined && item.valor > umbralAdvertencia) {
+        color = colorAdvertencia;
+      }
 
       // Label
       var label = this._crearElemento('text', {
@@ -141,7 +151,8 @@ var SVGRenderer = {
         'y': y + alturaBarra / 2 + 5,
         'text-anchor': 'end',
         'font-size': '12',
-        'fill': '#333'
+        'font-family': "'Manrope',sans-serif",
+        'fill': '#253150'
       });
       label.textContent = item.label;
       svg.appendChild(label);
@@ -153,8 +164,8 @@ var SVGRenderer = {
         'width': anchoBarra,
         'height': alturaBarra,
         'fill': color,
-        'rx': '3',
-        'ry': '3'
+        'rx': '6',
+        'ry': '6'
       });
       svg.appendChild(rect);
 
@@ -164,8 +175,9 @@ var SVGRenderer = {
         'y': y + alturaBarra / 2 + 5,
         'text-anchor': 'start',
         'font-size': '12',
-        'font-weight': 'bold',
-        'fill': '#333'
+        'font-family': "'Manrope',sans-serif",
+        'font-weight': '700',
+        'fill': '#253150'
       });
       valorText.textContent = item.valor + sufijo;
       svg.appendChild(valorText);
@@ -290,6 +302,7 @@ var SVGRenderer = {
           'y': puntos[m].y - 8,
           'text-anchor': 'middle',
           'font-size': '9',
+          'font-family': "'Manrope',sans-serif",
           'font-weight': '600',
           'fill': '#253150'
         });
@@ -309,7 +322,8 @@ var SVGRenderer = {
         'y': alto - 8,
         'text-anchor': 'middle',
         'font-size': '9',
-        'fill': '#666'
+        'font-family': "'Manrope',sans-serif",
+        'fill': '#706F6F'
       });
       etiqueta.textContent = labelText;
       svg.appendChild(etiqueta);
@@ -321,7 +335,8 @@ var SVGRenderer = {
       'y': margenTop + 4,
       'text-anchor': 'end',
       'font-size': '10',
-      'fill': '#666'
+      'font-family': "'Manrope',sans-serif",
+      'fill': '#706F6F'
     });
     yMax.textContent = maxValor.toString();
     svg.appendChild(yMax);

@@ -111,7 +111,7 @@ function _obtenerHeadersMetricasLotes() {
   // Cache miss o caché no disponible — leer de la hoja
   var hoja;
   try {
-    var ss = SpreadsheetApp.openById(getArchivoAnalisisId());
+    var ss = SpreadsheetRegistry_get(getArchivoAnalisisId());
     hoja = ss.getSheetByName('registro analisis');
   } catch (e) {
     _registrarEvento_('ERROR', 'Servicios_MetricasLotes.js', '_obtenerHeadersMetricasLotes', 'No se pudo abrir archivo de análisis: ' + e.message);
@@ -557,7 +557,7 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     if (!mapa) return _metricasLotesVacias();
 
     // 2c. Leer datos completos de la hoja
-    var ss = SpreadsheetApp.openById(getArchivoAnalisisId());
+    var ss = SpreadsheetRegistry_get(getArchivoAnalisisId());
     var hoja = ss.getSheetByName('registro analisis');
     if (!hoja || hoja.getLastRow() < 2) return _metricasLotesVacias();
 
@@ -833,7 +833,7 @@ function _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta) {
   var mapaEstados = {}; // { uuid: estado }
 
   try {
-    var ssControl = SpreadsheetApp.openById(getHojaControlId());
+    var ssControl = SpreadsheetRegistry_get(getHojaControlId());
     var hojaControl = ssControl.getSheetByName('Control_General');
 
     if (hojaControl && hojaControl.getLastRow() >= 2) {
@@ -870,7 +870,7 @@ function _obtenerEstadosOperativosEnProceso(fechaDesde, fechaHasta) {
     return resultado;
   }
 
-  var ssAnalisis = SpreadsheetApp.openById(getArchivoAnalisisId());
+  var ssAnalisis = SpreadsheetRegistry_get(getArchivoAnalisisId());
   var hojaAnalisis = ssAnalisis.getSheetByName('registro analisis');
   if (!hojaAnalisis || hojaAnalisis.getLastRow() < 2) return resultado;
 
@@ -1159,18 +1159,19 @@ function _obtenerEstadosOperativosEnProcesoConDatos(fechaDesde, fechaHasta, dato
   // ── Paso 1: Leer Control_General SOLO col J (Estado) y col BJ (UUID) ──
   var mapaEstados = {};
   try {
-    var ssControl = SpreadsheetApp.openById(getHojaControlId());
+    var ssControl = SpreadsheetRegistry_get(getHojaControlId());
     var hojaControl = ssControl.getSheetByName('Control_General');
     if (hojaControl && hojaControl.getLastRow() >= 2) {
       var ultimaFila = hojaControl.getLastRow();
-      // Leer solo col J (10) = Estado
-      var colEstados = hojaControl.getRange(2, 10, ultimaFila - 1, 1).getValues();
-      // Leer solo col BJ (62) = UUID_SISTEMA
-      var colUuids = hojaControl.getRange(2, 62, ultimaFila - 1, 1).getValues();
-      for (var c = 0; c < colUuids.length; c++) {
-        var uuid = String(colUuids[c][0] || '').trim();
+      // Una sola lectura J:BJ (10..62) en vez de dos getRange separados —
+      // cada llamada a Sheets es un round-trip; leer el bloque completo y
+      // quedarse solo con las columnas que importan sale más barato que
+      // pagar la latencia de red dos veces.
+      var bloque = hojaControl.getRange(2, 10, ultimaFila - 1, 53).getValues();
+      for (var c = 0; c < bloque.length; c++) {
+        var uuid = String(bloque[c][52] || '').trim(); // col BJ (62) relativa: 62-10
         if (!uuid) continue;
-        mapaEstados[uuid] = String(colEstados[c][0] || '').trim().toUpperCase();
+        mapaEstados[uuid] = String(bloque[c][0] || '').trim().toUpperCase(); // col J (10) relativa: 0
       }
     }
   } catch (e) {

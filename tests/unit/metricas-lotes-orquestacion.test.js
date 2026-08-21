@@ -151,6 +151,14 @@ function setupGlobals() {
     }
   };
 
+  // Passthrough: el código fuente abre el libro vía SpreadsheetRegistry_get
+  // (cache por ejecución), no SpreadsheetApp.openById directo. Delega en
+  // globalThis.SpreadsheetApp dinámicamente para que los overrides puntuales
+  // de tests individuales (líneas más abajo) sigan funcionando igual.
+  globalThis.SpreadsheetRegistry_get = function(id) {
+    return globalThis.SpreadsheetApp.openById(id);
+  };
+
   globalThis.Utilities = {
     formatDate: function(date, tz, format) {
       if (!(date instanceof Date)) return '';
@@ -177,6 +185,7 @@ function cleanupGlobals() {
   delete globalThis.CacheWrapper_putJSON;
   delete globalThis.getArchivoAnalisisId;
   delete globalThis.SpreadsheetApp;
+  delete globalThis.SpreadsheetRegistry_get;
   delete globalThis.Utilities;
   delete globalThis._metricasLotesVacias;
   delete globalThis._validarParametrosRango;

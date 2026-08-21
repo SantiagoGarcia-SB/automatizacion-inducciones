@@ -488,8 +488,10 @@ function api_guardarEvaluacion(filaNum, datos, finalizar) {
 /**
  * Retorna los errores pendientes de respuesta del comercial logueado.
  * Usa vista jerárquica: ADMIN/ASESOR ven todos, otros filtran por equipo visible.
+ * Cacheado con TTL corto (45s): antes escaneaba Errores_Terceros completo +
+ * una franja de 62 columnas de Control_General en CADA carga del panel.
  * @returns {Array}
- * @sheets_read 1
+ * @sheets_read 1 (0 en cache-hit)
  * @sheets_write 0
  */
 function api_obtenerMisErroresPendientes() {
@@ -497,7 +499,13 @@ function api_obtenerMisErroresPendientes() {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
     var emailsEquipo = getEmailsEquipoVisible(usuario.email);
     // null → sin filtro (ADMIN/ASESOR); array → filtrar por equipo visible
-    return obtenerErroresPendientesComercial(emailsEquipo);
+    var cacheKey = 'ERRORES_PENDIENTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+    var cached = CacheWrapper_getJSON(cacheKey);
+    if (cached) return cached;
+
+    var resultado = obtenerErroresPendientesComercial(emailsEquipo);
+    CacheWrapper_putJSON(cacheKey, resultado, 45);
+    return resultado;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerMisErroresPendientes', e.message);
     return [];

@@ -598,7 +598,7 @@
           <div class="lcc-name">${r.arrendatario || '—'}</div>
           <div class="lcc-meta">${r.comercial} &middot; Ingreso: ${r.fechaIngreso}</div>
         </div>
-        <span class="lote-badge ${getLoteBadgeClass(r.estado)}">${r.estado}</span>
+        <span class="badge-pill ${getLoteBadgeClass(r.estado)}">${r.estado}</span>
       </div>`).join('');
 
     container.innerHTML = `
@@ -771,7 +771,7 @@ function mostrarHistorialLotes(lotes) {
           <span class="historial-card__id">${l.idLote}</span>
           <span class="historial-card__meta">${l.fecha} · ${l.contratos} contrato(s)</span>
         </div>
-        <span class="lote-badge ${badgeClass}" style="font-size:10px;">${l.estados.split(',')[0].trim()}</span>
+        <span class="badge-pill ${badgeClass}" style="font-size:10px;">${l.estados.split(',')[0].trim()}</span>
       </div>`;
   }).join('');
 

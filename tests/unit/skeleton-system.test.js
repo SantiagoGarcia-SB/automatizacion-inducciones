@@ -85,10 +85,11 @@ function createSkeletonSystem(doc) {
 
     _generarSkeletonDashboard: function() {
       var html = '<div class="stack">';
-      html += '<div class="card card--hero" style="padding:var(--space-6);">'
+      html += '<div class="metric-hero-card metric-hero-azul" style="cursor:default;">'
+        + '<div style="width:100%;">'
         + '<div class="skeleton-line" style="height:24px;width:50%;background:rgba(255,255,255,0.15);margin-bottom:var(--space-2);"></div>'
         + '<div class="skeleton-line" style="height:14px;width:35%;background:rgba(255,255,255,0.1);"></div>'
-        + '</div>';
+        + '</div></div>';
       html += '<div class="grid grid--4" style="gap:var(--space-3);">';
       for (var i = 0; i < 4; i++) {
         html += '<div class="skeleton skeleton-card" style="height:88px;"></div>';
@@ -200,7 +201,7 @@ describe('SkeletonSystem', function() {
     it('genera hero card placeholder', function() {
       skeleton.mostrar('container1', 'dashboard');
       var html = doc._elements['container1'].innerHTML;
-      expect(html).toContain('card--hero');
+      expect(html).toContain('metric-hero-card');
     });
   });
 

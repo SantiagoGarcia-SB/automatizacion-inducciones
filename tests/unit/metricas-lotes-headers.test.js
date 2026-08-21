@@ -174,10 +174,10 @@ describe('_obtenerHeadersMetricasLotes', () => {
       'registro analisis': [HEADERS_COMPLETOS]
     });
 
-    // Forzar error en openById
-    globalThis.SpreadsheetApp = {
-      openById: function() { throw new Error('Permission denied'); }
-    };
+    // Forzar error en la apertura del libro — el código fuente abre vía
+    // SpreadsheetRegistry_get (cache por ejecución), no SpreadsheetApp.openById
+    // directo, así que hay que hacer fallar ese punto para simular el error real.
+    globalThis.SpreadsheetRegistry_get = function() { throw new Error('Permission denied'); };
 
     var result = _obtenerHeadersMetricasLotes();
     expect(result).toBeNull();

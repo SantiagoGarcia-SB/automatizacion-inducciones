@@ -18,7 +18,7 @@
  * Almacena en CacheWrapper con TTL 600s para que cubra al menos
  * 2 ciclos de trigger (5 min × 2 = 10 min < 600s).
  *
- * @sheets_read 2 (USUARIOS + Control_General) en horario laboral, 0 fuera
+ * @sheets_read 3 (USUARIOS + Control_General + registro analisis) en horario laboral, 0 fuera
  * @sheets_write 0
  */
 function precalentarCacheResumenYLotes() {
@@ -51,6 +51,7 @@ function precalentarCacheResumenYLotes() {
     // ── 4. Pre-calentar caché GLOBAL (para LIDER/ADMIN) ──
     _precalentarResumenParaEmail(null);  // null = sin filtro → GLOBAL
     _precalentarLotesParaEmail(null);    // null = sin filtro → GLOBAL
+    _precalentarMetricasComunes();       // rangos de fecha más usados en la vista Métricas
 
     // ── 5. Pre-calentar caché individual por usuario ──
     // Solo para roles que NO ven TODO (CONSULTOR, DIRECTOR, etc.)
@@ -108,6 +109,60 @@ function _precalentarLotesParaEmail(email) {
     // Degradación elegante: si falla un usuario, continuar con los demás
     _registrarEvento_('WARN', 'Triggers_CacheWarming.js', '_precalentarLotesParaEmail',
       'Fallo para ' + (email || 'GLOBAL') + ': ' + e.message);
+  }
+}
+
+
+/**
+ * Pre-calienta la caché de Métricas de Lotes (METRICAS_LOTES_{desde}_{hasta})
+ * para los rangos de fecha que la mayoría de usuarios consulta primero al
+ * abrir la vista: el mes en curso y los últimos 30 días. Sin esto, cada
+ * rango de fecha que un usuario elige pega en frío contra la ruta más
+ * pesada de la app (lectura completa de registro analisis + Control_General).
+ *
+ * Lee "registro analisis" UNA sola vez y la reutiliza para ambos rangos,
+ * igual que hace api_obtenerDatosMetricas con la petición en vivo.
+ *
+ * @sheets_read 1 (registro analisis) en horario laboral, 0 fuera
+ * @sheets_write 0
+ * @private
+ */
+function _precalentarMetricasComunes() {
+  try {
+    var headers = _obtenerHeadersMetricasLotes();
+    if (!headers) return;
+    var mapa = _mapearColumnasMetricasLotes(headers);
+    if (!mapa) return;
+
+    var ss = SpreadsheetRegistry_get(getArchivoAnalisisId());
+    var hoja = ss.getSheetByName('registro analisis');
+    if (!hoja || hoja.getLastRow() < 2) return;
+    var datos = hoja.getDataRange().getValues();
+
+    function fmt(d) { return Utilities.formatDate(d, 'GMT-5', 'yyyy-MM-dd'); }
+
+    var hoy = new Date();
+    var inicioMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    var hace30 = new Date(hoy.getTime() - 29 * 24 * 60 * 60 * 1000);
+
+    var rangos = [
+      { desde: fmt(inicioMes), hasta: fmt(hoy) },
+      { desde: fmt(hace30), hasta: fmt(hoy) }
+    ];
+
+    for (var i = 0; i < rangos.length; i++) {
+      var r = rangos[i];
+      var cacheKey = 'METRICAS_LOTES_' + r.desde + '_' + r.hasta;
+      if (CacheWrapper_getJSON(cacheKey)) continue; // ya caliente, no repetir cálculo
+
+      var metricas = calcularMetricasLotesConDatos(r.desde, r.hasta, datos, mapa);
+      var payloadStr = JSON.stringify(metricas);
+      if (payloadStr.length <= 512000) {
+        CacheWrapper_putJSON(cacheKey, metricas, 300);
+      }
+    }
+  } catch (e) {
+    _registrarEvento_('WARN', 'Triggers_CacheWarming.js', '_precalentarMetricasComunes', e.message);
   }
 }
 
