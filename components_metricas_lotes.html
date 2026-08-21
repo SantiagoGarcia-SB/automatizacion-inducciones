@@ -1171,16 +1171,13 @@ var MetricasLotesView = (function() {
       else if (res === 'NEGADO') lotesNegados++;
       else lotesEnProceso++;
 
-      totalSolicitudes += d.cantidadSolicitudes || 0;
-      solicitudesAprobadas += (d.solicitudesAprobadasEnLote || 0)
-                            + (d.solicitudesAprobadasIndividualNegadaPorLote || 0);
-      solicitudesNegadas += (d.solicitudesNegadas || 0)
-                          + (d.aprobadaPorLoteNegadaPorAnalista || 0);
-      solicitudesReconsideradas += d.negadaPorLoteReconsideradaPorGerencia || 0;
+      // Conteo crudo por REGISTRO ANALISTA SAI (sin cruzar con RESULTADO LOTE/SOLICITUD)
+      totalSolicitudes += d.totalSolicitudesRaw || 0;
+      solicitudesAprobadas += d.solicitudesAprobadasRaw || 0;
+      solicitudesNegadas += d.solicitudesNegadasRaw || 0;
+      solicitudesReconsideradas += d.solicitudesReconsideradasRaw || 0;
+      solicitudesEnProceso += d.solicitudesEnProcesoRaw || 0;
     }
-
-    // En proceso = total - evaluadas (derivado, no conteo independiente)
-    solicitudesEnProceso = Math.max(0, totalSolicitudes - solicitudesAprobadas - solicitudesNegadas - solicitudesReconsideradas);
 
     return {
       totalLotes: detalleSegmentado.length,

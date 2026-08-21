@@ -428,8 +428,27 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
     var negadaPorLoteReconsideradaPorGerencia = 0;
     var solicitudesEnProcesoEnLote = 0;
 
+    // Conteo crudo por fila, solo mirando REGISTRO ANALISTA SAI (sin cruzar con
+    // RESULTADO LOTE/SOLICITUD ni exigir codigo lote): misma regla que
+    // _calcularSolicitudesAprobNegReconsideradas, pero agrupado por lote para
+    // que el frontend pueda recalcular al filtrar por segmento/sucursal.
+    var solicitudesAprobadasRaw = 0;
+    var solicitudesNegadasRaw = 0;
+    var solicitudesReconsideradasRaw = 0;
+    var solicitudesEnProcesoRaw = 0;
+
     for (var m = 0; m < filasGrupo.length; m++) {
       var f = filasGrupo[m];
+
+      if (!f.registroAnalistaSai) {
+        solicitudesEnProcesoRaw++;
+      } else if (f.registroAnalistaSai.indexOf('RECONSIDERADO APROBADO') !== -1) {
+        solicitudesReconsideradasRaw++;
+      } else if (f.registroAnalistaSai === 'APROBADO') {
+        solicitudesAprobadasRaw++;
+      } else if (f.registroAnalistaSai === 'NEGADO') {
+        solicitudesNegadasRaw++;
+      }
 
       // Excluir de métricas 3-8 filas donde alguno de los 3 campos esté vacío
       if (!f.resultadoLote || !f.resultadoSolicitud || !f.registroAnalistaSai) {
@@ -477,6 +496,7 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
       resultadoLote: grupoLote.resultadoLote,
       sucursal: grupoLote.sucursal,
       cantidadSolicitudes: cantidadSolicitudes,
+      totalSolicitudesRaw: filasGrupo.length,
       solicitudesAprobadasEnLote: solicitudesAprobadasEnLote,
       solicitudesAprobadasIndividualNegadaPorLote: solicitudesAprobadasIndividualNegadaPorLote,
       solicitudesNegadasIndividualAprobadasPorLote: solicitudesNegadasIndividualAprobadasPorLote,
@@ -484,6 +504,10 @@ function _agruparPorLoteYCalcularMetricas(filasFiltradas) {
       aprobadaPorLoteNegadaPorAnalista: aprobadaPorLoteNegadaPorAnalista,
       negadaPorLoteReconsideradaPorGerencia: negadaPorLoteReconsideradaPorGerencia,
       solicitudesEnProcesoEnLote: solicitudesEnProcesoEnLote,
+      solicitudesAprobadasRaw: solicitudesAprobadasRaw,
+      solicitudesNegadasRaw: solicitudesNegadasRaw,
+      solicitudesReconsideradasRaw: solicitudesReconsideradasRaw,
+      solicitudesEnProcesoRaw: solicitudesEnProcesoRaw,
       solicitudes: filasGrupo.map(function(f) {
         return { numero: f.solicitudInquilino, estadoSAI: f.registroAnalistaSai };
       })
@@ -552,24 +576,10 @@ function calcularMetricasLotes(fechaDesde, fechaHasta) {
     // 2g. Calcular detalle por lote
     var detalle = _agruparPorLoteYCalcularMetricas(filasFiltradas);
 
-    // 2h. Recalcular solicitudesAprobadas y solicitudesNegadas desde detalle
-    // para coherencia con la tabla (incluye aprobaciones individuales de lotes negados)
-    var aprobDesdeDetalle = 0;
-    var negDesdeDetalle = 0;
-    var reconsDesdeDetalle = 0;
-    var enProcesoDesdeDetalle = 0;
-    for (var d = 0; d < detalle.length; d++) {
-      aprobDesdeDetalle += (detalle[d].solicitudesAprobadasEnLote || 0)
-                         + (detalle[d].solicitudesAprobadasIndividualNegadaPorLote || 0);
-      negDesdeDetalle += (detalle[d].solicitudesNegadas || 0)
-                       + (detalle[d].aprobadaPorLoteNegadaPorAnalista || 0);
-      reconsDesdeDetalle += (detalle[d].negadaPorLoteReconsideradaPorGerencia || 0);
-      enProcesoDesdeDetalle += (detalle[d].solicitudesEnProcesoEnLote || 0);
-    }
-    solicitudesCount.solicitudesAprobadas = aprobDesdeDetalle;
-    solicitudesCount.solicitudesNegadas = negDesdeDetalle;
-    solicitudesCount.solicitudesReconsideradas = reconsDesdeDetalle;
-    solicitudesCount.solicitudesEnProceso = enProcesoDesdeDetalle;
+    // 2h. solicitudesAprobadas/Negadas/Reconsideradas/EnProceso quedan tal como las
+    // calculó _calcularSolicitudesAprobNegReconsideradas: conteo crudo por fila de
+    // REGISTRO ANALISTA SAI, sin agrupar por lote (Total Evaluadas = filas con
+    // REGISTRO ANALISTA SAI diligenciado; En Proceso = filas sin diligenciar).
 
     // 2i. Formatear fechas en detalle para serialización
     for (var i = 0; i < detalle.length; i++) {
@@ -1020,14 +1030,10 @@ function calcularMetricasLotesConDatos(fechaDesde, fechaHasta, datosPreLeidos, m
     var totalSolicitudes = filasFiltradas.length;
     var detalle = _agruparPorLoteYCalcularMetricas(filasFiltradas);
 
-    // Recalcular desde detalle para coherencia
-    var aprobDesdeDetalle = 0, negDesdeDetalle = 0, reconsDesdeDetalle = 0, enProcesoDesdeDetalle = 0;
-    for (var d = 0; d < detalle.length; d++) {
-      aprobDesdeDetalle += (detalle[d].solicitudesAprobadasEnLote || 0) + (detalle[d].solicitudesAprobadasIndividualNegadaPorLote || 0);
-      negDesdeDetalle += (detalle[d].solicitudesNegadas || 0) + (detalle[d].aprobadaPorLoteNegadaPorAnalista || 0);
-      reconsDesdeDetalle += (detalle[d].negadaPorLoteReconsideradaPorGerencia || 0);
-      enProcesoDesdeDetalle += (detalle[d].solicitudesEnProcesoEnLote || 0);
-    }
+    // solicitudesAprobadas/Negadas/Reconsideradas/EnProceso quedan tal como las
+    // calculó _calcularSolicitudesAprobNegReconsideradas: conteo crudo por fila de
+    // REGISTRO ANALISTA SAI, sin agrupar por lote (Total Evaluadas = filas con
+    // REGISTRO ANALISTA SAI diligenciado; En Proceso = filas sin diligenciar).
 
     // Formatear fechas
     for (var i = 0; i < detalle.length; i++) {
@@ -1052,10 +1058,10 @@ function calcularMetricasLotesConDatos(fechaDesde, fechaHasta, datosPreLeidos, m
         lotesNegados: lotesCount.lotesNegados,
         lotesEnProceso: lotesCount.lotesEnProceso,
         totalSolicitudes: totalSolicitudes,
-        solicitudesAprobadas: aprobDesdeDetalle,
-        solicitudesNegadas: negDesdeDetalle,
-        solicitudesReconsideradas: reconsDesdeDetalle,
-        solicitudesEnProceso: enProcesoDesdeDetalle
+        solicitudesAprobadas: solicitudesCount.solicitudesAprobadas,
+        solicitudesNegadas: solicitudesCount.solicitudesNegadas,
+        solicitudesReconsideradas: solicitudesCount.solicitudesReconsideradas,
+        solicitudesEnProceso: solicitudesCount.solicitudesEnProceso
       },
       sucursales: Object.keys(sucursalesMap).sort(),
       detallePorLote: detalle
