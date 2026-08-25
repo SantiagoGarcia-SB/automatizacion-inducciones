@@ -245,7 +245,6 @@ function _leerDatosLote_() {
     // 4. Leer solicitudes para inyectar en tablas de los PDFs
     var rangoSolicitudes = retry(function() { return hoja.getRange("W187:W1085").getDisplayValues(); });
     var rangoDetallesCY = retry(function() { return hoja.getRange("CY187:CY1085").getDisplayValues(); });
-    var rangoFechas = retry(function() { return hoja.getRange("D187:D1085").getDisplayValues(); });
     var rangoNombres = retry(function() { return hoja.getRange("R187:R1085").getDisplayValues(); });
 
     var solicitudes = [];
@@ -255,7 +254,6 @@ function _leerDatosLote_() {
       solicitudes.push({
         solicitud: nombreSol,
         detalleCY: rangoDetallesCY[s][0].toString().trim(),
-        fecha: rangoFechas[s][0].toString().trim(),
         nombre: rangoNombres[s][0].toString().trim(),
         estado: rangoEstados[s][0].toString().trim()
       });
@@ -500,7 +498,7 @@ function _generarPdfDesdeTemplate_(idPlantilla, datosLote, solicitudes) {
     _reemplazarPlaceholders_(body, mapa);
 
     // 4. Inyectar datos en la tabla existente de la plantilla
-    //    Busca la tabla cuyo primer encabezado contenga "SOLICITUD" (comercial) o "FECHA" (inmobiliaria)
+    //    Busca la tabla cuyo primer encabezado contenga "SOLICITUD" (comercial); para inmobiliaria usa la tabla de detalle individual (índice 2)
     _inyectarDatosEnTablaExistente_(body, datosLote, solicitudes, idPlantilla);
 
     // 4b. Aplicar colores a palabras clave (NEGADO=rojo, APROBADO/ASEGURABLE=verde)
@@ -643,76 +641,6 @@ function _inyectarTablaResultados_(body, solicitudes) {
 }
 
 /**
- * Inyecta datos de solicitudes en la tabla existente de la plantilla.
- * Lógica idéntica al script antiguo:
- *   - Plantilla COMERCIAL: busca tabla con primera celda "SOLICITUD" → inyecta [solicitud, detalleCY]
- *   - Plantilla INMOBILIARIA: busca tabla con primera celda "FECHA" → inyecta [fecha, poliza, nombre, solicitud, estado]
- *
- * @param {GoogleAppsScript.Document.Body} body
- * @param {Object} datosLote
- * @param {Array} solicitudes — [{solicitud, detalleCY, fecha, nombre, estado}]
- * @param {string} idPlantilla — Para distinguir comercial vs inmobiliaria
- */
-function _inyectarDatosEnTablaExistente_(body, datosLote, solicitudes, idPlantilla) {
-  if (!solicitudes || solicitudes.length === 0) return;
-
-  var tablas = body.getTables();
-  var esComercial = (idPlantilla === ID_PLANTILLA_COMERCIAL);
-
-  // Buscar la tabla correcta por el texto de su primera celda
-  var tablaDestino = null;
-  for (var i = 0; i < tablas.length; i++) {
-    var primeraCelda = tablas[i].getCell(0, 0).getText().trim().toUpperCase();
-    if (esComercial && primeraCelda.indexOf("SOLICITUD") > -1) {
-      tablaDestino = tablas[i];
-      break;
-    }
-    if (!esComercial && primeraCelda.indexOf("FECHA") > -1) {
-      tablaDestino = tablas[i];
-      break;
-    }
-  }
-
-  if (!tablaDestino) return;
-
-  // Construir filas de datos según el tipo de plantilla
-  var datosParaTabla = [];
-  for (var j = 0; j < solicitudes.length; j++) {
-    var sol = solicitudes[j];
-    if (esComercial) {
-      datosParaTabla.push([sol.solicitud || "", sol.detalleCY || ""]);
-    } else {
-      datosParaTabla.push([
-        sol.fecha || "",
-        datosLote.poliza || "",
-        sol.nombre || "",
-        sol.solicitud || "",
-        sol.estado || ""
-      ]);
-    }
-  }
-
-  // Inyectar filas en la tabla (misma lógica que inyectarDatosEnTabla del script antiguo)
-  for (var k = 0; k < datosParaTabla.length; k++) {
-    var fila = datosParaTabla[k];
-    var nuevaFila = tablaDestino.appendTableRow();
-    for (var m = 0; m < fila.length; m++) {
-      var texto = fila[m] ? fila[m].toString().trim() : "";
-      var cell = nuevaFila.appendTableCell(texto);
-      var par = cell.getChild(0).asParagraph();
-      par.setAlignment(DocumentApp.HorizontalAlignment.CENTER);
-      cell.setVerticalAlignment(DocumentApp.VerticalAlignment.CENTER);
-      par.setFontSize(9);
-    }
-  }
-
-  // Eliminar la fila placeholder (fila 1, justo después del encabezado)
-  if (tablaDestino.getNumRows() > 1) {
-    tablaDestino.removeRow(1);
-  }
-}
-
-/**
  * Aplica color y negrita a todas las ocurrencias de una palabra en el documento.
  * Idéntica a aplicarColorGlobal del script antiguo.
  *
@@ -736,12 +664,12 @@ function _aplicarColorGlobal_(body, palabra, color) {
  * Inyecta datos en la tabla existente de la plantilla Google Docs.
  * Lógica idéntica al script antiguo:
  *   - PDF Comercial: busca tabla con encabezado "SOLICITUD" → inyecta [solicitud, detalleCY]
- *   - PDF Inmobiliaria: busca tabla con encabezado "FECHA" → inyecta [fecha, poliza, nombre, solicitud, estado]
+ *   - PDF Inmobiliaria: usa la tabla de detalle individual → inyecta [poliza, nombre, solicitud, estado]
  * Luego aplica colores a texto (NEGADO=rojo, APROBADO/ASEGURABLE=verde) con findText.
  *
  * @param {GoogleAppsScript.Document.Body} body
  * @param {Object} datosLote
- * @param {Array} solicitudes — [{solicitud, detalleCY, fecha, nombre, estado}]
+ * @param {Array} solicitudes — [{solicitud, detalleCY, nombre, estado}]
  * @param {string} idPlantilla — Para distinguir comercial vs inmobiliaria
  */
 function _inyectarDatosEnTablaExistente_(body, datosLote, solicitudes, idPlantilla) {
@@ -779,7 +707,7 @@ function _inyectarDatosEnTablaExistente_(body, datosLote, solicitudes, idPlantil
       if (esComercial) {
         datosColumnas = [sol.solicitud || "", sol.detalleCY || ""];
       } else {
-        datosColumnas = [sol.fecha || "", datosLote.poliza || "", sol.nombre || "", sol.solicitud || "", sol.estado || ""];
+        datosColumnas = [datosLote.poliza || "", sol.nombre || "", sol.solicitud || "", sol.estado || ""];
       }
 
       for (var c = 0; c < datosColumnas.length; c++) {
