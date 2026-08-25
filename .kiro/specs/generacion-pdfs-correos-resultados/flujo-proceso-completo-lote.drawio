@@ -1,0 +1,245 @@
+<mxfile host="app.diagrams.net" modified="2026-08-19T00:00:00.000Z" agent="Claude Code" version="24.0.0" type="device">
+  <diagram name="Proceso completo - Radicación, Análisis y Resultados" id="proceso-completo-lote">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1360" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== FONDOS DE FASE ===================== -->
+        <mxCell id="bg1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="15" width="1320" height="195" as="geometry" />
+        </mxCell>
+        <mxCell id="bg2" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="212" width="1320" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="bg3" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="425" width="1320" height="112" as="geometry" />
+        </mxCell>
+        <mxCell id="bg4" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="540" width="1320" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="bg5" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="685" width="1320" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="bg6" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#E0E0E0;arcSize=5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="803" width="1320" height="122" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== TITULO ===================== -->
+        <mxCell id="title" value="Proceso completo: Radicación, Análisis y Envío de Resultados por Lote" style="text;html=1;align=center;verticalAlign=middle;fontSize=17;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="20" y="-35" width="1320" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== ETIQUETAS DE FASE ===================== -->
+        <mxCell id="p1" value="FASE 1 · CAPTURA Y VALIDACIÓN DEL ARCHIVO" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="25" width="600" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="FASE 2 · RADICACIÓN EN SAI" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="222" width="600" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="FASE 3 · TRASLADO Y ASIGNACIÓN A ANALISTAS" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="435" width="600" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="FASE 4 · ANÁLISIS INDIVIDUAL POR SOLICITUD (se repite para cada solicitud del lote)" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="550" width="800" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" value="FASE 5 · CIERRE DEL LOTE" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="695" width="600" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="p6" value="FASE 6 · GENERACIÓN Y ENVÍO DE RESULTADOS" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="40" y="813" width="600" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 1 ===================== -->
+        <mxCell id="A1" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ASESOR&lt;/b&gt;&lt;br&gt;Entra al aplicativo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="A2" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ASESOR&lt;/b&gt;&lt;br&gt;Descarga el Excel (plantilla)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="70" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="A3" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ASESOR&lt;/b&gt;&lt;br&gt;Diligencia el Excel manualmente" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="460" y="70" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="A4" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ASESOR&lt;/b&gt;&lt;br&gt;Sube el archivo diligenciado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="670" y="70" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="S1" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Valida automáticamente el archivo (formato y campos)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="880" y="70" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="D1" value="¿Archivo válido?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6B656;strokeWidth=3;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1090" y="55" width="170" height="90" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 2 ===================== -->
+        <mxCell id="S2" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;La información cae a “Control_General”" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="250" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="R1" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;RADICADOR&lt;/b&gt;&lt;br&gt;Radica el registro en SAI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="250" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="D2" value="¿El nombre coincide con SAI?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6B656;strokeWidth=3;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="465" y="235" width="170" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ET" value="&lt;b style=&quot;font-size:10px;opacity:0.7&quot;&gt;RADICADOR&lt;/b&gt;&lt;br&gt;“Error en terceros”: solicita documentos por correo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="460" y="350" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AE" value="&lt;b style=&quot;font-size:10px;opacity:0.7&quot;&gt;ASESOR&lt;/b&gt;&lt;br&gt;Envía los documentos solicitados por correo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="350" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 3 ===================== -->
+        <mxCell id="S3" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Traslada la información a “Registro_Análisis”" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="465" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="E1" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ENCARGADO&lt;/b&gt;&lt;br&gt;Asigna manualmente los casos a los analistas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="465" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 4 ===================== -->
+        <mxCell id="AN1" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Revisa solicitudes anteriores" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="580" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AN2" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Revisa la dirección (address)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="580" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AN3" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Consulta preselecta (DataCrédito): ingresos, aciertos y moras" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="460" y="575" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="AN4" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Revisa siniestros con El Libertador" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="670" y="580" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="AN5" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Consulta el modelo manual de analítica" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="880" y="580" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="note_an" value="(se repite por cada solicitud del lote)" style="text;html=1;align=center;verticalAlign=middle;fontStyle=2;fontColor=#999999;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="880" y="650" width="180" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 5 ===================== -->
+        <mxCell id="E2" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ENCARGADO&lt;/b&gt;&lt;br&gt;Espera que todo el lote esté analizado" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="725" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="E3" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ENCARGADO&lt;/b&gt;&lt;br&gt;Corre el modelo de analítica de lote" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="725" width="180" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="E4" value="Lote queda cerrado&#10;(aprobado o negado)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="725" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 6 ===================== -->
+        <mxCell id="S4" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Genera los 2 PDF (Comercial e Inmobiliaria)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="845" width="180" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="S5" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Envía correo al comercial con los PDF (CC jefe/director)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="250" y="845" width="180" height="65" as="geometry" />
+        </mxCell>
+        <mxCell id="S6" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Registra el envío" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="460" y="845" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="END" value="El ejecutivo comercial recibe&#10;los resultados del lote" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=40;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="835" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 1 (secuenciales) ===================== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="A1" target="A2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="A2" target="A3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="A3" target="A4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="A4" target="S1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S1" target="D1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" value="No: rechaza, corrige y vuelve a subir" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;strokeColor=#B85450;fontColor=#B85450;fontSize=10;exitX=0.5;exitY=1;entryX=0.5;entryY=1;" edge="1" parent="1" source="D1" target="A4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1175" y="190" />
+              <mxPoint x="760" y="190" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <!-- Transición Fase1 -> Fase2 -->
+        <mxCell id="e7" value="Sí" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#3B6D11;fontSize=12;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="D1" target="S2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1175" y="245" />
+              <mxPoint x="130" y="245" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 2 ===================== -->
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S2" target="R1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="R1" target="D2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#B85450;fontSize=12;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="D2" target="ET"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;strokeColor=#B85450;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="ET" target="AE"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" value="Reintenta radicar en SAI" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;strokeColor=#B85450;fontColor=#B85450;fontSize=10;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="AE" target="R1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="130" y="330" />
+              <mxPoint x="340" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <!-- Transición Fase2 -> Fase3 -->
+        <mxCell id="e13" value="Sí" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#3B6D11;fontSize=12;fontStyle=1;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="D2" target="S3">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="700" y="280" />
+              <mxPoint x="700" y="447" />
+              <mxPoint x="130" y="447" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 3 ===================== -->
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S3" target="E1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- Transición Fase3 -> Fase4 -->
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="E1" target="AN1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="572" />
+              <mxPoint x="130" y="572" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 4 ===================== -->
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="AN1" target="AN2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="AN2" target="AN3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="AN3" target="AN4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="AN4" target="AN5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- Transición Fase4 -> Fase5 -->
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0.5;entryY=0;" edge="1" parent="1" source="AN5" target="E2">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1100" y="610" />
+              <mxPoint x="1100" y="718" />
+              <mxPoint x="130" y="718" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 5 ===================== -->
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="E2" target="E3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e22" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="E3" target="E4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- Transición Fase5 -> Fase6 -->
+        <mxCell id="e23" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="E4" target="S4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="550" y="815" />
+              <mxPoint x="130" y="815" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 6 ===================== -->
+        <mxCell id="e24" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S4" target="S5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S5" target="S6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e26" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="S6" target="END"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== LEYENDA ===================== -->
+        <mxCell id="legend" value="Colores por rol: naranja=Asesor · verde=Sistema (automático) · azul=Radicador · morado=Encargado · amarillo=Analista · rojo=error/subsanación · diamante=decisión · azul fuerte=hito/fin" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="932" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

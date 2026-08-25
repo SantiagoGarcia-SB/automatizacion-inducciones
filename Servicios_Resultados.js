@@ -245,7 +245,7 @@ function _leerDatosLote_() {
     // 4. Leer solicitudes para inyectar en tablas de los PDFs
     var rangoSolicitudes = retry(function() { return hoja.getRange("W187:W1085").getDisplayValues(); });
     var rangoDetallesCY = retry(function() { return hoja.getRange("CY187:CY1085").getDisplayValues(); });
-    var rangoFechas = retry(function() { return hoja.getRange("A187:A1085").getDisplayValues(); });
+    var rangoFechas = retry(function() { return hoja.getRange("D187:D1085").getDisplayValues(); });
     var rangoNombres = retry(function() { return hoja.getRange("R187:R1085").getDisplayValues(); });
 
     var solicitudes = [];
