@@ -1,0 +1,243 @@
+<mxfile host="app.diagrams.net" modified="2026-08-28T00:00:00.000Z" agent="Claude Code" version="24.0.0" type="device">
+  <diagram name="TO-BE - Flujo completo de inducciones (horizontal)" id="to-be-flujo-completo-h">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4850" pageHeight="980" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== TITULO Y STACK ===================== -->
+        <mxCell id="title" value="TO-BE — Flujo completo de radicación, análisis automático y resultados por lote" style="text;html=1;align=center;verticalAlign=middle;fontSize=17;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="-140" width="2000" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="stack" value="STACK TO-BE: Angular · Python · PostgreSQL · Cloud Storage · Firebase Auth (Identity Platform) · AI Gateway (Gemini) · GSA dedicada (infra GCP — a confirmar). Lectura: izquierda→derecha = camino automático. La rama inferior es el fallback manual, que se reincorpora antes del cierre de lote." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0F0F0;strokeColor=#B3B3B3;arcSize=6;fontSize=11;fontStyle=2;fontColor=#555555;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="-95" width="2600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 1 — CAMINO PRINCIPAL ===================== -->
+        <mxCell id="F1a" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;COMERCIAL&lt;/b&gt;&lt;br&gt;Entra a la app (Angular)&lt;br&gt;Login Firebase Auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="250" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F1b" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;COMERCIAL&lt;/b&gt;&lt;br&gt;Sube Excel + paz y salvo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;arcSize=15;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="250" y="250" width="180" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F1c" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Audita: heurística + IA Destino&lt;br&gt;(AI Gateway / Gemini)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="460" y="250" width="190" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="D1" value="¿Archivo&lt;br&gt;válido?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6B656;strokeWidth=3;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="210" width="150" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="F1d" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Persiste en PostgreSQL&lt;br&gt;+ Cloud Storage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="860" y="250" width="190" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 2 — CONSULTA AUTOMÁTICA (cluster paralelo) ===================== -->
+        <mxCell id="F2a" value="Cliente 360&lt;br&gt;ingresos + score&lt;br&gt;(solo clientes Bolívar)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCF2F4;strokeColor=#17A2B8;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="40" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F2b" value="Siniestros con El Libertador&lt;br&gt;(acumulado histórico)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCF2F4;strokeColor=#17A2B8;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="150" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F2c" value="Modelo de analítica (TI)&lt;br&gt;doc+ingresos+score+ocupación='Independiente'&lt;br&gt;+núm.solicitud[bloqueado TI]. Reintenta 2x" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCF2F4;strokeColor=#17A2B8;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="260" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F2d" value="Tablas SAI (GCP): doc+estado=ASEGURADA&lt;br&gt;cotejo IA de dirección — solo INQ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCF2F4;strokeColor=#17A2B8;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1080" y="370" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="D2" value="¿Camino&lt;br&gt;automático?&lt;br&gt;&lt;span style=&quot;font-size:9px;font-weight:normal&quot;&gt;(360+modelo OK,&lt;br&gt;ningún solicitante&lt;br&gt;es empresa)&lt;/span&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6B656;strokeWidth=3;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="150" width="170" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="F2note" value="Cae a FALLBACK (toda la solicitud) si, para cualquier solicitante (INQ o algún COA):&lt;br&gt;• no está en Cliente 360&lt;br&gt;• es persona jurídica (empresa) → Informe Express&lt;br&gt;• el modelo falla tras 2 reintentos" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;arcSize=8;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="40" y="560" width="420" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== REGLAS DURAS + RESULTADO ===================== -->
+        <mxCell id="F2b1" value="Regla dura 1&lt;br&gt;Siniestros acum. ≥ umbral&lt;br&gt;parametrizable → NIEGA&lt;br&gt;(por participante) — ACTIVA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6E6;strokeColor=#B85450;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="60" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F2b3" value="Regla dura 3&lt;br&gt;Dirección ya ASEGURADA&lt;br&gt;en SAI (cotejo IA) → NIEGA&lt;br&gt;solo INQ — ACTIVA" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6E6;strokeColor=#B85450;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="180" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F2b2" value="Regla dura 2&lt;br&gt;Moras DataCrédito ≥ $1.000.000&lt;br&gt;→ NIEGA — INACTIVA&lt;br&gt;(pendiente Ger. Técnica + VP Patrimonial)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;dashed=1;fontColor=#666666;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1560" y="300" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F2b4" value="Combinar resultado&lt;br&gt;INQ + COAs → resultado&lt;br&gt;final de la solicitud&lt;br&gt;— TBD, pendiente definición mayor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;dashed=1;fontColor=#666666;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1820" y="180" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F2b5" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Guarda resultado en Postgres&lt;br&gt;marca 'consultada'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2070" y="180" width="190" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 4 — CIERRE DE LOTE ===================== -->
+        <mxCell id="D4" value="¿Alguna solicitud&lt;br&gt;del lote cayó&lt;br&gt;en fallback?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#D6B656;strokeWidth=3;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2310" y="140" width="170" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="F4msg" value="Pantalla al comercial:&lt;br&gt;'requiere revisión manual,&lt;br&gt;info en próximas horas'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2310" y="380" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F4note" value="TBD (Operación): ¿el Analista puede radicar aprobadas mientras otras del mismo lote siguen en fallback?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#999999;dashed=1;fontColor=#666666;arcSize=8;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="510" y="560" width="380" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F4c" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Corre modelo de lote (margen)&lt;br&gt;migrado de Sheets a Python" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2570" y="180" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F4d" value="Pantalla al comercial:&lt;br&gt;'n aprobadas / n negadas —&lt;br&gt;PDF llega en minutos'" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2820" y="180" width="210" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 5 — TABLERO ===================== -->
+        <mxCell id="F5b" value="Tablero Sección 2 — Radicación y emisión (aprobadas)&lt;br&gt;ANALISTA radica+aprueba en SAI&lt;br&gt;texto prellenado: TBD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="3080" y="180" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F5d" value="Negadas automáticas&lt;br&gt;batch nocturno → directo a&lt;br&gt;tablas SAI en GCP, sin humano" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="3080" y="340" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F5e" value="Lote 100% radicado en SAI&lt;br&gt;(aprobadas emitidas + negadas&lt;br&gt;en batch + fallback ya emitido)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="3340" y="180" width="210" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== FASE 6 — RESULTADOS ===================== -->
+        <mxCell id="F6a" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Genera PDF comercial&lt;br&gt;+ PDF inmobiliaria" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="3600" y="180" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F6b" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Envía correo con PDFs&lt;br&gt;CC director/backup, BCC auditoría" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="3830" y="180" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F6c" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;SISTEMA&lt;/b&gt;&lt;br&gt;Registra en Historico_Envios&lt;br&gt;(PostgreSQL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="4070" y="180" width="190" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="F6d" value="Lanza Ley 2300 por lote&lt;br&gt;reemplaza batch quincenal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="4300" y="180" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="END" value="El ejecutivo comercial&lt;br&gt;recibe los resultados del lote" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=40;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="4540" y="170" width="240" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== RAMA FALLBACK (por debajo) ===================== -->
+        <mxCell id="F3a" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;AUXILIAR&lt;/b&gt;&lt;br&gt;Radica la solicitud en SAI&lt;br&gt;(Tablero Sección 1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1340" y="560" width="190" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F3b" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Reúne datos manuales:&lt;br&gt;ingresos, acierta, siniestros,&lt;br&gt;¿inmueble ya asegurado?&lt;br&gt;(Tablero Sección 3 — Análisis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1580" y="560" width="210" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F3c" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA (si empresa)&lt;/b&gt;&lt;br&gt;Consigue Informe Express&lt;br&gt;DataCrédito" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1580" y="710" width="190" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F3d" value="Se dispara el modelo&lt;br&gt;de analítica con esos datos&lt;br&gt;(mismo motor, mismas reglas)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#CCF2F4;strokeColor=#17A2B8;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1840" y="560" width="200" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="F3e" value="&lt;b style=&quot;font-size:10px;opacity:0.65&quot;&gt;ANALISTA&lt;/b&gt;&lt;br&gt;Emite resultado en SAI&lt;br&gt;(ya estaba radicada)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;arcSize=15;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="2080" y="560" width="190" height="110" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEYENDA ===================== -->
+        <mxCell id="legend" value="Colores: naranja=Comercial · verde=Sistema (automático) · azul=Auxiliar / hito · morado=Orquestación de lote · amarillo=Analista · celeste=Endpoint externo / IA · rojo=negado / alerta · gris punteado=TBD o bloqueado · diamante=decisión" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="880" width="2600" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="legend2" value="Pendientes/bloqueados clave: número de solicitud para el modelo (TI) · regla de moras DataCrédito (Ger. Técnica + VP Patrimonial) · combinación INQ+COAs · texto prellenado SAI · timing de radicación parcial (Operación) · propósito exacto de la GSA" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;fontColor=#B85450;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="905" width="2600" height="20" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 1 ===================== -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1a" target="F1b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1b" target="F1c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1c" target="D1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;strokeColor=#B85450;fontColor=#B85450;fontSize=10;exitX=0.5;exitY=0;entryX=0.5;entryY=0;" edge="1" parent="1" source="D1" target="F1b">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="755" y="190" />
+              <mxPoint x="340" y="190" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="Sí" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#3B6D11;fontSize=12;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="D1" target="F1d"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== EDGES: FASE 1 -> FASE 2 (fan-out) ===================== -->
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1d" target="F2a"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1d" target="F2b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.6;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1d" target="F2c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.7;entryX=0;entryY=0.5;" edge="1" parent="1" source="F1d" target="F2d"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== EDGES: FASE 2 (fan-in a D2) ===================== -->
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.2;" edge="1" parent="1" source="F2a" target="D2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.4;" edge="1" parent="1" source="F2b" target="D2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.6;" edge="1" parent="1" source="F2c" target="D2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.8;" edge="1" parent="1" source="F2d" target="D2"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== EDGES: D2 -> reglas duras / fallback ===================== -->
+        <mxCell id="e14" value="Sí" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#3B6D11;fontSize=12;fontStyle=1;exitX=1;exitY=0.25;entryX=0;entryY=0.5;" edge="1" parent="1" source="D2" target="F2b1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="D2" target="F2b3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e16" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.75;entryX=0;entryY=0.5;" edge="1" parent="1" source="D2" target="F2b2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e17" value="No → FALLBACK" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;strokeColor=#B85450;fontColor=#B85450;fontSize=10;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="D2" target="F3a">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1425" y="500" />
+              <mxPoint x="1435" y="500" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: reglas duras -> resultado ===================== -->
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.3;entryX=0;entryY=0.2;" edge="1" parent="1" source="F2b1" target="F2b4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F2b3" target="F2b4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.7;entryX=0;entryY=0.8;" edge="1" parent="1" source="F2b2" target="F2b4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e21" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F2b4" target="F2b5"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e22" value="automática resuelta" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;fontColor=#3B6D11;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F2b5" target="D4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e23" value="si negada" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;fontSize=10;fontColor=#B85450;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="F2b5" target="F5d">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2165" y="480" />
+              <mxPoint x="3143" y="480" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- ===================== EDGES: FASE 4 ===================== -->
+        <mxCell id="e24" value="Sí" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#B85450;fontSize=12;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="D4" target="F4msg"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e25" value="una vez resuelto el fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;fontSize=9;exitX=1;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="1" source="F4msg" target="F4c">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2650" y="435" />
+              <mxPoint x="2670" y="435" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e26" value="No" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontColor=#3B6D11;fontSize=12;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="D4" target="F4c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e27" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F4c" target="F4d"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e28" value="aprobadas" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;fontColor=#3B6D11;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F4d" target="F5b"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== EDGES: FASE 5 -> FASE 6 ===================== -->
+        <mxCell id="e29" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="F5b" target="F5e"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e30" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.7;entryX=0;entryY=0.5;" edge="1" parent="1" source="F5d" target="F5e"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e31" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F5e" target="F6a"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F6a" target="F6b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e33" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F6b" target="F6c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e34" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F6c" target="F6d"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e35" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F6d" target="END"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===================== EDGES: RAMA FALLBACK ===================== -->
+        <mxCell id="e36" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F3a" target="F3b"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e37" value="si es empresa" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;fontSize=9;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="F3b" target="F3c"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e38" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.4;entryX=0;entryY=0.4;" edge="1" parent="1" source="F3b" target="F3d"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e39" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="1" source="F3c" target="F3d"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e40" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="F3d" target="F3e"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e41" value="fallback resuelto" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;fontSize=10;fontColor=#3B6D11;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="F3e" target="D4">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2175" y="500" />
+              <mxPoint x="2395" y="500" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e42" value="fallback emitido" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeWidth=2;dashed=1;fontSize=9;exitX=1;exitY=0.5;entryX=0.5;entryY=1;" edge="1" parent="1" source="F3e" target="F5e">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2350" y="615" />
+              <mxPoint x="3445" y="615" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
