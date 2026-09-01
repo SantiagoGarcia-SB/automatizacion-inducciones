@@ -1295,7 +1295,7 @@ function _obtenerDatosCorreos_() {
 
 
 // ============================================================
-//  EMAIL RADICACIÓN EXITOSA
+//  EMAIL INGRESO EXITOSO
 //  Reemplaza enviarNotificaciones() de Codigo.js
 // ============================================================
 
@@ -1305,8 +1305,8 @@ function _obtenerDatosCorreos_() {
  *
  * @param {Object} formData           Datos del formulario.
  * @param {string} idLote             ID generado para el lote.
- * @param {number} cantidad           Número de contratos radicados.
- * @param {string} emailComercial     Email del usuario que radicó.
+ * @param {number} cantidad           Número de contratos ingresados.
+ * @param {string} emailComercial     Email del usuario que ingresó el lote.
  * @param {string} urlDrive           URL de la carpeta en Drive.
  * @param {Array}  filasParaInsertar  Filas ya procesadas del lote.
  */
@@ -1337,7 +1337,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
     _bloque_chips_([
       { label: "ID de Lote",          valor: idLote,                        colorVal: _C_ROJO },
       { label: "P&oacute;liza",        valor: formData.poliza                                  },
-      { label: "Contratos radicados", valor: String(cantidad)                                  },
+      { label: "Contratos ingresados", valor: String(cantidad)                                 },
       { label: "Tasa de Inducci&oacute;n", valor: formData.tasaNegociacion + "%" },
       { label: "Paz y Salvo",         valor: badgePazYSalvo,                full: true         }
     ]),
@@ -1346,13 +1346,13 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
 
     formData.tipoPazYSalvo === "checkbox"
       ? _bloque_nota_(
-          `<strong style="color:#253150;">Importante:</strong> Este lote fue radicado con
+          `<strong style="color:#253150;">Importante:</strong> Este lote fue ingresado con
            certificaci&oacute;n manual de paz y salvo. En caso de aprobaci&oacute;n,
            el equipo de inducciones solicitar&aacute; el soporte emitido por la inmobiliaria.`
         )
       : _bloque_nota_(
           `<strong style="color:#253150;">Soporte recibido:</strong> El documento de paz y salvo
-           fue adjuntado correctamente con esta radicaci&oacute;n.`
+           fue adjuntado correctamente con este ingreso.`
         ),
 
     _bloque_pie_()
@@ -1364,7 +1364,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
     to:       emailComercial,
     cc:       correosCC,
     bcc:      BCC_AUDITORIA,
-    subject:  `✅ Radicación exitosa · Lote ${idLote}`,
+    subject:  `✅ Ingreso exitoso · Lote ${idLote}`,
     htmlBody: htmlBody,
     replyTo:  "noreply@ellibertador.co",
     name:     "Inducciones · El Libertador"
