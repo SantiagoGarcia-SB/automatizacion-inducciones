@@ -321,28 +321,24 @@ var MENUS_POR_ROL = {
   COMERCIAL: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
-    { id: 'lotes', icon: '📋', label: 'Mis lotes' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+    { id: 'lotes', icon: '📋', label: 'Mis lotes' }
   ],
   CONSULTOR: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
-    { id: 'lotes', icon: '📋', label: 'Mis lotes' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+    { id: 'lotes', icon: '📋', label: 'Mis lotes' }
   ],
   DIRECTOR: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' }
   ],
   GERENTE: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
     { id: 'radicar', icon: '📤', label: 'Radicar' },
     { id: 'lotes', icon: '📋', label: 'Lotes' },
-    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' }
+    { id: 'metricas-lotes', icon: '📉', label: 'Métricas' }
   ],
   AUXILIAR: [
     { id: 'dashboard', icon: '📊', label: 'Inicio' },
@@ -361,7 +357,6 @@ var MENUS_POR_ROL = {
     { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
     { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
     { id: 'sep1', icon: '', label: '---' },
     { id: 'usuarios', icon: '👥', label: 'Usuarios' },
     { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
@@ -376,7 +371,6 @@ var MENUS_POR_ROL = {
     { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
     { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
     { id: 'sep1', icon: '', label: '---' },
     { id: 'usuarios', icon: '👥', label: 'Usuarios' },
     { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
@@ -393,7 +387,6 @@ var MENUS_POR_ROL = {
     { id: 'solicitudes', icon: '📄', label: 'Solicitudes' },
     { id: 'cola-auxiliar', icon: '📥', label: 'Cola radicación' },
     { id: 'mis-solicitudes', icon: '📝', label: 'Mis solicitudes' },
-    { id: 'errores', icon: '⚠️', label: 'Pendientes' },
     { id: 'sep1', icon: '', label: '---' },
     { id: 'usuarios', icon: '👥', label: 'Usuarios' },
     { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
@@ -876,12 +869,19 @@ function _renderizarDashboardConDatos(r) {
             + '</div>';
         }
 
-        // Alerta de errores pendientes (clickeable → lleva a Pendientes)
+        // Alertas de casos pendientes (clickeables → llevan a Mis lotes filtrado)
         if (r.errorTerceros > 0) {
-          html += '<div class="alert alert--error" onclick="navegarA(\'errores\')" style="cursor:pointer;">'
+          html += '<div class="alert alert--error" onclick="_filtrarLotesPorEstado(\'ERROR EN TERCEROS\')" style="cursor:pointer;">'
             + '<span style="font-size:1.1rem;">⚠️</span>'
-            + '<div><strong style="color:var(--color-primary-red);">' + r.errorTerceros + ' solicitud(es) requieren tu atención</strong>'
-            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Haz clic aquí para ver qué información necesitamos.</p></div>'
+            + '<div><strong style="color:var(--color-primary-red);">' + r.errorTerceros + ' lote(s) con error en terceros</strong>'
+            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Revisa el correo que te envió el equipo de operación para saber qué falta corregir.</p></div>'
+            + '</div>';
+        }
+        if (r.pendientePS > 0) {
+          html += '<div class="alert alert--warning" onclick="_filtrarLotesPorEstado(\'PENDIENTE PAZ Y SALVO\')" style="cursor:pointer;">'
+            + '<span style="font-size:1.1rem;">📄</span>'
+            + '<div><strong style="color:var(--color-accent-orange);">' + r.pendientePS + ' lote(s) pendiente(s) de paz y salvo</strong>'
+            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Revisa el correo que te envió el equipo de operación para saber qué falta enviar.</p></div>'
             + '</div>';
         }
 
