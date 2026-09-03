@@ -163,7 +163,9 @@ function validarCelular(valor) {
   if (!raw) return null; // vacío lo maneja la regla de "al menos uno"
 
   if (!/^3\d{9}$/.test(raw)) {
-    return `El celular "${valor}" no es válido. Verifique el número e intente nuevamente.`;
+    // Mensaje genérico a propósito: no se revela el patrón esperado
+    // (largo/prefijo) para no facilitar números fabricados (anti-fraude).
+    return "El número de celular no es válido. Verifícalo e intenta de nuevo.";
   }
 
   return null; // ✅ Válido

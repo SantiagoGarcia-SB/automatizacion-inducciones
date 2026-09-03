@@ -3654,8 +3654,15 @@ function _leerExcelRad(file) {
   var dropLabel = document.getElementById('rad_dropLabel');
   _radExcelParseado = null;
 
-  info.textContent = 'Preparando lector de Excel...';
-  info.style.color = '';
+  // Indicador animado para que no parezca congelado mientras lee/descarga.
+  info.style.color = 'var(--color-primary-navy)';
+  var puntos = 0;
+  info.textContent = '⏳ Leyendo la planilla, un momento...';
+  var animLector = setInterval(function() {
+    puntos = (puntos + 1) % 4;
+    info.textContent = '⏳ Leyendo la planilla, un momento' + Array(puntos + 1).join('.');
+  }, 400);
+  function _detenerAnim() { if (animLector) { clearInterval(animLector); animLector = null; } }
 
   _cargarLibreriaExcel().then(function() {
     var reader = new FileReader();
@@ -3663,6 +3670,7 @@ function _leerExcelRad(file) {
       try {
         var wb = XLSX.read(e.target.result, { type: 'array' });
         var datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
+        _detenerAnim();
         if (datos.length >= 4 && String(datos[3][2] || '').trim().toUpperCase() !== 'AMPARO INTEGRAL') {
           info.textContent = '⚠️ Plantilla incorrecta'; info.style.color = '#bd0f14';
           dropZone.style.borderColor = '#bd0f14'; return;
@@ -3675,10 +3683,12 @@ function _leerExcelRad(file) {
         dropZone.style.borderColor = '#16A34A';
         dropZone.style.background = 'rgba(22,163,74,0.02)';
         dropLabel.textContent = file.name + ' ✓';
-      } catch (err) { info.textContent = '⚠️ No se pudo leer'; info.style.color = '#bd0f14'; }
+      } catch (err) { _detenerAnim(); info.textContent = '⚠️ No se pudo leer'; info.style.color = '#bd0f14'; }
     };
+    reader.onerror = function() { _detenerAnim(); info.textContent = '⚠️ No se pudo leer el archivo'; info.style.color = '#bd0f14'; };
     reader.readAsArrayBuffer(file);
   }).catch(function(err) {
+    _detenerAnim();
     info.textContent = '⚠️ ' + err.message;
     info.style.color = '#bd0f14';
   });
@@ -3841,6 +3851,28 @@ var _DESTINOS_INVALIDOS_LOCAL = {
   "-":1,"--":1,"---":1,".":1,"..":1,"...":1,"_":1,"__":1,"?":1,"??":1,"0":1,"00":1
 };
 
+// Celular colombiano valido. Replica validarCelular() del backend (Codigo.js).
+// El mensaje al usuario es intencionalmente generico: NO revela el patron
+// esperado (largo/prefijo) para no facilitar numeros fabricados (anti-fraude).
+function _validarCelularLocal(valor) {
+  var raw = String(valor == null ? '' : valor).trim().replace(/[\s-]/g, '').replace(/^(\+?57)/, '');
+  if (!raw) return null; // vacio lo maneja la regla de "al menos uno"
+  if (!/^3\d{9}$/.test(raw)) {
+    return 'El número de celular no es válido. Verifícalo e intenta de nuevo.';
+  }
+  return null;
+}
+
+// Correo con formato basico. Replica validarCorreo() del backend.
+function _validarCorreoLocal(valor) {
+  var raw = String(valor == null ? '' : valor).trim();
+  if (!raw) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    return 'El correo no tiene un formato válido. Verifícalo e intenta de nuevo.';
+  }
+  return null;
+}
+
 function _validarDestinoLocal(valor) {
   var raw = String(valor == null ? '' : valor).trim();
   var upper = raw.toUpperCase().replace(/\s+/g, ' ');
@@ -3898,6 +3930,13 @@ function _preValidarExcel(data) {
     if (!cel && !cor) {
       errores.push({ fila: nF, col: 13, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
       errores.push({ fila: nF, col: 14, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
+    } else {
+      // Validar formato: el celular debe ser un movil, no un fijo.
+      var motivoCel = _validarCelularLocal(cel);
+      if (motivoCel) errores.push({ fila: nF, col: 13, campo: 'Celular (INQ)', motivo: motivoCel });
+
+      var motivoCor = _validarCorreoLocal(cor);
+      if (motivoCor) errores.push({ fila: nF, col: 14, campo: 'Correo Electrónico (INQ)', motivo: motivoCor });
     }
 
     // Destino — heurística local (los genéricos como "Local comercial" se
@@ -3906,6 +3945,34 @@ function _preValidarExcel(data) {
     if (motivoDestino) {
       errores.push({ fila: nF, col: 4, campo: 'Destino', motivo: motivoDestino });
     }
+
+    // Codeudores (COA 1 al 5). Mismos índices que el backend (Codigo.js).
+    // Solo se valida el COA si tiene nombre diligenciado.
+    var coaSlots = [
+      { nombre: 14, cel: 17, correo: 18, label: 'COA 1' },
+      { nombre: 19, cel: 22, correo: 23, label: 'COA 2' },
+      { nombre: 24, cel: 27, correo: 28, label: 'COA 3' },
+      { nombre: 29, cel: 32, correo: 33, label: 'COA 4' },
+      { nombre: 34, cel: 37, correo: 38, label: 'COA 5' }
+    ];
+    coaSlots.forEach(function(coa) {
+      var nombreCoa = String(fila[coa.nombre] || '').trim();
+      if (!nombreCoa) return; // COA vacío no se valida
+
+      var celCoa = String(fila[coa.cel] || '').trim().replace(/[\s-]/g, '');
+      var corCoa = String(fila[coa.correo] || '').trim();
+
+      if (!celCoa && !corCoa) {
+        errores.push({ fila: nF, col: coa.cel + 1, campo: 'Celular / Correo (' + coa.label + ')', motivo: 'Debe diligenciar al menos el Celular o el Correo de ' + coa.label + '.' });
+        errores.push({ fila: nF, col: coa.correo + 1, campo: 'Celular / Correo (' + coa.label + ')', motivo: 'Debe diligenciar al menos el Celular o el Correo de ' + coa.label + '.' });
+      } else {
+        var motivoCelCoa = _validarCelularLocal(celCoa);
+        if (motivoCelCoa) errores.push({ fila: nF, col: coa.cel + 1, campo: 'Celular (' + coa.label + ')', motivo: motivoCelCoa });
+
+        var motivoCorCoa = _validarCorreoLocal(corCoa);
+        if (motivoCorCoa) errores.push({ fila: nF, col: coa.correo + 1, campo: 'Correo (' + coa.label + ')', motivo: motivoCorCoa });
+      }
+    });
 
     // Duplicados verticales (no apunta a una sola celda → sin col)
     var llave = (String(fila[11] || '').trim() + '|' + String(fila[5] || '').trim()).toUpperCase();
@@ -3937,7 +4004,7 @@ function _mostrarErroresRadicacion(errores, archivoMarcado) {
       + '<p style="margin:0 0 4px;font-weight:700;color:var(--color-primary-red);font-size:var(--text-sm);">Corrige más rápido sobre tu misma planilla</p>'
       + '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);line-height:1.5;">Descárgala: las celdas por corregir están <strong style="color:#BD0F14;">resaltadas en rojo</strong>. Ajusta solo esas, guarda y vuelve a subir el mismo archivo.</p>'
       + '</div>'
-      + '<button class="btn btn--danger" style="padding:10px 18px;font-size:var(--text-sm);font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(189,15,20,0.25);" onclick="_descargarMarcado()">📥 Descargar planilla marcada</button>'
+      + '<button type="button" onclick="_descargarMarcado()" onmouseover="this.style.background=\'#9b0c10\'" onmouseout="this.style.background=\'#bd0f14\'" style="padding:10px 18px;font-size:0.85rem;font-weight:700;white-space:nowrap;border:none;border-radius:10px;cursor:pointer;background:#bd0f14;color:#fff;box-shadow:0 2px 8px rgba(189,15,20,0.25);">📥 Descargar planilla marcada</button>'
       + '</div></div>';
   }
 
@@ -3945,10 +4012,10 @@ function _mostrarErroresRadicacion(errores, archivoMarcado) {
   html += '<div style="background:#F0F7FF;border:1px solid #C7E0FF;border-radius:10px;padding:14px 16px;margin-bottom:16px;">'
     + '<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
     + '<div style="flex:1;min-width:220px;">'
-    + '<p style="margin:0 0 4px;font-weight:700;color:#0B5FA5;font-size:var(--text-sm);">Corrige aquí mismo, sin descargar nada</p>'
-    + '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);line-height:1.5;">Edita las celdas marcadas directamente en la página, con el nombre del inquilino a la vista, y vuelve a validar al instante.</p>'
+    + '<p style="margin:0 0 4px;font-weight:700;color:#0B5FA5;font-size:0.85rem;">Corrige aquí mismo, sin descargar nada</p>'
+    + '<p style="margin:0;font-size:0.85rem;color:#524f4f;line-height:1.5;">Edita las celdas marcadas directamente en la página, con el nombre del inquilino a la vista, y vuelve a validar al instante.</p>'
     + '</div>'
-    + '<button class="btn btn--primary" style="padding:10px 18px;font-size:var(--text-sm);font-weight:700;white-space:nowrap;" onclick="_abrirEditorPlanilla()">✏️ Corregir en la página</button>'
+    + '<button type="button" onclick="_abrirEditorPlanilla()" onmouseover="this.style.background=\'#1a2540\'" onmouseout="this.style.background=\'#253150\'" style="padding:10px 18px;font-size:0.85rem;font-weight:700;white-space:nowrap;border:none;border-radius:10px;cursor:pointer;background:#253150;color:#fff;box-shadow:0 2px 8px rgba(37,49,80,0.25);">✏️ Corregir en la página</button>'
     + '</div></div>';
 
   html += '<table class="table"><thead><tr><th>Fila</th><th>Campo</th><th>Observación</th></tr></thead><tbody>';
@@ -4026,56 +4093,102 @@ function _abrirEditorPlanilla() {
     porFila[e.fila].push(e);
   });
 
-  var html = '<div class="modal-content" style="max-width:820px;width:95%;max-height:90vh;overflow:auto;">'
-    + '<div class="modal-header modal-header--navy"><div class="flex flex--between" style="align-items:center;">'
-    + '<h3 style="margin:0;color:var(--color-mono-0);">✏️ Corregir planilla</h3>'
-    + '<button class="modal-close" onclick="_cerrarEditorPlanilla()">✕</button>'
-    + '</div></div>'
-    + '<div class="modal-body">'
-    + '<p style="font-size:var(--text-sm);color:var(--color-mono-600);margin:0 0 16px;">Corrige los campos resaltados. Cada bloque es un contrato; el nombre del inquilino y la identificación se muestran para que sepas de quién es.</p>';
+  var totalCampos = errores.length;
+  var totalContratos = Object.keys(porFila).length;
+
+  // Devuelve un ícono segun el tipo de campo, para lectura rapida.
+  function _iconoCampo(campo) {
+    var c = String(campo || '').toLowerCase();
+    if (c.indexOf('celular') >= 0 || c.indexOf('telefono') >= 0 || c.indexOf('teléfono') >= 0) return '📱';
+    if (c.indexOf('correo') >= 0 || c.indexOf('email') >= 0) return '✉️';
+    if (c.indexOf('destino') >= 0) return '🏠';
+    if (c.indexOf('canon') >= 0 || c.indexOf('iva') >= 0 || c.indexOf('admin') >= 0) return '💲';
+    return '📝';
+  }
+
+  // Iniciales del inquilino para el avatar.
+  function _iniciales(nombre) {
+    var partes = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+    if (partes.length === 0) return '?';
+    if (partes.length === 1) return partes[0].charAt(0).toUpperCase();
+    return (partes[0].charAt(0) + partes[partes.length - 1].charAt(0)).toUpperCase();
+  }
+
+  var html = '<div class="modal-content" style="max-width:560px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden;border-radius:18px;">'
+    // ── Header con gradiente de marca ──
+    + '<div style="flex-shrink:0;padding:22px 24px 20px;background:linear-gradient(120deg,#253150 0%,#3a2b52 55%,#bd0f14 160%);color:#fff;position:relative;">'
+    + '<button type="button" onclick="_cerrarEditorPlanilla()" aria-label="Cerrar" style="position:absolute;top:16px;right:16px;width:30px;height:30px;border:none;border-radius:50%;background:rgba(255,255,255,0.18);color:#fff;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>'
+    + '<div style="display:flex;align-items:center;gap:12px;padding-right:36px;">'
+    + '<div style="width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,0.16);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">✏️</div>'
+    + '<div style="min-width:0;">'
+    + '<h3 style="margin:0;color:#fff;font-size:1.2rem;font-weight:700;line-height:1.2;">Corregir planilla</h3>'
+    + '<p style="margin:3px 0 0;color:rgba(255,255,255,0.82);font-size:0.8rem;line-height:1.4;">' + totalCampos + ' campo(s) por ajustar en ' + totalContratos + ' contrato(s)</p>'
+    + '</div>'
+    + '</div>'
+    + '</div>'
+    // ── Cuerpo scrollable ──
+    + '<div style="background:#f4f5f8;overflow-y:auto;flex:1;padding:18px 20px;">';
 
   Object.keys(porFila).forEach(function(filaStr) {
     var filaNum = parseInt(filaStr, 10);
     var idx = filaNum - 1; // índice base-0 en el array
     var fila = data[idx] || [];
     var inquilino = String(fila[9] || '').trim() || '(sin nombre)';
-    var identificacion = String(fila[11] || '').trim() || '(sin identificación)';
+    var identificacion = String(fila[11] || '').trim() || 'sin ID';
+    var camposFila = porFila[filaStr].length;
 
-    html += '<div style="border:1px solid var(--color-mono-100);border-radius:10px;padding:14px 16px;margin-bottom:14px;">'
-      + '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'
-      + '<span style="font-weight:700;color:var(--color-primary-navy);">' + _escHtml(inquilino) + '</span>'
-      + '<span style="font-size:var(--text-xs);color:var(--color-mono-500);">Fila ' + filaNum + ' · ID: ' + _escHtml(identificacion) + '</span>'
-      + '</div>';
+    html += '<div style="background:#fff;border:1px solid #e8e6e7;border-radius:14px;padding:0;margin-bottom:16px;box-shadow:0 1px 4px rgba(37,49,80,0.07);overflow:hidden;">'
+      // Cabecera de la tarjeta (inquilino)
+      + '<div style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:#fafbfc;border-bottom:1px solid #eef0f3;">'
+      + '<div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#253150,#3a4d7a);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;flex-shrink:0;">' + _escHtml(_iniciales(inquilino)) + '</div>'
+      + '<div style="min-width:0;flex:1;">'
+      + '<div style="font-weight:700;color:#253150;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + _escHtml(inquilino) + '</div>'
+      + '<div style="font-size:0.72rem;color:#8a8888;margin-top:1px;">Fila ' + filaNum + ' · ID ' + _escHtml(identificacion) + '</div>'
+      + '</div>'
+      + '<span style="flex-shrink:0;font-size:0.68rem;font-weight:700;color:#bd0f14;background:rgba(189,15,20,0.08);padding:3px 9px;border-radius:20px;">' + camposFila + ' por corregir</span>'
+      + '</div>'
+      // Campos
+      + '<div style="padding:16px;">';
 
-    porFila[filaStr].forEach(function(e) {
+    porFila[filaStr].forEach(function(e, i) {
       var colIdx = e.col - 1; // índice base-0 de la columna
-      var titulo = String(titulos[colIdx] || e.campo || ('Columna ' + e.col));
+      var titulo = String(e.campo || titulos[colIdx] || ('Columna ' + e.col));
       var valorActual = String(fila[colIdx] == null ? '' : fila[colIdx]);
       var inputId = 'edit_' + filaNum + '_' + e.col;
+      var marginBottom = (i === porFila[filaStr].length - 1) ? '0' : '16px';
 
-      html += '<div style="margin-bottom:10px;">'
-        + '<label style="display:block;font-size:var(--text-sm);font-weight:600;color:var(--color-mono-800);margin-bottom:4px;">' + _escHtml(titulo) + '</label>'
-        + '<input class="input" id="' + inputId + '" data-fila="' + filaNum + '" data-col="' + e.col + '" value="' + _escHtml(valorActual) + '" style="border:2px solid #FF6B6B;">'
-        + '<small style="color:var(--color-primary-red);font-size:var(--text-xs);">' + _escHtml(e.motivo || '') + '</small>'
+      html += '<div style="margin-bottom:' + marginBottom + ';">'
+        + '<label for="' + inputId + '" style="display:flex;align-items:center;gap:6px;font-size:0.8rem;font-weight:600;color:#403f3f;margin-bottom:6px;">'
+        + '<span style="font-size:0.9rem;">' + _iconoCampo(titulo) + '</span>' + _escHtml(titulo)
+        + '</label>'
+        + '<input id="' + inputId + '" data-fila="' + filaNum + '" data-col="' + e.col + '" value="' + _escHtml(valorActual) + '" autocomplete="off" '
+        + 'onfocus="this.style.borderColor=\'#bd0f14\';this.style.boxShadow=\'0 0 0 3px rgba(189,15,20,0.12)\';this.style.background=\'#fff\';" '
+        + 'onblur="this.style.borderColor=\'#f0a6a6\';this.style.boxShadow=\'none\';this.style.background=\'#fffafa\';" '
+        + 'style="width:100%;box-sizing:border-box;padding:11px 14px;border:1.5px solid #f0a6a6;border-radius:10px;background:#fffafa;font-size:0.9rem;color:#253150;outline:none;transition:border-color .15s,box-shadow .15s,background .15s;">'
+        + '<div style="display:flex;align-items:flex-start;gap:6px;margin-top:7px;background:rgba(189,15,20,0.05);border-radius:8px;padding:7px 10px;">'
+        + '<span style="font-size:0.78rem;flex-shrink:0;line-height:1.3;">⚠️</span>'
+        + '<span style="color:#a1161b;font-size:0.75rem;line-height:1.4;">' + _escHtml(e.motivo || '') + '</span>'
+        + '</div>'
         + '</div>';
     });
 
-    html += '</div>';
+    html += '</div></div>';
   });
 
   if (erroresNoEditables.length > 0) {
-    html += '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
-      + '<p style="margin:0 0 4px;font-weight:700;font-size:var(--text-sm);color:#8A6D00;">Estos ajustes debes resolverlos en la planilla:</p>';
+    html += '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:12px;padding:13px 15px;margin-bottom:4px;">'
+      + '<p style="margin:0 0 6px;font-weight:700;font-size:0.8rem;color:#8A6D00;display:flex;align-items:center;gap:6px;"><span>ℹ️</span>Resuelve estos ajustes en la planilla original:</p>';
     erroresNoEditables.forEach(function(e) {
-      html += '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);">• Fila ' + _escHtml(e.fila) + ' — ' + _escHtml(e.motivo || '') + '</p>';
+      html += '<p style="margin:0 0 2px;font-size:0.78rem;color:#6b5d1f;line-height:1.4;">• Fila ' + _escHtml(e.fila) + ' — ' + _escHtml(e.motivo || '') + '</p>';
     });
     html += '</div>';
   }
 
   html += '</div>'
-    + '<div class="modal-footer">'
-    + '<button class="btn btn--ghost" onclick="_cerrarEditorPlanilla()">Cancelar</button>'
-    + '<button class="btn btn--primary" onclick="_aplicarCorreccionesYValidar()">✓ Aplicar y validar de nuevo</button>'
+    // ── Footer ──
+    + '<div style="flex-shrink:0;display:flex;gap:10px;justify-content:flex-end;align-items:center;padding:14px 20px;background:#fff;border-top:1px solid #eef0f3;">'
+    + '<button type="button" onclick="_cerrarEditorPlanilla()" onmouseover="this.style.background=\'#f4f5f8\'" onmouseout="this.style.background=\'#fff\'" style="padding:10px 18px;font-size:0.85rem;font-weight:600;border:1.5px solid #d5d3d4;border-radius:10px;cursor:pointer;background:#fff;color:#403f3f;transition:background .15s;">Cancelar</button>'
+    + '<button type="button" onclick="_aplicarCorreccionesYValidar()" onmouseover="this.style.background=\'#1a2540\'" onmouseout="this.style.background=\'#253150\'" style="padding:10px 20px;font-size:0.85rem;font-weight:700;border:none;border-radius:10px;cursor:pointer;background:#253150;color:#fff;box-shadow:0 2px 10px rgba(37,49,80,0.28);transition:background .15s;">✓ Aplicar y validar</button>'
     + '</div></div>';
 
   var modal = document.createElement('div');
