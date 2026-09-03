@@ -3763,7 +3763,7 @@ var _pasosProgreso = [
   { pct: 0, titulo: 'Preparando tu radicación', sub: 'Un momento mientras alistamos todo...' },
   { pct: 15, titulo: 'Leyendo la planilla', sub: 'Cargando los documentos adjuntos...' },
   { pct: 30, titulo: 'Documentos recibidos', sub: 'Preparando la información del lote...' },
-  { pct: 50, titulo: 'Validando con inteligencia artificial', sub: 'Revisando campos de destino con IA generativa...' },
+  { pct: 50, titulo: 'Validando la información', sub: 'Revisando los datos de la planilla...' },
   { pct: 85, titulo: 'Casi listo', sub: 'Guardando archivos y registrando el lote...' },
   { pct: 100, titulo: 'Radicación completada', sub: 'Tu lote fue procesado exitosamente.' }
 ];
@@ -3822,6 +3822,56 @@ function _restaurarBorradorRad() {
   if (data.tipoPS === 'adjunto') _selPS('B');
 }
 
+// Heurística local de Destino — réplica de validarDestino() del backend
+// (Codigo.js). Atrapa genéricos y relleno al instante, sin llamar al servidor.
+// La validación semántica con IA sigue siendo del servidor al radicar.
+var _DESTINOS_INVALIDOS_LOCAL = {
+  // Genéricos del negocio
+  "COMERCIAL":1,"LOCAL":1,"COMERCIO":1,"ARRIENDO":1,"ALQUILAR":1,"ALQUILER":1,
+  "INMUEBLE":1,"PROPIEDAD":1,"BIEN INMUEBLE":1,"USO MIXTO":1,"MIXTO":1,
+  "LOCAL COMERCIAL":1,"LOCALES COMERCIALES":1,"USO COMERCIAL":1,"ESTABLECIMIENTO COMERCIAL":1,
+  "ESTABLECIMIENTO":1,"NEGOCIO":1,"OFICINA":1,"OFICINAS":1,"BODEGA":1,"BODEGAS":1,
+  "LOCAL O BODEGA":1,"APARTAMENTO":1,"APTO":1,"CASA":1,
+  // Evasivas comunes
+  "N/A":1,"NA":1,"N.A":1,"N.A.":1,"NO APLICA":1,"NO APLICA.":1,
+  "SIN INFORMACION":1,"SIN INFORMACIÓN":1,"SIN INFO":1,"S/I":1,"S.I":1,
+  "NINGUNO":1,"NINGUNA":1,"NULL":1,"NULO":1,"NULA":1,"ND":1,"NO DISPONIBLE":1,
+  "NO TIENE":1,"DESCONOCIDO":1,"OTRO":1,"OTROS":1,"VARIOS":1,
+  // Ruido
+  "-":1,"--":1,"---":1,".":1,"..":1,"...":1,"_":1,"__":1,"?":1,"??":1,"0":1,"00":1
+};
+
+function _validarDestinoLocal(valor) {
+  var raw = String(valor == null ? '' : valor).trim();
+  var upper = raw.toUpperCase().replace(/\s+/g, ' ');
+
+  if (!upper) return 'El campo Destino es obligatorio.';
+
+  if (_DESTINOS_INVALIDOS_LOCAL[upper])
+    return '"' + raw + '" no describe un uso real del inmueble. Especifique (ej: Peluquería, Restaurante, Vivienda familiar).';
+
+  if (!/[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/.test(raw))
+    return '"' + raw + '" no contiene texto válido.';
+
+  var soloLetras = raw.replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/g, '');
+  if (soloLetras.length < 4)
+    return '"' + raw + '" es demasiado corto para describir un destino.';
+
+  var palabras = raw.split(/\s+/);
+  var palabraMaxima = 0;
+  for (var p = 0; p < palabras.length; p++) {
+    var len = palabras[p].replace(/[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/gi, '').length;
+    if (len > palabraMaxima) palabraMaxima = len;
+  }
+  if (palabraMaxima < 3)
+    return '"' + raw + '" no contiene palabras reconocibles como destino.';
+
+  if (/^(.)\1{3,}$/.test(raw.replace(/\s/g, '')))
+    return '"' + raw + '" parece un valor de relleno.';
+
+  return null; // válido a nivel heurístico
+}
+
 // ── Pre-validación frontend ──
 function _preValidarExcel(data) {
   var errores = [];
@@ -3838,18 +3888,26 @@ function _preValidarExcel(data) {
     // Campos obligatorios
     [1,2,4,5,6,9,10,11].forEach(function(idx) {
       if (!String(fila[idx] || '').trim()) {
-        errores.push({ fila: nF, campo: String(titulos[idx] || 'Col '+(idx+1)), motivo: 'Dato faltante.' });
+        errores.push({ fila: nF, col: idx + 1, campo: String(titulos[idx] || 'Col '+(idx+1)), motivo: 'Dato faltante.' });
       }
     });
 
-    // Celular o correo
+    // Celular o correo (se marcan ambas celdas: celular col 13, correo col 14)
     var cel = String(fila[12] || '').trim().replace(/[\s-]/g, '');
     var cor = String(fila[13] || '').trim();
     if (!cel && !cor) {
-      errores.push({ fila: nF, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
+      errores.push({ fila: nF, col: 13, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
+      errores.push({ fila: nF, col: 14, campo: 'Celular / Correo (INQ)', motivo: 'Debe diligenciar al menos uno.' });
     }
 
-    // Duplicados verticales
+    // Destino — heurística local (los genéricos como "Local comercial" se
+    // atrapan al instante; la IA hace el juicio semántico final en el servidor).
+    var motivoDestino = _validarDestinoLocal(fila[3]);
+    if (motivoDestino) {
+      errores.push({ fila: nF, col: 4, campo: 'Destino', motivo: motivoDestino });
+    }
+
+    // Duplicados verticales (no apunta a una sola celda → sin col)
     var llave = (String(fila[11] || '').trim() + '|' + String(fila[5] || '').trim()).toUpperCase();
     if (mapaLlaves[llave]) {
       errores.push({ fila: nF, campo: 'DUPLICADO', motivo: 'Contrato repetido (ver fila ' + mapaLlaves[llave] + ').' });
@@ -3867,11 +3925,33 @@ function _mostrarErroresRadicacion(errores, archivoMarcado) {
     + '<div class="flex flex--between" style="align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">'
     + '<h4 style="color:var(--color-primary-red);margin:0;">⚠️ Ajustes necesarios (' + errores.length + ')</h4>';
 
+  html += '</div>';
+
   if (archivoMarcado && archivoMarcado.base64) {
-    html += '<button class="btn btn--danger" style="padding:8px 14px;font-size:var(--text-sm);" onclick="_descargarMarcado()">📥 Descargar planilla con observaciones</button>';
+    // CTA destacado: se invita a reutilizar la MISMA planilla marcada.
+    // Las celdas a corregir vienen resaltadas en rojo, así el comercial
+    // corrige sobre el mismo archivo y lo vuelve a subir, sin rehacer nada.
+    html += '<div style="background:#FFF5F5;border:1px solid #FFD1D1;border-radius:10px;padding:14px 16px;margin-bottom:16px;">'
+      + '<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
+      + '<div style="flex:1;min-width:220px;">'
+      + '<p style="margin:0 0 4px;font-weight:700;color:var(--color-primary-red);font-size:var(--text-sm);">Corrige más rápido sobre tu misma planilla</p>'
+      + '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);line-height:1.5;">Descárgala: las celdas por corregir están <strong style="color:#BD0F14;">resaltadas en rojo</strong>. Ajusta solo esas, guarda y vuelve a subir el mismo archivo.</p>'
+      + '</div>'
+      + '<button class="btn btn--danger" style="padding:10px 18px;font-size:var(--text-sm);font-weight:700;white-space:nowrap;box-shadow:0 2px 8px rgba(189,15,20,0.25);" onclick="_descargarMarcado()">📥 Descargar planilla marcada</button>'
+      + '</div></div>';
   }
 
-  html += '</div><table class="table"><thead><tr><th>Fila</th><th>Campo</th><th>Observación</th></tr></thead><tbody>';
+  // Opción recomendada: corregir sobre la misma página, sin descargar ni resubir.
+  html += '<div style="background:#F0F7FF;border:1px solid #C7E0FF;border-radius:10px;padding:14px 16px;margin-bottom:16px;">'
+    + '<div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;">'
+    + '<div style="flex:1;min-width:220px;">'
+    + '<p style="margin:0 0 4px;font-weight:700;color:#0B5FA5;font-size:var(--text-sm);">Corrige aquí mismo, sin descargar nada</p>'
+    + '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);line-height:1.5;">Edita las celdas marcadas directamente en la página, con el nombre del inquilino a la vista, y vuelve a validar al instante.</p>'
+    + '</div>'
+    + '<button class="btn btn--primary" style="padding:10px 18px;font-size:var(--text-sm);font-weight:700;white-space:nowrap;" onclick="_abrirEditorPlanilla()">✏️ Corregir en la página</button>'
+    + '</div></div>';
+
+  html += '<table class="table"><thead><tr><th>Fila</th><th>Campo</th><th>Observación</th></tr></thead><tbody>';
   for (var i = 0; i < errores.length; i++) {
     var e = errores[i];
     html += '<tr><td style="text-align:center;">' + (e.fila || '-') + '</td><td><strong>' + (e.campo || '') + '</strong></td><td>' + (e.motivo || '') + '</td></tr>';
@@ -3884,6 +3964,9 @@ function _mostrarErroresRadicacion(errores, archivoMarcado) {
 
   // Guardar referencia al archivo marcado para descarga
   if (archivoMarcado) window._archivoMarcadoActual = archivoMarcado;
+
+  // Guardar los errores actuales para el editor en página.
+  window._erroresActuales = errores || [];
 }
 
 function _descargarMarcado() {
@@ -3898,6 +3981,147 @@ function _descargarMarcado() {
   a.href = url; a.download = am.nombre || 'Ajustes_Requeridos.xlsx';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ============================================================
+//  EDITOR DE PLANILLA EN PÁGINA (corregir sin descargar/resubir)
+// ============================================================
+
+// Escapa texto para insertarlo con seguridad en HTML (atributos y contenido).
+function _escHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Abre un modal con las filas que tienen errores, mostrando el inquilino e
+// identificación como contexto y una celda editable por cada campo con error.
+// Los cambios se escriben directamente en _radExcelParseado (datos en memoria),
+// así el comercial corrige y revalida sin descargar ni volver a subir el Excel.
+function _abrirEditorPlanilla() {
+  var data = _radExcelParseado;
+  if (!data || data.length < 5) { _toast('No hay planilla cargada para editar.', 'warning'); return; }
+
+  var errores = (window._erroresActuales || []).filter(function(e) {
+    return typeof e.fila === 'number' && typeof e.col === 'number';
+  });
+
+  // Errores que no apuntan a una celda concreta (duplicado de contrato, etc.):
+  // no se pueden editar con un input, se listan aparte como aviso.
+  var erroresNoEditables = (window._erroresActuales || []).filter(function(e) {
+    return typeof e.fila !== 'number' || typeof e.col !== 'number';
+  });
+
+  if (errores.length === 0) {
+    _toast('Estos ajustes no se pueden corregir en la tabla; usa la planilla marcada.', 'warning');
+    return;
+  }
+
+  var titulos = data[3] || [];
+
+  // Agrupar errores por fila para mostrar un contrato por bloque.
+  var porFila = {};
+  errores.forEach(function(e) {
+    if (!porFila[e.fila]) porFila[e.fila] = [];
+    porFila[e.fila].push(e);
+  });
+
+  var html = '<div class="modal-content" style="max-width:820px;width:95%;max-height:90vh;overflow:auto;">'
+    + '<div class="modal-header modal-header--navy"><div class="flex flex--between" style="align-items:center;">'
+    + '<h3 style="margin:0;color:var(--color-mono-0);">✏️ Corregir planilla</h3>'
+    + '<button class="modal-close" onclick="_cerrarEditorPlanilla()">✕</button>'
+    + '</div></div>'
+    + '<div class="modal-body">'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-600);margin:0 0 16px;">Corrige los campos resaltados. Cada bloque es un contrato; el nombre del inquilino y la identificación se muestran para que sepas de quién es.</p>';
+
+  Object.keys(porFila).forEach(function(filaStr) {
+    var filaNum = parseInt(filaStr, 10);
+    var idx = filaNum - 1; // índice base-0 en el array
+    var fila = data[idx] || [];
+    var inquilino = String(fila[9] || '').trim() || '(sin nombre)';
+    var identificacion = String(fila[11] || '').trim() || '(sin identificación)';
+
+    html += '<div style="border:1px solid var(--color-mono-100);border-radius:10px;padding:14px 16px;margin-bottom:14px;">'
+      + '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:10px;">'
+      + '<span style="font-weight:700;color:var(--color-primary-navy);">' + _escHtml(inquilino) + '</span>'
+      + '<span style="font-size:var(--text-xs);color:var(--color-mono-500);">Fila ' + filaNum + ' · ID: ' + _escHtml(identificacion) + '</span>'
+      + '</div>';
+
+    porFila[filaStr].forEach(function(e) {
+      var colIdx = e.col - 1; // índice base-0 de la columna
+      var titulo = String(titulos[colIdx] || e.campo || ('Columna ' + e.col));
+      var valorActual = String(fila[colIdx] == null ? '' : fila[colIdx]);
+      var inputId = 'edit_' + filaNum + '_' + e.col;
+
+      html += '<div style="margin-bottom:10px;">'
+        + '<label style="display:block;font-size:var(--text-sm);font-weight:600;color:var(--color-mono-800);margin-bottom:4px;">' + _escHtml(titulo) + '</label>'
+        + '<input class="input" id="' + inputId + '" data-fila="' + filaNum + '" data-col="' + e.col + '" value="' + _escHtml(valorActual) + '" style="border:2px solid #FF6B6B;">'
+        + '<small style="color:var(--color-primary-red);font-size:var(--text-xs);">' + _escHtml(e.motivo || '') + '</small>'
+        + '</div>';
+    });
+
+    html += '</div>';
+  });
+
+  if (erroresNoEditables.length > 0) {
+    html += '<div style="background:#FFF8E1;border:1px solid #FFE082;border-radius:8px;padding:12px 14px;margin-bottom:8px;">'
+      + '<p style="margin:0 0 4px;font-weight:700;font-size:var(--text-sm);color:#8A6D00;">Estos ajustes debes resolverlos en la planilla:</p>';
+    erroresNoEditables.forEach(function(e) {
+      html += '<p style="margin:0;font-size:var(--text-sm);color:var(--color-mono-700);">• Fila ' + _escHtml(e.fila) + ' — ' + _escHtml(e.motivo || '') + '</p>';
+    });
+    html += '</div>';
+  }
+
+  html += '</div>'
+    + '<div class="modal-footer">'
+    + '<button class="btn btn--ghost" onclick="_cerrarEditorPlanilla()">Cancelar</button>'
+    + '<button class="btn btn--primary" onclick="_aplicarCorreccionesYValidar()">✓ Aplicar y validar de nuevo</button>'
+    + '</div></div>';
+
+  var modal = document.createElement('div');
+  modal.id = 'modalEditorPlanilla';
+  modal.className = 'modal-overlay';
+  modal.innerHTML = html;
+  modal.addEventListener('click', function(ev) { if (ev.target === modal) _cerrarEditorPlanilla(); });
+  document.body.appendChild(modal);
+}
+
+function _cerrarEditorPlanilla() {
+  var m = document.getElementById('modalEditorPlanilla');
+  if (m) m.remove();
+}
+
+// Vuelca los valores editados a _radExcelParseado y revalida.
+function _aplicarCorreccionesYValidar() {
+  var data = _radExcelParseado;
+  if (!data) { _cerrarEditorPlanilla(); return; }
+
+  var inputs = document.querySelectorAll('#modalEditorPlanilla input[data-fila]');
+  for (var i = 0; i < inputs.length; i++) {
+    var inp = inputs[i];
+    var filaNum = parseInt(inp.getAttribute('data-fila'), 10);
+    var colNum = parseInt(inp.getAttribute('data-col'), 10);
+    var idxFila = filaNum - 1;
+    var idxCol = colNum - 1;
+    if (!data[idxFila]) continue;
+    data[idxFila][idxCol] = inp.value.trim();
+  }
+
+  _cerrarEditorPlanilla();
+
+  // Revalidar en el frontend con las mismas reglas rápidas.
+  var erroresRestantes = _preValidarExcel(data);
+  if (erroresRestantes.length > 0) {
+    _mostrarErroresRadicacion(erroresRestantes, null);
+    _toast('Quedan ' + erroresRestantes.length + ' ajuste(s) por corregir.', 'warning');
+    return;
+  }
+
+  // Sin errores rápidos: se limpia el panel. La validación completa (incluida
+  // la de destino) se hace en el servidor al enviar a radicación.
+  var panel = document.getElementById('rad_errores');
+  if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+  _toast('Correcciones aplicadas. Ya puedes enviar a radicación.', 'success');
 }
 
 function mostrarVistaEnConstruccion(seccion) {

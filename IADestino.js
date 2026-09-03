@@ -1,6 +1,6 @@
 /**
- * Validación semántica del campo Destino usando Vertex AI (Gemini), con la
- * cuenta de servicio del proyecto GCP "Proyecto IA Servicios Bolivar".
+ * Validación semántica del campo Destino usando la API de Gemini
+ * (Google AI Studio / Generative Language API), autenticada con API key.
  *
  * No reemplaza validarDestino() (heurística barata en Codigo.js) — la
  * complementa. La heurística filtra basura obvia sin gastar una llamada de
@@ -9,42 +9,20 @@
  * nada real).
  *
  * Requiere las Propiedades del Script:
- *   VERTEX_SA_KEY_JSON  → contenido completo del JSON de la cuenta de servicio
- *   VERTEX_PROJECT_ID   → ID del proyecto GCP (ej. "proyecto-ia-servicios-bolivar")
- *   VERTEX_LOCATION     → región de Vertex AI (ej. "us-central1")
- *   VERTEX_MODEL        → (opcional) modelo a usar; por defecto "gemini-2.5-flash-lite"
+ *   GEMINI_API_KEY   → API key de la Gemini API (Google AI Studio).
+ *   GEMINI_MODEL     → (opcional) modelo a usar; por defecto "gemini-2.5-flash-lite".
  *
- * Requiere la librería OAuth2 for Apps Script (identificador "OAuth2").
+ * La API key NUNCA debe estar hardcodeada en el código: se configura en
+ * Configuración del proyecto → Propiedades del script.
  */
 
-const VERTEX_CHUNK_SIZE = 100;
+const GEMINI_CHUNK_SIZE = 100;
+const GEMINI_API_BASE   = 'https://generativelanguage.googleapis.com/v1beta';
 
 /**
- * Crea el servicio OAuth2 que firma el JWT de la cuenta de servicio y
- * obtiene el access token de Vertex AI (scope cloud-platform).
- */
-function _obtenerServicioVertex_() {
-  const props = PropertiesService.getScriptProperties();
-  const credencialesJson = props.getProperty('VERTEX_SA_KEY_JSON');
-
-  if (!credencialesJson) {
-    throw new Error('Falta la propiedad de script VERTEX_SA_KEY_JSON con la clave de la cuenta de servicio de Vertex AI.');
-  }
-
-  const credenciales = JSON.parse(credencialesJson);
-
-  return OAuth2.createService('VertexAI')
-    .setTokenUrl('https://oauth2.googleapis.com/token')
-    .setPrivateKey(credenciales.private_key)
-    .setIssuer(credenciales.client_email)
-    .setPropertyStore(props)
-    .setScope('https://www.googleapis.com/auth/cloud-platform');
-}
-
-/**
- * Valida en lote una lista de valores ÚNICOS de Destino contra Vertex AI.
- * Si la lista supera VERTEX_CHUNK_SIZE, se parte en varias llamadas.
- * Si Vertex AI falla (timeout/5xx/cuota) tras los reintentos de retry(),
+ * Valida en lote una lista de valores ÚNICOS de Destino contra la Gemini API.
+ * Si la lista supera GEMINI_CHUNK_SIZE, se parte en varias llamadas.
+ * Si la Gemini API falla (timeout/5xx/cuota) tras los reintentos de retry(),
  * NO bloquea la radicación: se registra el aviso y esos valores quedan
  * validados solo por heurística.
  *
@@ -58,11 +36,11 @@ function validarDestinosConIA_(listaDestinos) {
   let degradado = false;
   if (!listaDestinos || listaDestinos.length === 0) return { mapa, degradado };
 
-  for (let i = 0; i < listaDestinos.length; i += VERTEX_CHUNK_SIZE) {
-    const chunk = listaDestinos.slice(i, i + VERTEX_CHUNK_SIZE);
+  for (let i = 0; i < listaDestinos.length; i += GEMINI_CHUNK_SIZE) {
+    const chunk = listaDestinos.slice(i, i + GEMINI_CHUNK_SIZE);
 
     try {
-      const veredictos = retry(() => _llamarVertexDestinos_(chunk));
+      const veredictos = retry(() => _llamarGeminiDestinos_(chunk));
       veredictos.forEach(v => {
         if (v && v.destino) {
           mapa[v.destino] = { valido: v.valido !== false, motivo: v.motivo || '' };
@@ -82,28 +60,22 @@ function validarDestinosConIA_(listaDestinos) {
 }
 
 /**
- * Hace la llamada HTTP a Vertex AI (generateContent) para un chunk de
+ * Hace la llamada HTTP a la Gemini API (generateContent) para un chunk de
  * destinos y devuelve el array de veredictos ya parseado.
  * Lanza excepción si la respuesta no es 200 o no trae contenido utilizable,
  * para que retry() la reintente y, si persiste, validarDestinosConIA_ la
  * capture y degrade.
  */
-function _llamarVertexDestinos_(destinos) {
-  const props     = PropertiesService.getScriptProperties();
-  const projectId = props.getProperty('VERTEX_PROJECT_ID');
-  const location  = props.getProperty('VERTEX_LOCATION') || 'us-central1';
-  const modelo    = props.getProperty('VERTEX_MODEL') || 'gemini-2.5-flash-lite';
+function _llamarGeminiDestinos_(destinos) {
+  const props  = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty('GEMINI_API_KEY');
+  const modelo = props.getProperty('GEMINI_MODEL') || 'gemini-2.5-flash-lite';
 
-  if (!projectId) {
-    throw new Error('Falta la propiedad de script VERTEX_PROJECT_ID.');
+  if (!apiKey) {
+    throw new Error('Falta la propiedad de script GEMINI_API_KEY con la API key de la Gemini API.');
   }
 
-  const service = _obtenerServicioVertex_();
-  if (!service.hasAccess()) {
-    throw new Error('No se pudo obtener el token de acceso de Vertex AI: ' + service.getLastError());
-  }
-
-  const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelo}:generateContent`;
+  const url = `${GEMINI_API_BASE}/models/${modelo}:generateContent`;
 
   const payload = {
     contents: [{ role: 'user', parts: [{ text: _construirPromptDestinos_(destinos) }] }],
@@ -127,14 +99,16 @@ function _llamarVertexDestinos_(destinos) {
   const response = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + service.getAccessToken() },
+    headers: { 'x-goog-api-key': apiKey },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
 
   const codigo = response.getResponseCode();
   if (codigo !== 200) {
-    throw new Error('Vertex AI respondió ' + codigo + ': ' + response.getContentText());
+    // No se registra el cuerpo completo para evitar filtrar la API key u
+    // otros datos sensibles en logs; solo el código de estado.
+    throw new Error('La Gemini API respondió con código ' + codigo + '.');
   }
 
   const data      = JSON.parse(response.getContentText());
@@ -142,7 +116,7 @@ function _llamarVertexDestinos_(destinos) {
   const parte     = candidato && candidato.content && candidato.content.parts && candidato.content.parts[0];
 
   if (!parte || !parte.text) {
-    throw new Error('Respuesta de Vertex AI sin contenido utilizable: ' + response.getContentText());
+    throw new Error('Respuesta de la Gemini API sin contenido utilizable.');
   }
 
   return JSON.parse(parte.text);
@@ -154,11 +128,24 @@ function _llamarVertexDestinos_(destinos) {
  */
 function _construirPromptDestinos_(destinos) {
   return 'Eres un auditor de contratos de arrendamiento en Colombia. Para cada valor de la ' +
-    'lista de abajo, evalúa si describe un DESTINO o USO REAL de un inmueble arrendado ' +
-    '(ejemplos válidos: "Peluquería", "Restaurante", "Vivienda familiar", "Bodega de repuestos", ' +
-    '"Consultorio odontológico"). Marca "valido": false si el valor es texto sin sentido, ' +
-    'ambiguo, demasiado genérico para identificar la actividad real, o no describe un uso de ' +
-    'inmueble. Cuando sea inválido, da un "motivo" breve en español explicando por qué. ' +
+    'lista de abajo, evalúa si describe con PRECISIÓN el DESTINO o USO REAL y ESPECÍFICO de un ' +
+    'inmueble arrendado, es decir, la actividad concreta que se ejerce allí ' +
+    '(ejemplos válidos: "Peluquería", "Restaurante", "Vivienda", "Vivienda familiar", ' +
+    '"Bodega de repuestos", "Consultorio odontológico").\n\n' +
+    'IMPORTANTE: "Vivienda" y "Vivienda familiar" SÍ son destinos válidos porque identifican ' +
+    'el uso residencial. En cambio, "Apartamento", "Apto" o "Casa" a secas NO son válidos ' +
+    'porque describen el tipo de inmueble, no el uso/destino.\n\n' +
+    'Sé ESTRICTO con lo COMERCIAL. Marca "valido": false cuando el valor:\n' +
+    '- Sea texto sin sentido, relleno o ambiguo.\n' +
+    '- Sea una categoría comercial GENÉRICA que NO identifica la actividad concreta, aunque ' +
+    'suene plausible. En especial, rechaza valores como "Local comercial", "Local", "Comercial", ' +
+    '"Comercio", "Oficina", "Uso comercial", "Bodega" (a secas), "Negocio", "Uso mixto" y ' +
+    'similares: indican una categoría pero no QUÉ actividad se ejerce.\n' +
+    '- No describa un uso de inmueble.\n\n' +
+    'Un valor solo es válido si permite saber la actividad real (ej. "Bodega de repuestos" es ' +
+    'válido, "Bodega" no; "Oficina de contaduría" es válido, "Oficina" no). ' +
+    'Cuando sea inválido, da un "motivo" breve en español explicando por qué y, si aplica, ' +
+    'pide que especifiquen la actividad concreta. ' +
     'Responde con un elemento por cada valor de la lista, en el mismo orden, sin omitir ninguno.\n\n' +
     'Valores a evaluar:\n' + JSON.stringify(destinos);
 }

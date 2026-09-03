@@ -24,6 +24,9 @@ const DESTINOS_INVALIDOS = new Set([
   // Genéricos del negocio
   "COMERCIAL","LOCAL","COMERCIO","ARRIENDO","ALQUILAR","ALQUILER",
   "INMUEBLE","PROPIEDAD","BIEN INMUEBLE","USO MIXTO","MIXTO",
+  "LOCAL COMERCIAL","LOCALES COMERCIALES","USO COMERCIAL","ESTABLECIMIENTO COMERCIAL",
+  "ESTABLECIMIENTO","NEGOCIO","OFICINA","OFICINAS","BODEGA","BODEGAS",
+  "LOCAL O BODEGA","APARTAMENTO","APTO","CASA",
   // Evasivas comunes
   "N/A","NA","N.A","N.A.","NO APLICA","NO APLICA.",
   "SIN INFORMACION","SIN INFORMACIÓN","SIN INFO","S/I","S.I",
@@ -284,18 +287,19 @@ function motorDeAuditoria(formData) {
     // CASCADA 3 — AUDITORÍA FILA POR FILA
     // ----------------------------------------------------------
 
-    // Pre-paso: valores únicos de Destino que ya pasan la heurística barata
-    // (validarDestino) se envían UNA sola vez a Vertex AI para juicio
-    // semántico, en vez de una llamada de red por fila. Si Vertex AI falla,
-    // validarDestinosConIA_ se degrada sola y devuelve {} — no bloquea la
-    // radicación (ver IADestino.js).
+    // Pre-paso: TODOS los valores únicos de Destino no vacíos se envían UNA
+    // sola vez a la Gemini API para juicio semántico, en vez de una llamada
+    // de red por fila. La IA revisa siempre el destino (incluidos genéricos
+    // como "Local comercial"), no solo los que pasan la heurística barata.
+    // Si la Gemini API falla, validarDestinosConIA_ se degrada sola y
+    // devuelve {} — no bloquea la radicación (ver IADestino.js).
     const destinosUnicosParaIA = new Set();
     for (let iPre = 4; iPre < data.length; iPre++) {
       const filaPre = data[iPre];
       if (!String(filaPre[9] || "").trim()) continue;
 
       const rawDestinoPre = String(filaPre[3] ?? "").trim();
-      if (rawDestinoPre && !validarDestino(rawDestinoPre)) {
+      if (rawDestinoPre) {
         destinosUnicosParaIA.add(rawDestinoPre);
       }
     }
@@ -322,7 +326,7 @@ function motorDeAuditoria(formData) {
       const obligatoriosInquilino = [1, 2, 4, 5, 6, 9, 10, 11];
       obligatoriosInquilino.forEach(idx => {
         if (!String(fila[idx] || "").trim()) {
-          errores.push({ fila: nF, campo: titulos[idx], motivo: "Dato faltante." });
+          errores.push({ fila: nF, col: idx + 1, campo: titulos[idx], motivo: "Dato faltante." });
         }
       });
 
@@ -331,33 +335,45 @@ function motorDeAuditoria(formData) {
       const correoInq  = String(fila[13] || "").trim();
 
       if (!celularInq && !correoInq) {
+        // Falta ambos contactos: se marcan ambas celdas (celular col 13, correo col 14).
         errores.push({
           fila: nF,
+          col: 13,
+          campo: "Celular (INQ) / Correo Electrónico (INQ)",
+          motivo: "Debe diligenciar al menos el Celular o el Correo del Inquilino."
+        });
+        errores.push({
+          fila: nF,
+          col: 14,
           campo: "Celular (INQ) / Correo Electrónico (INQ)",
           motivo: "Debe diligenciar al menos el Celular o el Correo del Inquilino."
         });
       } else {
         const motivoCelularInq = validarCelular(celularInq);
         if (motivoCelularInq) {
-          errores.push({ fila: nF, campo: "Celular (INQ)", motivo: motivoCelularInq });
+          errores.push({ fila: nF, col: 13, campo: "Celular (INQ)", motivo: motivoCelularInq });
         }
 
         const motivoCorreoInq = validarCorreo(correoInq);
         if (motivoCorreoInq) {
-          errores.push({ fila: nF, campo: "Correo Electrónico (INQ)", motivo: motivoCorreoInq });
+          errores.push({ fila: nF, col: 14, campo: "Correo Electrónico (INQ)", motivo: motivoCorreoInq });
         }
       }
 
       // ── 3. DESTINO (heurística barata + juicio semántico con IA) ──
+      // La heurística rechaza basura obvia (ej. "LOCAL", relleno). Si pasa,
+      // se aplica el veredicto de la IA, que revisa TODOS los destinos y es
+      // estricta con genéricos como "Local comercial" (ver IADestino.js).
       const motivoDestino = validarDestino(fila[3]);
       if (motivoDestino) {
-        errores.push({ fila: nF, campo: "Destino", motivo: motivoDestino });
+        errores.push({ fila: nF, col: 4, campo: "Destino", motivo: motivoDestino });
       } else {
         const rawDestino  = String(fila[3] ?? "").trim();
         const veredictoIA = veredictosDestinoIA[rawDestino];
         if (veredictoIA && veredictoIA.valido === false) {
           errores.push({
             fila: nF,
+            col: 4,
             campo: "Destino",
             motivo: veredictoIA.motivo || `"${rawDestino}" no parece describir un uso real del inmueble (validado por IA).`
           });
@@ -374,7 +390,7 @@ function motorDeAuditoria(formData) {
       camposMonetarios.forEach(({ idx, nombre }) => {
         const motivoMonetario = validarCampoMonetario(fila[idx], nombre);
         if (motivoMonetario) {
-          errores.push({ fila: nF, campo: nombre, motivo: motivoMonetario });
+          errores.push({ fila: nF, col: idx + 1, campo: nombre, motivo: motivoMonetario });
         }
       });
 
@@ -395,16 +411,18 @@ function motorDeAuditoria(formData) {
         const corCoa = String(fila[coa.correo] || "").trim();
 
         if (!celCoa && !corCoa) {
-          errores.push({ fila: nF, campo: `Celular / Correo (${coa.label})`, motivo: `Debe diligenciar al menos el Celular o el Correo de ${coa.label}.` });
+          // Falta ambos contactos del COA: se marcan las dos celdas (celular y correo).
+          errores.push({ fila: nF, col: coa.cel + 1, campo: `Celular / Correo (${coa.label})`, motivo: `Debe diligenciar al menos el Celular o el Correo de ${coa.label}.` });
+          errores.push({ fila: nF, col: coa.correo + 1, campo: `Celular / Correo (${coa.label})`, motivo: `Debe diligenciar al menos el Celular o el Correo de ${coa.label}.` });
         } else {
           const motivoCelularCoa = validarCelular(celCoa);
           if (motivoCelularCoa) {
-            errores.push({ fila: nF, campo: `Celular (${coa.label})`, motivo: motivoCelularCoa });
+            errores.push({ fila: nF, col: coa.cel + 1, campo: `Celular (${coa.label})`, motivo: motivoCelularCoa });
           }
 
           const motivoCorreoCoa = validarCorreo(corCoa);
           if (motivoCorreoCoa) {
-            errores.push({ fila: nF, campo: `Correo (${coa.label})`, motivo: motivoCorreoCoa });
+            errores.push({ fila: nF, col: coa.correo + 1, campo: `Correo (${coa.label})`, motivo: motivoCorreoCoa });
           }
         }
       });
@@ -985,21 +1003,33 @@ function generarArchivoMarcado(ssId, errores) {
   const ss = SpreadsheetApp.openById(ssId);
   const hoja = ss.getSheets()[0];
   const ultimaCol = hoja.getLastColumn();
-  
+
+  // Color rojo claro pero visible para señalar la celda a corregir a simple vista.
+  const COLOR_CELDA_ERROR = "#FF6B6B";
+
   hoja.getRange(4, ultimaCol + 1).setValue("DIAGNÓSTICO DE AUDITORÍA")
       .setFontWeight("bold").setBackground("#BD0F14").setFontColor("white");
 
   errores.forEach(err => {
-    if (typeof err.fila === 'number') {
-      hoja.getRange(err.fila, 1, 1, ultimaCol).setBackground("#fff2f2");
-      
-      const celdaDiagnostico = hoja.getRange(err.fila, ultimaCol + 1);
-      const valorActual = celdaDiagnostico.getValue();
-      const nuevoMensaje = `[${err.campo}] ${err.motivo}`;
-      
-      const valorFinal = valorActual ? valorActual + " | " + nuevoMensaje : nuevoMensaje;
-      celdaDiagnostico.setValue(valorFinal).setFontColor("#BD0F14");
+    if (typeof err.fila !== 'number') return;
+
+    // Se marca SOLO la celda del campo con error (no toda la fila) para que
+    // el usuario identifique a ojo qué corregir. Si el error no apunta a una
+    // columna concreta (ej. duplicado de contrato), no se pinta ninguna celda;
+    // el detalle queda en la columna de diagnóstico.
+    if (typeof err.col === 'number' && err.col >= 1 && err.col <= ultimaCol) {
+      hoja.getRange(err.fila, err.col)
+          .setBackground(COLOR_CELDA_ERROR)
+          .setFontColor("#7A0000")
+          .setFontWeight("bold");
     }
+
+    const celdaDiagnostico = hoja.getRange(err.fila, ultimaCol + 1);
+    const valorActual = celdaDiagnostico.getValue();
+    const nuevoMensaje = `[${err.campo}] ${err.motivo}`;
+
+    const valorFinal = valorActual ? valorActual + " | " + nuevoMensaje : nuevoMensaje;
+    celdaDiagnostico.setValue(valorFinal).setFontColor("#BD0F14");
   });
 
   SpreadsheetApp.flush();
