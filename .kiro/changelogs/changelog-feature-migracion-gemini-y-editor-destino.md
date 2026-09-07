@@ -14,3 +14,4 @@
 ### Corregido
 - Se bloqueó la radicación de planillas sin contratos detectados, evitando registros exitosos sin filas en `Control_General` y el envío de correos con cero contratos.
 - Se endureció la validación de la planilla oficial: ahora exige los metadatos A1:B3 y los 39 encabezados A4:AM4 en su orden canónico, con rechazo explícito de columnas adicionales o desplazadas.
+- Se actualizó el modelo predeterminado de validación de Destino a `gemini-3.5-flash-lite`.

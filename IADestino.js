@@ -69,7 +69,7 @@ function validarDestinosConIA_(listaDestinos) {
 function _llamarGeminiDestinos_(destinos) {
   const props  = PropertiesService.getScriptProperties();
   const apiKey = props.getProperty('GEMINI_API_KEY');
-  const modelo = props.getProperty('GEMINI_MODEL') || 'gemini-2.5-flash-lite';
+  const modelo = props.getProperty('GEMINI_MODEL') || 'gemini-3.5-flash-lite';
 
   if (!apiKey) {
     throw new Error('Falta la propiedad de script GEMINI_API_KEY con la API key de la Gemini API.');
