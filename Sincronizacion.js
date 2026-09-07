@@ -503,6 +503,10 @@ function sincronizarEstadoDesdeAnalisis() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function _notificarCambiosEstadoComerciales_(cambiosPorLote) {
+  if (!NotificationConfig_estaActiva('cambio_estado')) {
+    NotificationConfig_registrarSupresion('cambio_estado');
+    return;
+  }
   if (!cambiosPorLote || Object.keys(cambiosPorLote).length === 0) return;
 
   var cache = CacheService.getScriptCache();

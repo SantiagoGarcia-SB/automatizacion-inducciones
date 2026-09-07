@@ -161,15 +161,19 @@ clasp open
 
 ### Configuración de Triggers
 
-Los siguientes triggers deben configurarse manualmente desde el editor de Apps Script (`Triggers` > `Add Trigger`):
+Los triggers de sincronización se configuran desde el editor de Apps Script. Las notificaciones programadas se administran desde **Configuración → Notificaciones** por un usuario `ADMIN`:
 
-| Función | Evento | Frecuencia |
-|---------|--------|------------|
-| `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Cada edición |
-| `enviarRecordatoriosPazYSalvoDiario` | Time-driven | Diario (hora configurable) |
-| `sincronizarLoteAutomatico` | Time-driven | Cada 5–15 minutos (según volumen) |
-| `procesarDatosMejorado` | Time-driven | Cada 15 días — se crea ejecutando `configurarTriggerCumplimiento` una sola vez desde el editor |
-| `enviarReporteGestionInducciones` | Time-driven | Lunes a viernes 5:00pm y sábado 12:30pm — se crea ejecutando `configurarTriggerReporteGestion` una sola vez desde el editor (idempotente por reemplazo: se puede re-ejecutar sin duplicar) |
+| Función | Evento | Administración |
+|---------|--------|----------------|
+| `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Se asegura al guardar una configuración; la notificación se activa/desactiva desde Configuración. |
+| `ejecutarRecordatoriosDiarios` | Time-driven | Hora y frecuencia desde Configuración. |
+| `sincronizarUnificado` | Time-driven | Cada 10 minutos; se configura con `configurarTriggerSincronizacionUnificada`. |
+| `procesarDatosMejorado` | Time-driven | Intervalo, hora y activación desde Configuración. |
+| `enviarReporteGestionInducciones` | Time-driven | Días, horarios y activación desde Configuración. Valores iniciales: lunes a viernes 5:00pm y sábado 12:30pm. |
+| `enviarReportesCierreMes` | Time-driven | Día del mes, hora y activación desde Configuración. |
+| `verificarSaludDelSistema` | Time-driven | Hora, frecuencia y activación desde Configuración. |
+
+> La configuración de notificaciones se inicializa automáticamente en la pestaña `CONFIG_NOTIFICACIONES` al abrir la vista **Configuración** como ADMIN. Al guardar una agenda, el sistema reemplaza únicamente los triggers administrados por esta funcionalidad. Las notificaciones por evento se activan o desactivan desde la misma vista, pero conservan su envío inmediato cuando están activas.
 
 ### Propiedades del Script requeridas
 

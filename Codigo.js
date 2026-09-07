@@ -204,6 +204,76 @@ function validarCampoMonetario(valor, nombreCampo) {
   return null; // ✅ Válido
 }
 
+const PLANTILLA_METADATOS = [
+  "Tipo Negociacion",
+  "Número de Poliza",
+  "Nombre Inmobiliaria"
+];
+
+const PLANTILLA_ENCABEZADOS = [
+  "Aseguradora Anterior", "Fecha Inicio de Contrato", "Amparo integral", "Destino", "Ciudad del inmueble", "Dirección", "Cánon", "Administración", "IVA", "Nombre del Inquilino", "Tipo de Documento (INQ)", "Número de Identificación (INQ)", "Celular (INQ)", "Correo Electrónico (INQ)",
+  "Nombre del Codeudor (1)", "Tipo de Documento (COA 1)", "Número de Identificación (COA 1)", "Celular (COA 1)", "Correo Electrónico (COA 1)",
+  "Nombre del Codeudor (2)", "Tipo de Documento (COA 2)", "Número de Identificación (COA 2)", "Celular (COA 2)", "Correo Electrónico (COA 2)",
+  "Nombre del Codeudor (3)", "Tipo de Documento (COA 3)", "Número de Identificación (COA 3)", "Celular (COA 3)", "Correo Electrónico (COA 3)",
+  "Nombre del Codeudor (4)", "Tipo de Documento (COA 4)", "Número de Identificación (COA 4)", "Celular (COA 4)", "Correo Electrónico (COA 4)",
+  "Nombre del Codeudor (5)", "Tipo de Documento (COA 5)", "Número de Identificación (COA 5)", "Celular (COA 5)", "Correo Electrónico (COA 5)"
+];
+
+function _normalizarEtiquetaPlanilla_(valor) {
+  return String(valor ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toUpperCase();
+}
+
+function _validarEstructuraPlanilla_(data) {
+  if (!Array.isArray(data) || data.length < 5) {
+    return [{ fila: "SISTEMA", campo: "PLANILLA", motivo: "La planilla debe incluir metadatos, encabezados y al menos una fila de contrato." }];
+  }
+
+  for (let i = 0; i < PLANTILLA_METADATOS.length; i++) {
+    const etiquetaEsperada = PLANTILLA_METADATOS[i];
+    const etiquetaActual = data[i] && data[i][0];
+    if (_normalizarEtiquetaPlanilla_(etiquetaActual) !== _normalizarEtiquetaPlanilla_(etiquetaEsperada)) {
+      return [{ fila: i + 1, col: 1, campo: "METADATO", motivo: `Se esperaba "${etiquetaEsperada}" en la columna A y se encontró "${String(etiquetaActual || "").trim()}".` }];
+    }
+
+    if (!String(data[i][1] || "").trim()) {
+      return [{ fila: i + 1, col: 2, campo: etiquetaEsperada, motivo: "Dato obligatorio." }];
+    }
+  }
+
+  const titulos = data[3] || [];
+  for (let i = 0; i < PLANTILLA_ENCABEZADOS.length; i++) {
+    const tituloEsperado = PLANTILLA_ENCABEZADOS[i];
+    const tituloActual = titulos[i];
+    if (_normalizarEtiquetaPlanilla_(tituloActual) !== _normalizarEtiquetaPlanilla_(tituloEsperado)) {
+      return [{ fila: 4, col: i + 1, campo: "ENCABEZADO", motivo: `Se esperaba "${tituloEsperado}" en la columna ${i + 1} y se encontró "${String(tituloActual || "").trim()}".` }];
+    }
+  }
+
+  if (titulos.length !== PLANTILLA_ENCABEZADOS.length) {
+    return [{ fila: 4, campo: "ENCABEZADO", motivo: `La plantilla debe tener exactamente ${PLANTILLA_ENCABEZADOS.length} columnas; se encontraron ${titulos.length}.` }];
+  }
+
+  return [];
+}
+
+function _esFilaConDatosPlanilla_(fila) {
+  return Array.isArray(fila) && fila.some(valor => String(valor ?? "").trim() !== "");
+}
+
+function _contarContratosConInquilino_(data) {
+  if (!Array.isArray(data) || data.length <= 4) return 0;
+
+  return data.slice(4).reduce((total, fila) => {
+    if (!_esFilaConDatosPlanilla_(fila)) return total;
+    return total + (String(fila[9] || "").trim() ? 1 : 0);
+  }, 0);
+}
+
 
 // ============================================================
 //  MOTOR PRINCIPAL DE AUDITORÍA
@@ -259,31 +329,27 @@ function motorDeAuditoria(formData) {
     }
 
     // ----------------------------------------------------------
-    // CASCADA 2 — VALIDACIÓN DE ENCABEZADOS
+    // CASCADA 2 — VALIDACIÓN ESTRICTA DE LA PLANTILLA OFICIAL
     // ----------------------------------------------------------
 
-    const tipoNegociacion = String(data[0][1] || "").trim();
-    const titulos         = data[3];
-
-    const metadatos = [
-      { valor: data[0][1], label: "Tipo de negociación" },
-      { valor: data[1][1], label: "Póliza"              },
-      { valor: data[2][1], label: "Inmobiliaria"        },
-    ];
-
-    metadatos.forEach(({ valor, label }) => {
-      if (!String(valor || "").trim()) {
-        errores.push({ fila: "Encabezado", campo: label, motivo: `El campo "${label}" es obligatorio.` });
-      }
-    });
-
-    const encabezadoTexto = String(titulos[2] || "").trim().toUpperCase();
-    if (encabezadoTexto !== "AMPARO INTEGRAL") {
-      errores.push({ fila: "SISTEMA", campo: "FORMATO", motivo: "Plantilla antigua detectada. Use el nuevo formato rojo." });
-      return { status: "ERROR", detalles: errores };
+    const erroresEstructura = _validarEstructuraPlanilla_(data);
+    if (erroresEstructura.length > 0) {
+      return { status: "ERROR", detalles: erroresEstructura };
     }
 
-    if (errores.length > 0) return { status: "ERROR", detalles: errores };
+    const tipoNegociacion = String(data[0][1] || "").trim();
+    const titulos = data[3];
+    const contratosDetectados = _contarContratosConInquilino_(data);
+    if (contratosDetectados === 0) {
+      return {
+        status: "ERROR",
+        detalles: [{
+          fila: "SISTEMA",
+          campo: "PLANILLA",
+          motivo: "No se detectaron contratos para procesar. Verifique que cada fila con información tenga diligenciado Nombre del Inquilino en la columna J."
+        }]
+      };
+    }
 
     // ----------------------------------------------------------
     // CASCADA 3 — AUDITORÍA FILA POR FILA
@@ -320,9 +386,13 @@ function motorDeAuditoria(formData) {
     for (let i = 4; i < data.length; i++) {
       const fila      = data[i];
       const nF        = i + 1;
-      const inquilino = String(fila[9] || "").trim();
+      if (!_esFilaConDatosPlanilla_(fila)) continue;
 
-      if (!inquilino) continue;
+      const inquilino = String(fila[9] || "").trim();
+      if (!inquilino) {
+        errores.push({ fila: nF, col: 10, campo: "Nombre del Inquilino", motivo: "Dato obligatorio." });
+        continue;
+      }
 
       // ── 1. CAMPOS OBLIGATORIOS ──
       const obligatoriosInquilino = [1, 2, 4, 5, 6, 9, 10, 11];

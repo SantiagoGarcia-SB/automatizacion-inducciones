@@ -125,6 +125,10 @@ function resolverEmailPorLote(mapaLoteEmail, idLote) {
  * @sheets_write 1 por bloque contiguo de filas actualizadas
  */
 function ejecutarRecordatoriosDiarios() {
+  if (typeof NotificationConfig_estaActiva === 'function' && !NotificationConfig_estaActiva('recordatorios_diarios')) {
+    if (typeof NotificationConfig_registrarSupresion === 'function') NotificationConfig_registrarSupresion('recordatorios_diarios');
+    return;
+  }
 
   // ── 1. Abrir libro de control una sola vez ──
   var ss = SpreadsheetRegistry_get(ID_HOJA_CONTROL);
@@ -369,31 +373,29 @@ function _procesarRecordatoriosEnLote_(sheetCG, lotesMapa, mapaLoteEmail, hoy, t
  * Ejecutar manualmente una sola vez desde el editor de Apps Script.
  */
 function configurarTriggerRecordatoriosDiarios() {
+  if (typeof reconciliarConfiguracionNotificaciones === 'function') {
+    return reconciliarConfiguracionNotificaciones();
+  }
+
   var triggers = ScriptApp.getProjectTriggers();
   var funcionesAEliminar = [
-    "enviarRecordatoriosPazYSalvoDiario",
-    "enviarRecordatoriosErrorTercerosDiario",
-    "ejecutarRecordatoriosDiarios"
+    'enviarRecordatoriosPazYSalvoDiario',
+    'enviarRecordatoriosErrorTercerosDiario',
+    'ejecutarRecordatoriosDiarios'
   ];
-
-  // ── Eliminar triggers existentes de las funciones objetivo ──
   for (var i = 0; i < triggers.length; i++) {
-    var handlerFunction = triggers[i].getHandlerFunction();
-    if (funcionesAEliminar.indexOf(handlerFunction) !== -1) {
+    if (funcionesAEliminar.indexOf(triggers[i].getHandlerFunction()) !== -1) {
       ScriptApp.deleteTrigger(triggers[i]);
     }
   }
-
-  // ── Crear trigger consolidado: ejecutarRecordatoriosDiarios a las 8:00am Colombia ──
-  ScriptApp.newTrigger("ejecutarRecordatoriosDiarios")
+  ScriptApp.newTrigger('ejecutarRecordatoriosDiarios')
     .timeBased()
     .atHour(8)
     .nearMinute(0)
     .everyDays(1)
-    .inTimezone("America/Bogota")
+    .inTimezone('America/Bogota')
     .create();
-
-  Logger.log("✅ Trigger configurado: ejecutarRecordatoriosDiarios → diario 8:00am (America/Bogota)");
+  Logger.log('Trigger configurado: ejecutarRecordatoriosDiarios → diario 8:00am (America/Bogota)');
 }
 
 
@@ -823,6 +825,10 @@ function _badge_estado_pendiente_() {
 // ============================================================
 
 function enviarCorreoPazYSalvo(e) {
+  if (!NotificationConfig_estaActiva('paz_y_salvo')) {
+    NotificationConfig_registrarSupresion('paz_y_salvo');
+    return;
+  }
   if (!e || !e.range) return;
 
   // ── Bloqueo por caché para evitar envíos duplicados ──
@@ -961,6 +967,10 @@ if (10 < colStart || 10 > colEnd) return;
  * haciendo el cruce entre Control_General y Hoja_Control.
  */
 function enviarRecordatoriosPazYSalvoDiario() {
+  if (!NotificationConfig_estaActiva('recordatorios_diarios')) {
+    NotificationConfig_registrarSupresion('recordatorios_diarios');
+    return;
+  }
 
   const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
   const sheetCG = ss.getSheetByName("Control_General");
@@ -1126,6 +1136,10 @@ function enviarRecordatoriosPazYSalvoDiario() {
  * Usa columna BI (61) como fecha de último aviso.
  */
 function enviarRecordatoriosErrorTercerosDiario() {
+  if (!NotificationConfig_estaActiva('recordatorios_diarios')) {
+    NotificationConfig_registrarSupresion('recordatorios_diarios');
+    return;
+  }
 
   const ss = SpreadsheetApp.openById("1Z0GLLJvinwaU6MK_iaduKBri8VqfCDEPeOfh9gThQhI");
   const sheetCG = ss.getSheetByName("Control_General");
@@ -1311,6 +1325,10 @@ function _obtenerDatosCorreos_() {
  * @param {Array}  filasParaInsertar  Filas ya procesadas del lote.
  */
 function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, urlDrive, filasParaInsertar) {
+  if (!NotificationConfig_estaActiva('ingreso_exitoso')) {
+    NotificationConfig_registrarSupresion('ingreso_exitoso');
+    return;
+  }
 
   const nombreComercial = emailANombre(emailComercial, 'PRIMER_NOMBRE') || 'Ejecutivo Comercial';
   const badgePazYSalvo  = _badge_paz_y_salvo_(formData.tipoPazYSalvo);
@@ -1398,34 +1416,5 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
  * Idempotente: borra triggers previos de estas funciones antes de crearlos.
  */
 function configurarTriggersNotificaciones() {
-  const funciones = ['enviarCorreoPazYSalvo', 'enviarRecordatoriosPazYSalvoDiario', 'enviarRecordatoriosErrorTercerosDiario'];
-
-  // Limpiar triggers existentes de estas funciones
-  ScriptApp.getProjectTriggers()
-    .filter(t => funciones.includes(t.getHandlerFunction()))
-    .forEach(t => ScriptApp.deleteTrigger(t));
-
-  // enviarCorreoPazYSalvo: installable onEdit en el spreadsheet de Control_General
-  ScriptApp.newTrigger('enviarCorreoPazYSalvo')
-    .forSpreadsheet(ID_HOJA_CONTROL)
-    .onEdit()
-    .create();
-
-  // enviarRecordatoriosPazYSalvoDiario: todos los días a las 8am
-  ScriptApp.newTrigger('enviarRecordatoriosPazYSalvoDiario')
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .nearMinute(0)
-    .create();
-
-  // enviarRecordatoriosErrorTercerosDiario: todos los días a las 8am (junto con paz y salvo)
-  ScriptApp.newTrigger('enviarRecordatoriosErrorTercerosDiario')
-    .timeBased()
-    .everyDays(1)
-    .atHour(8)
-    .nearMinute(0)
-    .create();
-
-  Logger.log('Triggers creados: enviarCorreoPazYSalvo (onEdit), enviarRecordatoriosPazYSalvoDiario (diario 8am), enviarRecordatoriosErrorTercerosDiario (diario 8am).');
+  return reconciliarConfiguracionNotificaciones();
 }

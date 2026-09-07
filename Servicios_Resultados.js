@@ -38,6 +38,11 @@
  * @sheets_write 1 (Historico_Envios)
  */
 function enviarResultadosLote() {
+  if (!NotificationConfig_estaActiva('resultados_lote')) {
+    NotificationConfig_registrarSupresion('resultados_lote');
+    return { ok: false, mensaje: 'El envío de resultados está desactivado en Configuración.' };
+  }
+
   var MODULO = "Servicios_Resultados.js";
 
   // 1. Adquirir lock para evitar ejecuciones concurrentes

@@ -16,14 +16,16 @@
  * @param {string} emailComercial - Email del comercial
  */
 function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
+  if (!NotificationConfig_estaActiva('error_terceros')) {
+    NotificationConfig_registrarSupresion('error_terceros');
+    return;
+  }
   if (!emailComercial || emailComercial.indexOf('@') === -1) return;
 
   var nombre = emailComercial.split('@')[0].split('.')[0];
   nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);
 
-  // URL del aplicativo (deployment actual + ?v=2)
   var urlApp = ScriptApp.getService().getUrl() + '?v=2';
-
   var htmlBody = _envolver_([
     _bloque_cabecera_('Acción requerida'),
     _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Necesitamos tu ayuda'),
@@ -53,15 +55,17 @@ function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
  * @param {string} emailComercial - Email del comercial que respondió
  */
 function notificarCorreccionAlAuxiliar(arrendatario, emailAuxiliar, emailComercial) {
+  if (!NotificationConfig_estaActiva('correccion_recibida')) {
+    NotificationConfig_registrarSupresion('correccion_recibida');
+    return;
+  }
   if (!emailAuxiliar || emailAuxiliar.indexOf('@') === -1) return;
 
   var nombreComercial = emailComercial.split('@')[0].split('.').map(function(p) {
     return p.charAt(0).toUpperCase() + p.slice(1);
   }).join(' ');
 
-  // URL del aplicativo
   var urlApp = ScriptApp.getService().getUrl() + '?v=2';
-
   var htmlBody = _envolver_([
     _bloque_cabecera_('Corrección recibida'),
     _bloque_barra_estado_('#0fbdb7', '&#10003;', 'Respuesta del comercial'),

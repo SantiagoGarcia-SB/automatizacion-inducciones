@@ -7,6 +7,11 @@
  * Notifica a líderes con resumen del corte. Corre cada 15 días.
  */
 function procesarDatosMejorado() {
+  if (!NotificationConfig_estaActiva('cumplimiento_ley_2300')) {
+    NotificationConfig_registrarSupresion('cumplimiento_ley_2300');
+    return;
+  }
+
   // ── 0. LOCK — evita chocar con Sincronizacion.js mientras toca 'registro analisis' ──
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) {
@@ -282,21 +287,7 @@ function procesarDatosMejorado() {
  * trigger ya existe, no crea uno duplicado.
  */
 function configurarTriggerCumplimiento() {
-  const yaExiste = ScriptApp.getProjectTriggers()
-    .some(t => t.getHandlerFunction() === 'procesarDatosMejorado');
-
-  if (yaExiste) {
-    Logger.log('El trigger de procesarDatosMejorado ya existe. No se creó uno nuevo.');
-    return;
-  }
-
-  ScriptApp.newTrigger('procesarDatosMejorado')
-    .timeBased()
-    .everyDays(15)
-    .atHour(6)
-    .create();
-
-  Logger.log('Trigger creado: procesarDatosMejorado cada 15 días, alrededor de las 6am (America/Bogota).');
+  return reconciliarConfiguracionNotificaciones();
 }
 
 /**

@@ -387,6 +387,11 @@ function _construirCorreoReporteGestion_(m, fechaRef) {
  * Es la que dispara el trigger diario (configurarTriggerReporteGestion).
  */
 function enviarReporteGestionInducciones() {
+  if (!NotificationConfig_estaActiva('reporte_gestion')) {
+    NotificationConfig_registrarSupresion('reporte_gestion');
+    return false;
+  }
+
   try {
     // Verificar cuota antes de enviar (Fase 2.2)
     if (!_verificarCuotaEmail_(1)) {
@@ -432,35 +437,7 @@ function enviarReporteGestionInducciones() {
  * viejos corriendo en paralelo.
  */
 function configurarTriggerReporteGestion() {
-  ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'enviarReporteGestionInducciones')
-    .forEach(t => ScriptApp.deleteTrigger(t));
-
-  const diasEntreSemana = [
-    ScriptApp.WeekDay.MONDAY,
-    ScriptApp.WeekDay.TUESDAY,
-    ScriptApp.WeekDay.WEDNESDAY,
-    ScriptApp.WeekDay.THURSDAY,
-    ScriptApp.WeekDay.FRIDAY
-  ];
-
-  diasEntreSemana.forEach(dia => {
-    ScriptApp.newTrigger('enviarReporteGestionInducciones')
-      .timeBased()
-      .onWeekDay(dia)
-      .atHour(17)
-      .nearMinute(0)
-      .create();
-  });
-
-  ScriptApp.newTrigger('enviarReporteGestionInducciones')
-    .timeBased()
-    .onWeekDay(ScriptApp.WeekDay.SATURDAY)
-    .atHour(12)
-    .nearMinute(30)
-    .create();
-
-  Logger.log('Triggers creados: enviarReporteGestionInducciones — lunes a viernes 5:00pm, sábado 12:30pm (America/Bogota).');
+  return reconciliarConfiguracionNotificaciones();
 }
 
 
@@ -773,6 +750,11 @@ function _construirCorreoCierreMes_(datos) {
  * o desde el trigger mensual (configurarTriggerReporteCierreMes).
  */
 function enviarReportesCierreMes() {
+  if (!NotificationConfig_estaActiva('reporte_cierre_mensual')) {
+    NotificationConfig_registrarSupresion('reporte_cierre_mensual');
+    return;
+  }
+
   var comerciales = UsuariosRepo_leerTodos().filter(function(u) {
     return (u.rol === 'CONSULTOR' || u.rol === 'COMERCIAL') && u.activo;
   });
@@ -1126,18 +1108,7 @@ function _construirCorreoCierreMesEquipo_(datos) {
  * antes de crear el nuevo.
  */
 function configurarTriggerReporteCierreMes() {
-  ScriptApp.getProjectTriggers()
-    .filter(function(t) { return t.getHandlerFunction() === 'enviarReportesCierreMes'; })
-    .forEach(function(t) { ScriptApp.deleteTrigger(t); });
-
-  ScriptApp.newTrigger('enviarReportesCierreMes')
-    .timeBased()
-    .onMonthDay(1)
-    .atHour(7)
-    .nearMinute(0)
-    .create();
-
-  Logger.log('Trigger creado: enviarReportesCierreMes — día 1 de cada mes, 7:00am (America/Bogota).');
+  return reconciliarConfiguracionNotificaciones();
 }
 
 

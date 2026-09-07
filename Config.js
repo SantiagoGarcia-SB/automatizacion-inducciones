@@ -94,17 +94,16 @@ function _registrarEvento_(nivel, modulo, mensaje, detalle) {
  *  4. Lotes estancados (>7 días sin cambio en PENDIENTE RADICAR)
  */
 function verificarSaludDelSistema() {
+  if (!NotificationConfig_estaActiva('salud_sistema')) {
+    NotificationConfig_registrarSupresion('salud_sistema');
+    return;
+  }
+
   const alertas = [];
 
   // ── 1. Verificar triggers esperados ──
-  const triggersEsperados = [
-    'enviarCorreoPazYSalvo',
-    'enviarRecordatoriosPazYSalvoDiario',
-    'sincronizarLoteAutomatico',
-    'sincronizarEstadoDesdeAnalisis',
-    'enviarReporteGestionInducciones',
-    'procesarDatosMejorado'
-  ];
+  const triggersEsperados = ['enviarCorreoPazYSalvo', 'sincronizarUnificado']
+    .concat(NotificationConfig_handlersProgramadosActivos());
 
   const triggersActuales = ScriptApp.getProjectTriggers().map(t => t.getHandlerFunction());
 
@@ -268,18 +267,7 @@ function verificarSaludDelSistema() {
  * Ejecutar UNA VEZ manualmente.
  */
 function configurarTriggerSalud() {
-  ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'verificarSaludDelSistema')
-    .forEach(t => ScriptApp.deleteTrigger(t));
-
-  ScriptApp.newTrigger('verificarSaludDelSistema')
-    .timeBased()
-    .everyDays(1)
-    .atHour(7)
-    .nearMinute(0)
-    .create();
-
-  Logger.log('Trigger creado: verificarSaludDelSistema — diario a las 7:00am.');
+  return reconciliarConfiguracionNotificaciones();
 }
 
 

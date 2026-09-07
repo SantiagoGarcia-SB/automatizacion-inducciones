@@ -581,11 +581,14 @@ function api_reasignarSolicitud(filaNum, nuevoEmail) {
 function api_enviarReporteGestion() {
   try {
     verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    if (!NotificationConfig_estaActiva('reporte_gestion')) {
+      return { ok: false, mensaje: 'El reporte de gestión está desactivado en Configuración.' };
+    }
     enviarReporteGestionInducciones();
     return { ok: true, mensaje: 'Reporte enviado.' };
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_enviarReporteGestion', e.message);
-    return { ok: false, mensaje: 'Error: ' + e.message };
+    return { ok: false, mensaje: 'No se pudo enviar el reporte.' };
   }
 }
 
@@ -600,17 +603,50 @@ function api_enviarReporteGestion() {
 function api_enviarReportesCierreMes() {
   try {
     verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    if (!NotificationConfig_estaActiva('reporte_cierre_mensual')) {
+      return { ok: false, mensaje: 'El reporte de cierre mensual está desactivado en Configuración.' };
+    }
     enviarReportesCierreMes();
     return { ok: true, mensaje: 'Reportes de cierre de mes enviados.' };
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_enviarReportesCierreMes', e.message);
-    return { ok: false, mensaje: 'Error: ' + e.message };
+    return { ok: false, mensaje: 'No se pudieron enviar los reportes.' };
   }
 }
 
 // ============================================================
-//  API — CONFIGURACIÓN (Catálogo de motivos)
+//  API — CONFIGURACIÓN (Catálogo de motivos y notificaciones)
 // ============================================================
+
+/**
+ * Retorna las políticas de notificación administrables. Solo ADMIN puede
+ * consultar agendas y estados para evitar exponer controles operativos.
+ * @returns {Array<Object>} Políticas normalizadas.
+ */
+function api_obtenerConfiguracionNotificaciones() {
+  try {
+    verificarRol(['ADMIN']);
+    return NotificationConfig_listar();
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerConfiguracionNotificaciones', 'No se pudo consultar configuración.');
+    return [];
+  }
+}
+
+/**
+ * Guarda una política de notificación y actualiza sus triggers asociados.
+ * @param {{id:string,activa:boolean,agendas:Array<Object>}} configuracion Política editable.
+ * @returns {{ok:boolean,mensaje:string,configuracion?:Object}} Resultado del guardado.
+ */
+function api_guardarConfiguracionNotificacion(configuracion) {
+  try {
+    var usuario = verificarRol(['ADMIN']);
+    return NotificationConfig_guardar(configuracion, usuario.email);
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_guardarConfiguracionNotificacion', 'No se pudo guardar configuración.');
+    return { ok: false, mensaje: 'No se pudo guardar la configuración.' };
+  }
+}
 
 /**
  * Retorna el catálogo de motivos de error en terceros.

@@ -3242,42 +3242,272 @@ function _renderizarMetricasCompleta(usuarios, lotes, metricasLotes, historico, 
 }
 
 function cargarVistaConfiguracion() {
-  // 1. Check cache first
-  var cached = CacheManager.get('config-motivos');
-  if (cached) { _renderizarConfigMotivos(cached); return; }
+  var esAdmin = APP_USUARIO && APP_USUARIO.rol === 'ADMIN';
+  var motivosCache = CacheManager.get('config-motivos');
+  var notificacionesCache = CacheManager.get('config-notificaciones');
 
-  // 2. Cache miss → show skeleton
-  SkeletonSystem.mostrar('viewDashboard', 'lista', {
-    items: 3,
-    titulo: 'Configuración'
-  });
+  if (motivosCache && (!esAdmin || notificacionesCache)) {
+    _renderizarConfiguracionCompleta(motivosCache, notificacionesCache || []);
+    return;
+  }
+
+  SkeletonSystem.mostrar('viewDashboard', 'lista', { items: 5, titulo: 'Configuración' });
   mostrarVista('viewDashboard');
 
-  // 3. Fetch from server with 15s timeout
   var navIdLocal = _navId;
-  var timeoutId = setTimeout(function() {
-    if (!_sigueVigente(navIdLocal)) return;
-    SkeletonSystem.reemplazar('viewDashboard',
-      '<div class="card" style="text-align:center;padding:var(--space-8);">'
-      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
-      + '<button class="btn btn--primary" onclick="cargarVistaConfiguracion()">Reintentar</button></div>');
-  }, 15000);
+  var promesaMotivos = motivosCache ? Promise.resolve(motivosCache) : callServer('api_obtenerCatalogoMotivos');
+  var promesaNotificaciones = esAdmin
+    ? (notificacionesCache ? Promise.resolve(notificacionesCache) : callServer('api_obtenerConfiguracionNotificaciones'))
+    : Promise.resolve([]);
 
-  callServer('api_obtenerCatalogoMotivos')
-    .then(function(motivos) {
-      clearTimeout(timeoutId);
+  Promise.all([promesaMotivos, promesaNotificaciones])
+    .then(function(resultado) {
       if (!_sigueVigente(navIdLocal)) return;
-      CacheManager.set('config-motivos', motivos || []);
-      _renderizarConfigMotivos(motivos || []);
+      var motivos = resultado[0] || [];
+      var notificaciones = resultado[1] || [];
+      CacheManager.set('config-motivos', motivos);
+      if (esAdmin) CacheManager.set('config-notificaciones', notificaciones);
+      _renderizarConfiguracionCompleta(motivos, notificaciones);
     })
-    .catch(function(err) {
-      clearTimeout(timeoutId);
+    .catch(function() {
       if (!_sigueVigente(navIdLocal)) return;
       SkeletonSystem.reemplazar('viewDashboard',
         '<div class="card" style="text-align:center;padding:var(--space-8);">'
         + '<p style="color:var(--color-mono-500);">Error al cargar configuración.</p>'
         + '<button class="btn btn--primary" onclick="cargarVistaConfiguracion()">Reintentar</button></div>');
     });
+}
+
+function _renderizarConfiguracionCompleta(motivos, notificaciones) {
+  _renderizarConfigMotivos(motivos);
+  if (!APP_USUARIO || APP_USUARIO.rol !== 'ADMIN') return;
+
+  window.CONFIGURACION_NOTIFICACIONES = notificaciones || [];
+  var container = document.getElementById('viewDashboard');
+  if (!container) return;
+
+  var html = '<div class="card">'
+    + '<div class="flex flex--between" style="margin-bottom:var(--space-5);align-items:flex-start;gap:var(--space-4);">'
+    + '<div><h3 style="margin-bottom:var(--space-1);">Notificaciones</h3>'
+    + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:0;">Controla qué correos se envían. Las agendas usan hora de Colombia y Apps Script puede ejecutarlas con unos minutos de variación.</p></div>'
+    + '<span class="badge badge--navy">Solo ADMIN</span></div>'
+    + '<div class="stack stack--tight">';
+
+  for (var i = 0; i < notificaciones.length; i++) {
+    var politica = notificaciones[i];
+    var estado = politica.activa ? 'Activa' : 'Inactiva';
+    var color = politica.activa ? '#0d7a54' : '#bd0f14';
+    html += '<div style="padding:var(--space-4);border:1px solid var(--color-mono-100);border-radius:var(--radius-sm);">'
+      + '<div class="flex flex--between" style="gap:var(--space-4);align-items:flex-start;">'
+      + '<div><strong style="font-size:var(--text-sm);color:var(--color-primary-navy);">' + politica.nombre + '</strong>'
+      + '<p style="font-size:var(--text-sm);color:var(--color-mono-500);margin:4px 0 0;">' + politica.descripcion + '</p>'
+      + '<p style="font-size:var(--text-xs);color:var(--color-mono-500);margin:6px 0 0;">' + _resumenAgendaNotificacion(politica) + '</p></div>'
+      + '<div style="text-align:right;white-space:nowrap;"><span style="display:block;font-size:var(--text-xs);font-weight:700;color:' + color + ';margin-bottom:8px;">' + estado + '</span>'
+      + '<button class="btn btn--ghost" style="font-size:var(--text-xs);padding:var(--space-1) var(--space-2);" onclick="_modalConfiguracionNotificacion(\'' + politica.id + '\')">Configurar</button></div>'
+      + '</div></div>';
+  }
+
+  html += '</div></div>';
+  container.insertAdjacentHTML('beforeend', html);
+}
+
+function _resumenAgendaNotificacion(politica) {
+  if (politica.tipo === 'EVENTO' || politica.tipo === 'EVENTO_MANUAL') return 'Se envía inmediatamente cuando ocurre el evento.';
+  var textos = [];
+  for (var i = 0; i < politica.agendas.length; i++) {
+    var agenda = politica.agendas[i];
+    var hora = String(agenda.hora).padStart(2, '0') + ':' + String(agenda.minuto).padStart(2, '0');
+    if (politica.tipo === 'PROGRAMADA_SEMANAL') textos.push(_etiquetaDiasNotificacion(agenda.diasSemana) + ' · ' + hora);
+    else if (politica.tipo === 'PROGRAMADA_MENSUAL') textos.push('Día ' + agenda.diaMes + ' · ' + hora);
+    else if (politica.tipo === 'PROGRAMADA_INTERVALO') textos.push('Cada ' + agenda.cadaDias + ' días · ' + hora);
+    else textos.push('Cada ' + agenda.cadaDias + ' día(s) · ' + hora);
+  }
+  return textos.join(' | ') + ' · America/Bogota';
+}
+
+function _etiquetaDiasNotificacion(dias) {
+  var etiquetas = { MONDAY: 'Lun', TUESDAY: 'Mar', WEDNESDAY: 'Mié', THURSDAY: 'Jue', FRIDAY: 'Vie', SATURDAY: 'Sáb', SUNDAY: 'Dom' };
+  return (dias || []).map(function(dia) { return etiquetas[dia] || dia; }).join(', ');
+}
+
+function _modalConfiguracionNotificacion(id) {
+  var politicas = window.CONFIGURACION_NOTIFICACIONES || [];
+  var politica = politicas.filter(function(item) { return item.id === id; })[0];
+  if (!politica) return;
+
+  var modal = document.createElement('div');
+  modal.id = 'modalConfiguracionNotificacion';
+  modal.className = 'modal-overlay nc-modal-overlay';
+  modal.dataset.politicaId = politica.id;
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'nc_modal_titulo');
+  modal.addEventListener('click', function(e) { if (e.target === modal) _cerrarModalConfiguracionNotificacion(); });
+  modal.addEventListener('keydown', function(e) { if (e.key === 'Escape') _cerrarModalConfiguracionNotificacion(); });
+
+  modal.innerHTML = '<div class="modal-content nc-modal">'
+    + '<div class="modal-header modal-header--navy nc-modal__header">'
+    + '<div class="nc-modal__title-row"><div><h3 id="nc_modal_titulo" class="nc-modal__title">' + politica.nombre + '</h3>'
+    + '<span class="badge badge--gray nc-modal__type">' + _etiquetaTipoNotificacion(politica.tipo) + '</span></div>'
+    + '<button class="modal-close" type="button" aria-label="Cerrar configuración" onclick="_cerrarModalConfiguracionNotificacion()">✕</button></div></div>'
+    + '<div class="modal-body nc-modal__body">'
+    + '<p class="nc-modal__description">' + politica.descripcion + '</p>'
+    + '<section class="nc-modal__section" aria-labelledby="nc_estado_titulo">'
+    + '<div class="nc-section-heading"><div><h4 id="nc_estado_titulo">Estado de la notificación</h4><p>Define si este correo puede enviarse.</p></div></div>'
+    + '<label class="nc-status-control"><input type="checkbox" id="nc_activa" ' + (politica.activa ? 'checked' : '') + '>'
+    + '<span class="nc-status-control__indicator" aria-hidden="true"></span><span class="nc-status-control__copy"><strong class="nc-status-control__title">Notificación activa</strong>'
+    + '<span class="nc-status-control__description">Al desactivarla, el proceso continúa pero el correo no se envía.</span></span></label></section>'
+    + _camposAgendaNotificacion(politica)
+    + '</div>'
+    + '<div class="modal-footer nc-modal__footer"><button class="btn btn--ghost" type="button" onclick="_cerrarModalConfiguracionNotificacion()">Cancelar</button>'
+    + '<button class="btn btn--primary" type="button" onclick="_guardarConfiguracionNotificacion()">Guardar cambios</button></div></div>';
+  document.body.appendChild(modal);
+  _renumerarAgendasSemanales();
+  setTimeout(function() {
+    var closeButton = modal.querySelector('.modal-close');
+    if (closeButton) closeButton.focus();
+  }, 0);
+}
+
+function _cerrarModalConfiguracionNotificacion() {
+  var modal = document.getElementById('modalConfiguracionNotificacion');
+  if (modal) modal.remove();
+}
+
+function _etiquetaTipoNotificacion(tipo) {
+  var etiquetas = {
+    EVENTO: 'Por evento',
+    EVENTO_MANUAL: 'Manual',
+    PROGRAMADA_DIARIA: 'Diaria',
+    PROGRAMADA_SEMANAL: 'Semanal',
+    PROGRAMADA_MENSUAL: 'Mensual',
+    PROGRAMADA_INTERVALO: 'Por intervalo'
+  };
+  return etiquetas[tipo] || 'Configuración';
+}
+
+function _camposAgendaNotificacion(politica) {
+  if (politica.tipo === 'EVENTO' || politica.tipo === 'EVENTO_MANUAL') {
+    return '<section class="nc-modal__section" aria-labelledby="nc_envio_titulo">'
+      + '<div class="nc-section-heading"><div><h4 id="nc_envio_titulo">Modo de envío</h4><p>Este correo no requiere una agenda.</p></div><span class="badge badge--success">Envío inmediato</span></div>'
+      + '<div class="nc-event-info"><span class="nc-event-info__icon" aria-hidden="true">✦</span><p>Se enviará inmediatamente cuando ocurra el evento. Solo puedes activar o desactivar su envío; el proceso de negocio no se detiene.</p></div></section>';
+  }
+
+  if (politica.tipo === 'PROGRAMADA_SEMANAL') {
+    var filas = '<div id="nc_agendas_semanales" class="nc-schedule-list">';
+    for (var i = 0; i < politica.agendas.length; i++) filas += _filaAgendaSemanal(politica.agendas[i]);
+    return '<section class="nc-modal__section" aria-labelledby="nc_agenda_titulo">'
+      + '<div class="nc-section-heading nc-section-heading--actions"><div><h4 id="nc_agenda_titulo">Programación</h4><p>Selecciona los días y la hora de cada envío.</p></div><button class="btn btn--secondary nc-add-schedule" type="button" onclick="_agregarAgendaSemanal()">+ Agregar horario</button></div>'
+      + '<div class="nc-timezone">Zona horaria: <strong>America/Bogota</strong></div>' + filas + '</div></section>';
+  }
+
+  var agenda = politica.agendas[0] || { hora: 8, minuto: 0, cadaDias: 1, diaMes: 1 };
+  var campos = '';
+  if (politica.tipo === 'PROGRAMADA_DIARIA') {
+    campos = '<div class="nc-repeat-note"><span class="badge badge--navy">Todos los días</span><span>El envío se ejecuta diariamente.</span></div>'
+      + '<div class="grid grid--2 nc-fields"><div class="nc-field"><label class="nc-field__label" for="nc_hora">Hora</label><input class="input" id="nc_hora" type="number" min="0" max="23" value="' + agenda.hora + '"><span class="nc-field__hint">De 0 a 23</span></div>'
+      + '<div class="nc-field"><label class="nc-field__label" for="nc_minuto">Minuto</label><input class="input" id="nc_minuto" type="number" min="0" max="59" value="' + agenda.minuto + '"><span class="nc-field__hint">De 0 a 59</span></div></div>';
+  } else {
+    var campoPeriodo = politica.tipo === 'PROGRAMADA_MENSUAL'
+      ? '<div class="nc-field"><label class="nc-field__label" for="nc_diaMes">Día del mes</label><input class="input" id="nc_diaMes" type="number" min="1" max="28" value="' + agenda.diaMes + '"><span class="nc-field__hint">Del 1 al 28</span></div>'
+      : '<div class="nc-field"><label class="nc-field__label" for="nc_cadaDias">Repetir cada</label><input class="input" id="nc_cadaDias" type="number" min="1" max="31" value="' + agenda.cadaDias + '"><span class="nc-field__hint">Días (1 a 31)</span></div>';
+    campos = '<div class="grid grid--3 nc-fields">' + campoPeriodo
+      + '<div class="nc-field"><label class="nc-field__label" for="nc_hora">Hora</label><input class="input" id="nc_hora" type="number" min="0" max="23" value="' + agenda.hora + '"><span class="nc-field__hint">De 0 a 23</span></div>'
+      + '<div class="nc-field"><label class="nc-field__label" for="nc_minuto">Minuto</label><input class="input" id="nc_minuto" type="number" min="0" max="59" value="' + agenda.minuto + '"><span class="nc-field__hint">De 0 a 59</span></div></div>';
+  }
+  return '<section class="nc-modal__section" aria-labelledby="nc_agenda_titulo">'
+    + '<div class="nc-section-heading"><div><h4 id="nc_agenda_titulo">Programación</h4><p>Configura cuándo se debe enviar este correo.</p></div></div>'
+    + '<div class="nc-timezone">Zona horaria: <strong>America/Bogota</strong></div>' + campos + '</section>';
+}
+
+function _filaAgendaSemanal(agenda) {
+  var dias = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+  var etiquetas = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+  var checks = '';
+  for (var i = 0; i < dias.length; i++) {
+    var seleccionado = (agenda.diasSemana || []).indexOf(dias[i]) !== -1 ? 'checked' : '';
+    checks += '<label class="nc-day-option"><input type="checkbox" value="' + dias[i] + '" ' + seleccionado + '><span>' + etiquetas[i] + '</span></label>';
+  }
+  return '<article class="nc-agenda-semanal nc-schedule-card">'
+    + '<div class="nc-schedule-card__header"><strong class="nc-schedule-card__title">Horario</strong><button class="btn btn--ghost nc-remove-schedule" type="button" onclick="_quitarAgendaSemanal(this)">Quitar</button></div>'
+    + '<div class="nc-day-grid">' + checks + '</div>'
+    + '<div class="grid grid--2 nc-fields"><div class="nc-field"><label class="nc-field__label">Hora</label><input class="input nc_hora" type="number" min="0" max="23" value="' + agenda.hora + '"><span class="nc-field__hint">De 0 a 23</span></div>'
+    + '<div class="nc-field"><label class="nc-field__label">Minuto</label><input class="input nc_minuto" type="number" min="0" max="59" value="' + agenda.minuto + '"><span class="nc-field__hint">De 0 a 59</span></div></div></article>';
+}
+
+function _quitarAgendaSemanal(boton) {
+  var contenedor = document.getElementById('nc_agendas_semanales');
+  if (!contenedor || contenedor.querySelectorAll('.nc-agenda-semanal').length <= 1) {
+    _toast('Debe existir al menos un horario semanal.', 'warning');
+    return;
+  }
+  var tarjeta = boton.closest('.nc-agenda-semanal');
+  if (tarjeta) tarjeta.remove();
+  _renumerarAgendasSemanales();
+}
+
+function _renumerarAgendasSemanales() {
+  var tarjetas = document.querySelectorAll('#nc_agendas_semanales .nc-agenda-semanal');
+  for (var i = 0; i < tarjetas.length; i++) {
+    var titulo = tarjetas[i].querySelector('.nc-schedule-card__title');
+    if (titulo) titulo.textContent = 'Horario ' + (i + 1);
+  }
+}
+
+function _agregarAgendaSemanal() {
+  var contenedor = document.getElementById('nc_agendas_semanales');
+  if (!contenedor) return;
+  contenedor.insertAdjacentHTML('beforeend', _filaAgendaSemanal({ diasSemana: ['MONDAY'], hora: 8, minuto: 0 }));
+  _renumerarAgendasSemanales();
+}
+
+function _guardarConfiguracionNotificacion() {
+  var modal = document.getElementById('modalConfiguracionNotificacion');
+  var id = modal && modal.dataset.politicaId;
+  var politica = (window.CONFIGURACION_NOTIFICACIONES || []).filter(function(item) { return item.id === id; })[0];
+  if (!politica) return;
+
+  var configuracion = { id: id, activa: document.getElementById('nc_activa').checked, agendas: _obtenerAgendasNotificacion(politica) };
+  if (configuracion.agendas === null) return;
+
+  callServer('api_guardarConfiguracionNotificacion', configuracion)
+    .then(function(resultado) {
+      if (!resultado || !resultado.ok) {
+        _toast(resultado ? resultado.mensaje : 'No se pudo guardar la configuración.', 'error');
+        return;
+      }
+      var politicas = window.CONFIGURACION_NOTIFICACIONES || [];
+      for (var i = 0; i < politicas.length; i++) if (politicas[i].id === id) politicas[i] = resultado.configuracion;
+      CacheManager.set('config-notificaciones', politicas);
+      modal.remove();
+      _renderizarConfiguracionCompleta(CacheManager.get('config-motivos') || [], politicas);
+      _toast('Configuración guardada.', 'success');
+    })
+    .catch(function() { _toast('No se pudo guardar la configuración.', 'error'); });
+}
+
+function _obtenerAgendasNotificacion(politica) {
+  if (politica.tipo === 'EVENTO' || politica.tipo === 'EVENTO_MANUAL') return [];
+  if (politica.tipo === 'PROGRAMADA_SEMANAL') {
+    var filas = document.querySelectorAll('.nc-agenda-semanal');
+    var agendas = [];
+    for (var i = 0; i < filas.length; i++) {
+      var dias = [];
+      var checks = filas[i].querySelectorAll('input[type="checkbox"]:checked');
+      for (var j = 0; j < checks.length; j++) dias.push(checks[j].value);
+      agendas.push({ diasSemana: dias, hora: Number(filas[i].querySelector('.nc_hora').value), minuto: Number(filas[i].querySelector('.nc_minuto').value) });
+    }
+    return agendas;
+  }
+  var agenda = { hora: Number(document.getElementById('nc_hora').value), minuto: Number(document.getElementById('nc_minuto').value) };
+  if (politica.tipo === 'PROGRAMADA_MENSUAL') {
+    agenda.diaMes = Number(document.getElementById('nc_diaMes').value);
+  } else if (politica.tipo === 'PROGRAMADA_DIARIA') {
+    agenda.cadaDias = 1;
+  } else {
+    agenda.cadaDias = Number(document.getElementById('nc_cadaDias').value);
+  }
+  return [agenda];
 }
 
 function _renderizarConfigMotivos(motivos) {
@@ -3647,6 +3877,42 @@ function _cargarLibreriaExcel() {
   return _xlsxCargando;
 }
 
+var _METADATOS_PLANILLA_OFICIAL = ['Tipo Negociacion', 'Número de Poliza', 'Nombre Inmobiliaria'];
+var _ENCABEZADOS_PLANILLA_OFICIAL = [
+  'Aseguradora Anterior', 'Fecha Inicio de Contrato', 'Amparo integral', 'Destino', 'Ciudad del inmueble', 'Dirección', 'Cánon', 'Administración', 'IVA', 'Nombre del Inquilino', 'Tipo de Documento (INQ)', 'Número de Identificación (INQ)', 'Celular (INQ)', 'Correo Electrónico (INQ)',
+  'Nombre del Codeudor (1)', 'Tipo de Documento (COA 1)', 'Número de Identificación (COA 1)', 'Celular (COA 1)', 'Correo Electrónico (COA 1)',
+  'Nombre del Codeudor (2)', 'Tipo de Documento (COA 2)', 'Número de Identificación (COA 2)', 'Celular (COA 2)', 'Correo Electrónico (COA 2)',
+  'Nombre del Codeudor (3)', 'Tipo de Documento (COA 3)', 'Número de Identificación (COA 3)', 'Celular (COA 3)', 'Correo Electrónico (COA 3)',
+  'Nombre del Codeudor (4)', 'Tipo de Documento (COA 4)', 'Número de Identificación (COA 4)', 'Celular (COA 4)', 'Correo Electrónico (COA 4)',
+  'Nombre del Codeudor (5)', 'Tipo de Documento (COA 5)', 'Número de Identificación (COA 5)', 'Celular (COA 5)', 'Correo Electrónico (COA 5)'
+];
+
+function _normalizarEtiquetaPlanillaCliente(valor) {
+  return String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
+function _validarEstructuraPlanillaCliente(datos) {
+  if (!Array.isArray(datos) || datos.length < 5) return 'La planilla debe incluir metadatos, encabezados y al menos una fila de contrato.';
+
+  for (var i = 0; i < _METADATOS_PLANILLA_OFICIAL.length; i++) {
+    if (_normalizarEtiquetaPlanillaCliente(datos[i] && datos[i][0]) !== _normalizarEtiquetaPlanillaCliente(_METADATOS_PLANILLA_OFICIAL[i])) {
+      return 'Fila ' + (i + 1) + ': se esperaba "' + _METADATOS_PLANILLA_OFICIAL[i] + '" en la columna A.';
+    }
+    if (!String(datos[i][1] || '').trim()) return 'Fila ' + (i + 1) + ': falta el valor de "' + _METADATOS_PLANILLA_OFICIAL[i] + '" en la columna B.';
+  }
+
+  var titulos = datos[3] || [];
+  for (var j = 0; j < _ENCABEZADOS_PLANILLA_OFICIAL.length; j++) {
+    if (_normalizarEtiquetaPlanillaCliente(titulos[j]) !== _normalizarEtiquetaPlanillaCliente(_ENCABEZADOS_PLANILLA_OFICIAL[j])) {
+      return 'Columna ' + (j + 1) + ': se esperaba "' + _ENCABEZADOS_PLANILLA_OFICIAL[j] + '" y se encontró "' + String(titulos[j] || '').trim() + '".';
+    }
+  }
+
+  return titulos.length === _ENCABEZADOS_PLANILLA_OFICIAL.length
+    ? ''
+    : 'La fila de encabezados debe tener exactamente ' + _ENCABEZADOS_PLANILLA_OFICIAL.length + ' columnas; se encontraron ' + titulos.length + '.';
+}
+
 function _leerExcelRad(file) {
   if (!file) return;
   var info = document.getElementById('rad_excelInfo');
@@ -3671,13 +3937,22 @@ function _leerExcelRad(file) {
         var wb = XLSX.read(e.target.result, { type: 'array' });
         var datos = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1 });
         _detenerAnim();
-        if (datos.length >= 4 && String(datos[3][2] || '').trim().toUpperCase() !== 'AMPARO INTEGRAL') {
-          info.textContent = '⚠️ Plantilla incorrecta'; info.style.color = '#bd0f14';
-          dropZone.style.borderColor = '#bd0f14'; return;
+        var errorEstructura = _validarEstructuraPlanillaCliente(datos);
+        if (errorEstructura) {
+          info.textContent = '⚠️ Plantilla incorrecta: ' + errorEstructura;
+          info.style.color = '#bd0f14';
+          dropZone.style.borderColor = '#bd0f14';
+          return;
         }
-        _radExcelParseado = datos;
         var count = 0;
         for (var i = 4; i < datos.length; i++) { if (datos[i] && String(datos[i][9] || '').trim()) count++; }
+        if (count === 0) {
+          info.textContent = '⚠️ No se detectaron contratos. Verifica que la columna Nombre del Inquilino esté diligenciada.';
+          info.style.color = '#bd0f14';
+          dropZone.style.borderColor = '#bd0f14';
+          return;
+        }
+        _radExcelParseado = datos;
         info.style.color = '#0d7a54';
         info.textContent = '✅ ' + count + ' contrato(s) detectado(s)';
         dropZone.style.borderColor = '#16A34A';
