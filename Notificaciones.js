@@ -1356,7 +1356,7 @@ function enviarLasNotificaciones(formData, idLote, cantidad, emailComercial, url
       { label: "ID de Lote",          valor: idLote,                        colorVal: _C_ROJO },
       { label: "P&oacute;liza",        valor: formData.poliza                                  },
       { label: "Contratos ingresados", valor: String(cantidad)                                 },
-      { label: "Tasa de Inducci&oacute;n", valor: formData.tasaNegociacion + "%" },
+      { label: "Tasa de Inducci&oacute;n", valor: String(formData.tasaNegociacion || "").replace(/\./g, ",") + "%" },
       { label: "Paz y Salvo",         valor: badgePazYSalvo,                full: true         }
     ]),
 

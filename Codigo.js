@@ -57,50 +57,36 @@ function onOpen() {
 // ============================================================
 
 function doGet(e) {
-  // v2 es el frontend por defecto desde el 1 de agosto de 2026.
-  // ?v=1 sirve de respaldo inmediato al frontend anterior si algo sale mal
-  // con v2, sin necesidad de un nuevo despliegue.
-  var quierePrevio = e && e.parameter && e.parameter.v === '1';
+  var template = HtmlService.createTemplateFromFile('IndexNuevo');
+  var usuario = obtenerUsuarioActual_v2();
+  var datosIniciales = { usuario: usuario };
 
-  if (!quierePrevio) {
-    var template = HtmlService.createTemplateFromFile('IndexNuevo');
-    var usuario = obtenerUsuarioActual_v2();
-    var datosIniciales = { usuario: usuario };
+  // Pre-cargar resumen y lotes SOLO desde CacheWrapper (lectura rápida, no bloquea).
+  // NUNCA se invoca obtenerResumenComercial() ni obtenerLotesDeComercial() aquí.
+  // La ÚNICA lectura a Sheets permitida en doGet es obtenerUsuarioActual_v2() (TTL 120s).
+  // En cache-miss o error, el cliente los pide vía google.script.run con skeleton.
+  if (usuario && usuario.autorizado) {
+    try {
+      var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
 
-    // Pre-cargar resumen y lotes SOLO desde CacheWrapper (lectura rápida, no bloquea).
-    // NUNCA se invoca obtenerResumenComercial() ni obtenerLotesDeComercial() aquí.
-    // La ÚNICA lectura a Sheets permitida en doGet es obtenerUsuarioActual_v2() (TTL 120s).
-    // En cache-miss o error, el cliente los pide vía google.script.run con skeleton.
-    if (usuario && usuario.autorizado) {
-      try {
-        var verTodos = (usuario.rol === 'LIDER' || usuario.rol === 'ADMIN');
+      // Resumen: cache-hit → inyectar, cache-miss → null (cliente pide async)
+      var resumenKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
+      datosIniciales.resumen = CacheWrapper_getJSON(resumenKey) || null;
 
-        // Resumen: cache-hit → inyectar, cache-miss → null (cliente pide async)
-        var resumenKey = 'RESUMEN_' + (verTodos ? 'GLOBAL' : usuario.email);
-        datosIniciales.resumen = CacheWrapper_getJSON(resumenKey) || null;
-
-        // Lotes: misma lógica — inyectar si cache-hit, null si cache-miss
-        var lotesKey = verTodos ? 'LOTES_GLOBAL' : 'LOTES_' + usuario.email;
-        datosIniciales.lotes = CacheWrapper_getJSON(lotesKey) || null;
-      } catch (err) {
-        // Degradación elegante: si CacheWrapper falla, el frontend carga async.
-        // No interrumpir entrega del HTML (Req 7.5).
-        datosIniciales.resumen = null;
-        datosIniciales.lotes = null;
-      }
+      // Lotes: misma lógica — inyectar si cache-hit, null si cache-miss
+      var lotesKey = verTodos ? 'LOTES_GLOBAL' : 'LOTES_' + usuario.email;
+      datosIniciales.lotes = CacheWrapper_getJSON(lotesKey) || null;
+    } catch (err) {
+      // Degradación elegante: si CacheWrapper falla, el frontend carga async.
+      // No interrumpir entrega del HTML (Req 7.5).
+      datosIniciales.resumen = null;
+      datosIniciales.lotes = null;
     }
-
-    template.datosIniciales = JSON.stringify(datosIniciales);
-    return template.evaluate()
-      .setTitle('Inducciones | El Libertador')
-      .setFaviconUrl("https://www.ellibertador.co/favicon.ico")
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
   }
 
-  // Frontend anterior — disponible como respaldo con ?v=1
-  return HtmlService.createTemplateFromFile('Index').evaluate()
-    .setTitle('Ingreso de Inducciones | El Libertador')
+  template.datosIniciales = JSON.stringify(datosIniciales);
+  return template.evaluate()
+    .setTitle('Inducciones | El Libertador')
     .setFaviconUrl("https://www.ellibertador.co/favicon.ico")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
@@ -573,9 +559,15 @@ function motorDeAuditoria(formData) {
     const estadoCartera   = "PAZ Y SALVO";
     const filasParaInsertar = [];
 
+    // Normaliza a coma decimal sin importar cómo llegue el dato (front legacy,
+    // front nuevo o una llamada directa a la API): mismo criterio que la
+    // máscara de #tasaNegociacion / #rad_tasa, así siempre queda consistente
+    // en Control_General y en las notificaciones.
     let tasaNegociacionLimpia = "";
     if (formData.tasaNegociacion) {
-      tasaNegociacionLimpia = formData.tasaNegociacion.toString().replace(/\./g, ',');
+      tasaNegociacionLimpia = formData.tasaNegociacion.toString().replace(/\./g, ',').replace(/[^0-9,]/g, '');
+      const partesTasa = tasaNegociacionLimpia.split(',');
+      if (partesTasa.length > 2) tasaNegociacionLimpia = partesTasa[0] + ',' + partesTasa.slice(1).join('');
     }
 
     let contadorRegistro = 1;

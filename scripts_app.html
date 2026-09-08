@@ -3670,6 +3670,7 @@ function mostrarVistaRadicar() {
     + '<label class="rad-label" for="rad_observaciones">Notas de radicación</label>'
     + '<textarea class="rad-input rad-textarea" id="rad_observaciones" rows="3" placeholder="Información adicional para el equipo de inducciones..."></textarea>'
     + '</div>'
+    + '<span id="rad_borradorIndicator" class="rad-file-info" style="opacity:0;transition:opacity 0.3s;">✓ Borrador guardado</span>'
     + '</div>'
     // — Sección 2: Paz y Salvo
     + '<div class="rad-divider"></div>'
@@ -3756,6 +3757,10 @@ function mostrarVistaRadicar() {
         if (e.dataTransfer.files[0]) { document.getElementById('rad_fileExcel').files = e.dataTransfer.files; _leerExcelRad(e.dataTransfer.files[0]); }
       };
     }
+    // Máscara de tasa: fuerza coma decimal mientras se escribe (debe ir antes
+    // del guardado de borrador para que lo persistido ya esté normalizado).
+    var tasaInput = document.getElementById('rad_tasa');
+    if (tasaInput) tasaInput.addEventListener('input', function() { _validarComaRad(this); });
     // Auto-guardar borrador al escribir
     ['rad_poliza', 'rad_tasa', 'rad_observaciones'].forEach(function(id) {
       var el = document.getElementById(id);
@@ -3811,6 +3816,34 @@ function _archivoABase64(file) {
     reader.onload = function() { resolve({ bytes: reader.result, nombre: file.name, tipo: file.type }); };
     reader.onerror = function(e) { reject(e); };
   });
+}
+
+/** Fuerza coma decimal en #rad_tasa mientras se escribe (mismo criterio que la hoja de cálculo). */
+function _validarComaRad(input) {
+  input.value = input.value.replace(/\./g, ',').replace(/[^0-9,]/g, '');
+  var partes = input.value.split(',');
+  if (partes.length > 2) input.value = partes[0] + ',' + partes.slice(1).join('');
+}
+
+/** Scroll suave al campo faltante y resalte temporal (borde/fondo rojo, 3s). */
+function _resaltarCampoFaltante(elementId) {
+  var el = document.getElementById(elementId);
+  if (!el) return;
+
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  el.style.transition = 'border-color 0.3s, background-color 0.3s, box-shadow 0.3s';
+  el.style.borderColor = '#BD0F14';
+  el.style.backgroundColor = '#FFF5F5';
+  el.style.boxShadow = '0 0 0 4px rgba(189, 15, 20, 0.15)';
+
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.focus();
+
+  setTimeout(function() {
+    el.style.borderColor = '';
+    el.style.backgroundColor = '';
+    el.style.boxShadow = '';
+  }, 3000);
 }
 
 function _limpiarFormRadicacion() {
@@ -3977,10 +4010,11 @@ function _procesarRadicacion() {
   var tipoPS = ''; for (var r = 0; r < radios.length; r++) { if (radios[r].checked) tipoPS = radios[r].value; }
   var filePdf = document.getElementById('rad_filePdf') ? document.getElementById('rad_filePdf').files[0] : null;
 
-  if (!poliza || !tasa) { _toast('Completa póliza y tasa.', 'warning'); return; }
-  if (!fileExcel || !_radExcelParseado) { _toast('Carga la planilla Excel.', 'warning'); return; }
-  if (!tipoPS) { _toast('Selecciona una opción de paz y salvo.', 'warning'); return; }
-  if (tipoPS === 'adjunto' && !filePdf) { _toast('Adjunta el PDF de paz y salvo.', 'warning'); return; }
+  if (!poliza || !tasa) { _toast('Completa póliza y tasa.', 'warning'); _resaltarCampoFaltante(!poliza ? 'rad_poliza' : 'rad_tasa'); return; }
+  if (!fileExcel) { _toast('Carga la planilla de inducción en Excel para poder radicar el lote.', 'warning'); _resaltarCampoFaltante('rad_dropZone'); return; }
+  if (!_radExcelParseado) { _toast('No se pudieron leer datos de la planilla. Verifica que sea un Excel válido (.xlsx) con contratos.', 'warning'); _resaltarCampoFaltante('rad_dropZone'); return; }
+  if (!tipoPS) { _toast('Selecciona una opción de paz y salvo.', 'warning'); _resaltarCampoFaltante('rad_sec2'); return; }
+  if (tipoPS === 'adjunto' && !filePdf) { _toast('Adjunta el PDF de paz y salvo.', 'warning'); _resaltarCampoFaltante('rad_dropZonePdf'); return; }
 
   // Pre-validación frontend (mismas reglas que el servidor, feedback instantáneo)
   var erroresFront = _preValidarExcel(_radExcelParseado);
@@ -4061,10 +4095,46 @@ function _mostrarModalProgreso() {
     + '<div class="spinner" style="margin:0 auto 20px;"></div>'
     + '<h3 id="progTitulo" style="margin:0 0 6px;">Preparando tu radicación</h3>'
     + '<p id="progSub" style="color:var(--color-mono-500);font-size:var(--text-sm);margin:0 0 16px;">Un momento mientras alistamos todo...</p>'
+    + '<span id="progEta" style="display:inline-block;background:var(--color-mono-100);border-radius:var(--radius-sm);padding:3px 10px;margin-bottom:16px;font-family:var(--font-mono);font-size:var(--text-xs);font-weight:700;color:var(--color-primary-navy);"></span>'
     + '<div style="width:100%;background:var(--color-mono-100);border-radius:var(--radius-full);height:6px;overflow:hidden;">'
     + '<div id="progBar" style="height:6px;width:0%;background:var(--gradient-brand);border-radius:var(--radius-full);transition:width 0.5s ease;"></div>'
     + '</div></div>';
   document.body.appendChild(modal);
+  _iniciarCronometroEta();
+}
+
+// ── Cronómetro ETA del modal de progreso ──
+var _etaInterval = null;
+
+function _iniciarCronometroEta() {
+  var el = document.getElementById('progEta');
+  if (!el) return;
+
+  var count = 0;
+  if (_radExcelParseado) {
+    for (var i = 4; i < _radExcelParseado.length; i++) {
+      if (_radExcelParseado[i] && String(_radExcelParseado[i][9] || '').trim()) count++;
+    }
+  }
+  // Misma estimación que el frontend legacy: base 12s (IA + Drive + escritura) + 0.1s por contrato.
+  var segsRestantes = Math.max(15, Math.round(12 + count * 0.1));
+  el.textContent = segsRestantes + 's';
+
+  if (_etaInterval) clearInterval(_etaInterval);
+  _etaInterval = setInterval(function() {
+    segsRestantes--;
+    if (segsRestantes <= 0) {
+      el.textContent = 'Casi listo...';
+      clearInterval(_etaInterval);
+      _etaInterval = null;
+    } else {
+      el.textContent = segsRestantes + 's';
+    }
+  }, 1000);
+}
+
+function _detenerCronometroEta() {
+  if (_etaInterval) { clearInterval(_etaInterval); _etaInterval = null; }
 }
 
 function _avanzarProgreso(paso) {
@@ -4078,6 +4148,7 @@ function _avanzarProgreso(paso) {
 }
 
 function _cerrarModalProgreso() {
+  _detenerCronometroEta();
   var m = document.getElementById('modalProgreso');
   if (m) m.remove();
 }
@@ -4091,6 +4162,14 @@ function _guardarBorradorRad() {
     tipoPS: document.querySelector('input[name="rad_tipoPS"]:checked') ? document.querySelector('input[name="rad_tipoPS"]:checked').value : ''
   };
   localStorage.setItem('borradorRadNuevo', JSON.stringify(data));
+
+  var indicator = document.getElementById('rad_borradorIndicator');
+  if (indicator) {
+    var horaGuardado = new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+    indicator.textContent = '✓ Borrador guardado ' + horaGuardado;
+    indicator.style.opacity = '1';
+    setTimeout(function() { indicator.style.opacity = '0.6'; }, 2000);
+  }
 }
 
 function _restaurarBorradorRad() {
@@ -4101,7 +4180,7 @@ function _restaurarBorradorRad() {
   var t = document.getElementById('rad_tasa');
   var o = document.getElementById('rad_observaciones');
   if (p && data.poliza) p.value = data.poliza;
-  if (t && data.tasa) t.value = data.tasa;
+  if (t && data.tasa) { t.value = data.tasa; _validarComaRad(t); }
   if (o && data.observaciones) o.value = data.observaciones;
   if (data.tipoPS === 'checkbox') _selPS('A');
   if (data.tipoPS === 'adjunto') _selPS('B');
@@ -4220,6 +4299,17 @@ function _preValidarExcel(data) {
     if (motivoDestino) {
       errores.push({ fila: nF, col: 4, campo: 'Destino', motivo: motivoDestino });
     }
+
+    // Campos monetarios (Canon, Administración, IVA) — mismo criterio que
+    // validarCampoMonetario() del backend (Codigo.js), feedback instantáneo.
+    [{ idx: 6, nombre: 'Canon' }, { idx: 7, nombre: 'Administración' }, { idx: 8, nombre: 'IVA' }].forEach(function(cm) {
+      var valMonetario = String(fila[cm.idx] || '').trim();
+      if (!valMonetario) return;
+      var sinFmt = valMonetario.replace(/[$.,\s]/g, '');
+      if (!/^\d+$/.test(sinFmt)) {
+        errores.push({ fila: nF, col: cm.idx + 1, campo: cm.nombre, motivo: '"' + valMonetario + '" contiene letras o símbolos no permitidos.' });
+      }
+    });
 
     // Codeudores (COA 1 al 5). Mismos índices que el backend (Codigo.js).
     // Solo se valida el COA si tiene nombre diligenciado.
