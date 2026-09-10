@@ -8,6 +8,20 @@
  */
 
 /**
+ * Normaliza un valor de la columna Estado (col J de Control_General) antes de
+ * clasificarlo o compararlo. En el Excel, "Envío formato LMI" / "Envío carta LMI"
+ * se escriben literalmente como "ENVIO FORMATO L.M.I." / "ENVIO CARTA L.M.I."
+ * (con puntos entre cada letra) — sin quitar los puntos, ningún indexOf('FORMATO LMI')
+ * los detecta nunca. Mayúsculas + sin puntos es el formato canónico que usan
+ * todas las comparaciones de estado en este archivo y en el frontend.
+ * @param {*} valor
+ * @returns {string}
+ */
+function _normalizarEstado(valor) {
+  return String(valor || '').replace(/\./g, '').trim().toUpperCase();
+}
+
+/**
  * Obtiene el resumen de KPIs.
  * Si emailComercial es null → métricas globales (todos).
  * Si tiene valor → solo las de ese comercial.
@@ -47,7 +61,7 @@ function obtenerResumenComercial(emailComercial) {
     }
 
     resumen.inducciones++;
-    var estado = String(datos[i][9] || '').trim().toUpperCase();
+    var estado = _normalizarEstado(datos[i][9]);
     var idLote = String(datos[i][0] || '').trim();
     var poliza = String(datos[i][16] || '').trim();
 
@@ -107,6 +121,49 @@ function _resolverNombresFiltro(emailComercial) {
     return nombres.length > 0 ? nombres : null;
   }
   return null;
+}
+
+/**
+ * Retorna TODAS las solicitudes individuales (filas de Control_General) del
+ * equipo visible, con su ID de lote — en una sola lectura de Sheets. El filtro
+ * por estado (para las tarjetas del Dashboard) se aplica en el frontend sobre
+ * este mismo resultado cacheado, para no releer/reescanear la hoja en cada clic.
+ * @param {string|string[]|null} emailComercial - null = sin filtro (ADMIN/ASESOR)
+ * @returns {Array<{idLote, fecha, comercial, arrendatario, tipoDoc, identificacion, destino, ciudad, estado}>}
+ */
+function obtenerTodasLasSolicitudes(emailComercial) {
+  var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
+  if (!hoja || hoja.getLastRow() < 2) return [];
+
+  var ultimaFila = hoja.getLastRow();
+  var datos = hoja.getRange(2, 1, ultimaFila - 1, 26).getValues();
+  var nombres = _resolverNombresFiltro(emailComercial);
+
+  var resultado = [];
+  for (var i = 0; i < datos.length; i++) {
+    if (nombres) {
+      var comercial = String(datos[i][10] || '').trim().toUpperCase();
+      if (nombres.indexOf(comercial) === -1) continue;
+    }
+
+    var fechaStr = '';
+    if (datos[i][2] instanceof Date) {
+      fechaStr = Utilities.formatDate(datos[i][2], 'GMT-5', 'd/MM/yyyy HH:mm');
+    }
+
+    resultado.push({
+      idLote: String(datos[i][0] || ''),
+      fecha: fechaStr,
+      comercial: String(datos[i][10] || ''),
+      arrendatario: String(datos[i][23] || ''),
+      tipoDoc: String(datos[i][24] || ''),
+      identificacion: String(datos[i][25] || ''),
+      destino: String(datos[i][17] || ''),
+      ciudad: String(datos[i][18] || ''),
+      estado: _normalizarEstado(datos[i][9])
+    });
+  }
+  return resultado;
 }
 
 function _resumenVacio() {
@@ -211,7 +268,7 @@ function obtenerLotesDeComercial(emailComercial, pagina, porPagina, filtroEstado
     }
 
     lotesMap[idLote].contratos++;
-    var estado = String(datos[i][9] || '').trim();
+    var estado = _normalizarEstado(datos[i][9]);
     if (estado) {
       lotesMap[idLote].estados[estado] = (lotesMap[idLote].estados[estado] || 0) + 1;
     }
@@ -314,7 +371,7 @@ function obtenerLotesPendientesPazYSalvo(nombreComercial) {
     var comercial = String(datos[i][10] || '').trim().toUpperCase();
     if (comercial !== nombreComercial) continue;
 
-    var estado = String(datos[i][9] || '').trim().toUpperCase();
+    var estado = _normalizarEstado(datos[i][9]);
     if (estado !== 'PENDIENTE PAZ Y SALVO') continue;
 
     var idLote = String(datos[i][0] || '').trim();
@@ -416,7 +473,7 @@ function obtenerDetalleLote(idLote) {
       ciudad: String(fila[18] || ''),
       direccion: String(fila[19] || ''),
       canon: String(fila[20] || ''),
-      estado: String(fila[9] || '')
+      estado: _normalizarEstado(fila[9])
     });
   }
 

@@ -22,6 +22,7 @@ var CacheManager = {
     'errores': 0,
     'lotes': 0,
     'solicitudes': 0,
+    'solicitudes-todas': 0,
     'usuarios': 0,
     'usuarios-dash': 0,
     'config-motivos': 0
@@ -541,6 +542,32 @@ function _prefetchLotesEnBackground() {
     });
 }
 
+/**
+ * Pre-carga TODAS las solicitudes en background apenas se muestra el dashboard,
+ * para que cuando el usuario haga clic en una tarjeta KPI (normalmente unos
+ * segundos después de ver el resumen) los datos ya estén en CacheManager y la
+ * vista de "Solicitudes" abra al instante, sin esperar la lectura de la hoja.
+ * Si el usuario hace clic ANTES de que esto termine, _verSolicitudesPorEstado
+ * reutiliza esta misma promesa en vez de disparar una segunda lectura.
+ */
+var _prefetchSolicitudesPromise = null;
+
+function _prefetchSolicitudesEnBackground() {
+  if (CacheManager.get('solicitudes-todas') || _prefetchSolicitudesPromise) return;
+  _prefetchSolicitudesPromise = callServer('api_obtenerTodasLasSolicitudes')
+    .then(function(datos) {
+      _prefetchSolicitudesPromise = null;
+      if (datos && !CacheManager.get('solicitudes-todas')) {
+        CacheManager.set('solicitudes-todas', datos);
+      }
+      return datos;
+    })
+    .catch(function(err) {
+      _prefetchSolicitudesPromise = null;
+      return null;
+    });
+}
+
 /** Control de navegación — evita que respuestas tardías sobreescriban la vista actual */
 var _navId = 0;
 var _seccionActiva = 'dashboard';
@@ -750,6 +777,7 @@ function cargarDashboard() {
   var cachedResumen = CacheManager.get('dashboard');
   if (cachedResumen) {
     _renderizarDashboardConDatos(cachedResumen);
+    _prefetchSolicitudesEnBackground();
     return;
   }
 
@@ -769,6 +797,7 @@ function cargarDashboard() {
       if (!_sigueVigente(navIdLocal)) return;
       CacheManager.set('dashboard', r);
       _renderizarDashboardConDatos(r);
+      _prefetchSolicitudesEnBackground();
       if (typeof actualizarLineasDeVida === 'function') actualizarLineasDeVida(APP_USUARIO.rol, r);
     })
     .catch(function(err) {
@@ -803,6 +832,32 @@ function _refrescarDashboard() {
   cargarDashboard();
 }
 
+/**
+ * Las 10 tarjetas del resumen del Dashboard — iguales para TODOS los roles
+ * (Consultor, Director, Gerente, Admin, Asesor): Total ingresadas + los 9
+ * estados del flujo, en orden lógico:
+ * Total ingresadas → Pendiente radicar → Radicado → Pendiente asignar →
+ * En análisis → Envío formato LMI → Envío carta LMI → Error en terceros →
+ * Pendiente paz y salvo → Terminado.
+ */
+function _renderizarTarjetasResumenDashboard(r) {
+  // Una sola fila flexible en vez de filas rígidas de 4: las tarjetas fluyen y se
+  // acomodan solas según el ancho disponible — sin filas huérfanas con espacio
+  // vacío ni tarjetas estiradas de más cuando sobran columnas.
+  return '<div style="display:flex;flex-wrap:wrap;gap:var(--space-3);">'
+    + _kpiCompacto('Total ingresadas', r.inducciones, 'navy', 'TODOS')
+    + _kpiCompacto('Pend. radicar', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
+    + _kpiCompacto('Radicado', r.radicado, 'navy', 'RADICADO')
+    + _kpiCompacto('Pend. asignar', r.pendienteAsignar, 'navy', 'PENDIENTE ASIGNAR')
+    + _kpiCompacto('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
+    + _kpiCompacto('Envío formato LMI', r.envioFormatoLMI, 'teal', 'ENVIO FORMATO LMI')
+    + _kpiCompacto('Envío carta LMI', r.envioCartaLMI, 'teal', 'ENVIO CARTA LMI')
+    + _kpiCompacto('Error terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
+    + _kpiCompacto('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
+    + _kpiCompacto('Terminado', r.terminados, 'green', 'TERMINADO')
+    + '</div>';
+}
+
 function _renderizarDashboardConDatos(r) {
       var hora = new Date().getHours();
       var saludo = hora < 12 ? 'Buenos días' : hora < 18 ? 'Buenas tardes' : 'Buenas noches';
@@ -824,21 +879,13 @@ function _renderizarDashboardConDatos(r) {
         + '</div>'
         + '</div>';
 
-      if (esAdmin) {
-        // KPIs compactos en 2 filas de 4 (más pequeños)
-        html += '<div class="grid grid--4" style="gap:var(--space-3);">'
-          + _kpiCompacto('Pólizas', r.totalPolizas, 'navy', '')
-          + _kpiCompacto('Pend. radicar', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
-          + _kpiCompacto('Radicado', r.radicado, 'navy', 'RADICADO')
-          + _kpiCompacto('Pend. asignar', r.pendienteAsignar, 'navy', 'PENDIENTE ASIGNAR')
-          + '</div>'
-          + '<div class="grid grid--4" style="gap:var(--space-3);">'
-          + _kpiCompacto('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
-          + _kpiCompacto('Error terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
-          + _kpiCompacto('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
-          + _kpiCompacto('Terminado', r.terminados, 'green', 'TERMINADO')
-          + '</div>';
+      // Mismo resumen de 10 tarjetas para todos los roles (Total ingresadas + los
+      // 9 estados del flujo, en orden lógico) — lo único que cambia por rol es
+      // el bloque de abajo (gráfico de distribución para Admin/Director/Gerente vs.
+      // alertas + accesos rápidos para Consultor).
+      html += _renderizarTarjetasResumenDashboard(r);
 
+      if (esAdmin) {
         // Gráfico de distribución (barra horizontal proporcional)
         var total = r.inducciones || 1;
         html += '<div class="card" style="padding:var(--space-5);">'
@@ -848,20 +895,9 @@ function _renderizarDashboardConDatos(r) {
           + '</div>';
 
       } else {
-        // Comercial: KPIs compactos
-        html += '<div class="grid grid--3" style="gap:var(--space-3);">'
-          + _kpiCompacto('Pend. radicar', r.pendienteRadicar, 'navy', 'PENDIENTE RADICAR')
-          + _kpiCompacto('En análisis', r.enAnalisis, 'navy', 'EN ANÁLISIS')
-          + _kpiCompacto('Pendiente paz y salvo', r.pendientePS, 'orange', 'PENDIENTE PAZ Y SALVO')
-          + '</div>'
-          + '<div class="grid grid--3" style="gap:var(--space-3);">'
-          + _kpiCompacto('Terminados', r.terminados, 'green', 'TERMINADO')
-          + _kpiCompacto('Error terceros', r.errorTerceros, 'red', 'ERROR EN TERCEROS')
-          + _kpiCompacto('Radicados', r.radicado || r.radicadosSemana || 0, 'navy', 'RADICADO')
-          + '</div>';
-
-        // Barra de progreso simple para comercial
-        var totalC = (r.pendienteRadicar||0) + (r.enAnalisis||0) + (r.pendientePS||0) + (r.terminados||0) + (r.errorTerceros||0) + (r.radicado||0);
+        // Barra de progreso simple para comercial — mismo total que el gráfico de
+        // Admin (todas las inducciones), para que los porcentajes sean coherentes.
+        var totalC = r.inducciones || 0;
         if (totalC > 0) {
           html += '<div class="card" style="padding:var(--space-5);">'
             + '<h4 style="margin:0 0 var(--space-3);">Tu progreso general</h4>'
@@ -869,20 +905,45 @@ function _renderizarDashboardConDatos(r) {
             + '</div>';
         }
 
-        // Alertas de casos pendientes (clickeables → llevan a Mis lotes filtrado)
-        if (r.errorTerceros > 0) {
-          html += '<div class="alert alert--error" onclick="_filtrarLotesPorEstado(\'ERROR EN TERCEROS\')" style="cursor:pointer;">'
-            + '<span style="font-size:1.1rem;">⚠️</span>'
-            + '<div><strong style="color:var(--color-primary-red);">' + r.errorTerceros + ' lote(s) con error en terceros</strong>'
-            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Revisa el correo que te envió el equipo de operación para saber qué falta corregir.</p></div>'
-            + '</div>';
-        }
-        if (r.pendientePS > 0) {
-          html += '<div class="alert alert--warning" onclick="_filtrarLotesPorEstado(\'PENDIENTE PAZ Y SALVO\')" style="cursor:pointer;">'
-            + '<span style="font-size:1.1rem;">📄</span>'
-            + '<div><strong style="color:var(--color-accent-orange);">' + r.pendientePS + ' lote(s) pendiente(s) de paz y salvo</strong>'
-            + '<p style="margin:var(--space-1) 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Revisa el correo que te envió el equipo de operación para saber qué falta enviar.</p></div>'
-            + '</div>';
+        // "Mis pendientes" — los 4 estados donde el comercial tiene algo que
+        // resolver (los otros 6 son de trámite interno, no requieren su acción).
+        // Mismo lenguaje visual que "Accesos rápidos" (icono + texto + flecha al
+        // hover) en vez de cajas de alerta planas, para que se lean accionables.
+        if (r.envioFormatoLMI > 0 || r.envioCartaLMI > 0 || r.errorTerceros > 0 || r.pendientePS > 0) {
+          html += '<div class="card card--flat" style="padding:var(--space-5);">'
+            + '<h4 style="margin:0 0 var(--space-4);">🔔 Mis pendientes</h4>'
+            + '<div class="metrics-row-detail" style="grid-template-columns:1fr;">';
+
+          if (r.envioFormatoLMI > 0) {
+            html += '<div class="metric-detail-card" onclick="_verSolicitudesPorEstado(\'ENVIO FORMATO LMI\')">'
+              + '<div class="metric-detail-dot" style="background:var(--azul-mid);width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">📝</div>'
+              + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);font-size:0.92rem;">' + r.envioFormatoLMI + ' solicitud(es) con envío de formato LMI pendiente</span>'
+              + '<span style="font-size:0.78rem;color:var(--text-muted);">Revisa el correo que te envió el equipo de Inducciones para saber qué formato debes enviar.</span></div>'
+              + '</div>';
+          }
+          if (r.envioCartaLMI > 0) {
+            html += '<div class="metric-detail-card" onclick="_verSolicitudesPorEstado(\'ENVIO CARTA LMI\')">'
+              + '<div class="metric-detail-dot" style="background:var(--azul-mid);width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">✉️</div>'
+              + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);font-size:0.92rem;">' + r.envioCartaLMI + ' solicitud(es) con envío de carta LMI pendiente</span>'
+              + '<span style="font-size:0.78rem;color:var(--text-muted);">Revisa el correo que te envió el equipo de Inducciones para saber qué carta debes enviar.</span></div>'
+              + '</div>';
+          }
+          if (r.errorTerceros > 0) {
+            html += '<div class="metric-detail-card" onclick="_verSolicitudesPorEstado(\'ERROR EN TERCEROS\')">'
+              + '<div class="metric-detail-dot" style="background:var(--rojo);width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">⚠️</div>'
+              + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);font-size:0.92rem;">' + r.errorTerceros + ' solicitud(es) con error en terceros</span>'
+              + '<span style="font-size:0.78rem;color:var(--text-muted);">Revisa el correo que te envió el equipo de Inducciones para saber qué falta corregir.</span></div>'
+              + '</div>';
+          }
+          if (r.pendientePS > 0) {
+            html += '<div class="metric-detail-card" onclick="_verSolicitudesPorEstado(\'PENDIENTE PAZ Y SALVO\')">'
+              + '<div class="metric-detail-dot" style="background:var(--amarillo);width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:1.3rem;">📄</div>'
+              + '<div class="metric-detail-text"><span class="metric-detail-label" style="text-transform:none;letter-spacing:normal;font-weight:700;color:var(--text-main);font-size:0.92rem;">' + r.pendientePS + ' solicitud(es) pendiente(s) de paz y salvo</span>'
+              + '<span style="font-size:0.78rem;color:var(--text-muted);">Revisa el correo que te envió el equipo de Inducciones para saber qué falta enviar.</span></div>'
+              + '</div>';
+          }
+
+          html += '</div></div>';
         }
 
         // Accesos rápidos como metric-detail-card (icono + texto + flecha al hover)
@@ -1003,23 +1064,35 @@ function _kpiCompacto(titulo, valor, tema, filtroEstado) {
   var colorMap = { navy: 'var(--azul)', red: 'var(--rojo)', orange: 'var(--amarillo)', green: 'var(--verde)', teal: 'var(--azul-mid)' };
   var color = colorMap[tema] || colorMap.navy;
   var esClickable = filtroEstado && filtroEstado.length > 0;
-  var onclick = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
+  var onclick = esClickable ? ' onclick="_verSolicitudesPorEstado(\'' + filtroEstado + '\')"' : '';
   var cursor = esClickable ? 'cursor:pointer;' : '';
+  // No clicable (ej. "Pólizas", que no es un estado del flujo): borde punteado para
+  // diferenciarla visualmente de las tarjetas de estado sin necesitar su propia fila.
+  var borde = esClickable ? '' : 'border-style:dashed;';
 
-  return '<div class="metric-card"' + onclick + ' style="padding:16px;' + cursor + '">'
+  return '<div class="metric-card"' + onclick + ' style="flex:1 1 160px;min-width:150px;max-width:210px;padding:16px;' + cursor + borde + '">'
     + '<div class="metric-label" style="margin-bottom:8px;">' + titulo + '</div>'
     + '<div class="metric-value" style="font-size:1.6rem;margin-bottom:0;color:' + color + ';">' + _fmtNum(valor) + '</div>'
     + '</div>';
 }
 
+/**
+ * Barra de distribución del pipeline. Los 9 segmentos siguen el mismo orden
+ * lógico y usan exactamente los mismos campos del resumen que las 10 tarjetas
+ * (_renderizarTarjetasResumenDashboard) — así la barra es un reflejo real de
+ * lo que las tarjetas ya muestran, no una versión recortada aparte.
+ */
 function _barraDistribucion(r, total) {
   var segmentos = [
-    { label: 'Terminado', valor: r.terminados || 0, color: 'var(--color-success)' },
-    { label: 'En análisis', valor: r.enAnalisis || 0, color: 'var(--color-primary-navy)' },
-    { label: 'Pend. asignar', valor: r.pendienteAsignar || 0, color: '#5a6d8f' },
     { label: 'Pend. radicar', valor: r.pendienteRadicar || 0, color: '#8b9dc3' },
+    { label: 'Radicado', valor: r.radicado || 0, color: '#5a6d8f' },
+    { label: 'Pend. asignar', valor: r.pendienteAsignar || 0, color: 'var(--azul-mid)' },
+    { label: 'En análisis', valor: r.enAnalisis || 0, color: 'var(--color-primary-navy)' },
+    { label: 'Envío formato LMI', valor: r.envioFormatoLMI || 0, color: 'var(--color-accent-teal)' },
+    { label: 'Envío carta LMI', valor: r.envioCartaLMI || 0, color: '#0a6e69' },
     { label: 'Error terceros', valor: r.errorTerceros || 0, color: 'var(--color-primary-red)' },
-    { label: 'Pendiente paz y salvo', valor: r.pendientePS || 0, color: 'var(--color-accent-orange)' }
+    { label: 'Pendiente paz y salvo', valor: r.pendientePS || 0, color: 'var(--color-accent-orange)' },
+    { label: 'Terminado', valor: r.terminados || 0, color: 'var(--color-success)' }
   ];
 
   var html = '<div style="display:flex;height:12px;border-radius:var(--radius-full);overflow:hidden;background:var(--color-mono-100);margin-bottom:var(--space-3);">';
@@ -1050,7 +1123,7 @@ function _kpiAdmin(titulo, valor, tema, filtroEstado) {
   var bgMap = { navy: 'var(--color-primary-navy)', red: 'var(--color-primary-red)', orange: 'var(--color-accent-orange)', green: 'var(--color-success)', teal: 'var(--color-accent-teal)' };
   var bg = bgMap[tema] || bgMap.navy;
   var esClickable = filtroEstado && filtroEstado.length > 0;
-  var onclick = esClickable ? ' onclick="_filtrarLotesPorEstado(\'' + filtroEstado + '\')"' : '';
+  var onclick = esClickable ? ' onclick="_verSolicitudesPorEstado(\'' + filtroEstado + '\')"' : '';
   var cursor = esClickable ? 'cursor:pointer;' : '';
 
   return '<div class="kpi-card"' + onclick + ' style="background:' + bg + ';color:var(--color-mono-0);' + cursor + '">'
@@ -1061,9 +1134,121 @@ function _kpiAdmin(titulo, valor, tema, filtroEstado) {
 
 function _fmtNum(n) { return (n || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
 
-function _filtrarLotesPorEstado(estado) {
-  _filtroEstadoActivo = estado;
-  navegarA('lotes');
+/**
+ * Determina si una solicitud (su estado ya en mayúsculas) cae dentro del filtro
+ * agregado de una tarjeta del Dashboard. Debe coincidir con la clasificación de
+ * obtenerResumenComercial (backend) para que el número de la tarjeta y el
+ * tamaño de esta lista siempre coincidan.
+ */
+function _coincideFiltroEstadoAgregado(estado, filtro) {
+  switch (filtro) {
+    case 'TODOS': return true;
+    case 'PENDIENTE RADICAR': return estado === 'PENDIENTE RADICAR';
+    case 'RADICADO': return estado === 'RADICADO';
+    case 'PENDIENTE ASIGNAR': return estado === 'PENDIENTE ASIGNAR';
+    case 'EN ANÁLISIS': return estado.indexOf('ANÁLISIS') !== -1;
+    case 'ENVIO FORMATO LMI': return estado.indexOf('FORMATO LMI') !== -1;
+    case 'ENVIO CARTA LMI': return estado.indexOf('CARTA LMI') !== -1;
+    case 'ERROR EN TERCEROS': return estado.indexOf('ERROR') !== -1;
+    case 'PENDIENTE PAZ Y SALVO': return estado.indexOf('PAZ Y SALVO') !== -1;
+    case 'TERMINADO': return estado === 'TERMINADO';
+    default: return false;
+  }
+}
+
+/**
+ * Llamada desde las tarjetas KPI/alertas del Dashboard. En vez de llevar a una
+ * lista de lotes agregada, muestra directamente las solicitudes puntuales que
+ * componen ese número, cada una con el ID del lote al que pertenece.
+ *
+ * Todas las tarjetas comparten el mismo set de datos (todas las solicitudes
+ * del equipo visible) — se pide UNA sola vez al servidor y se cachea en
+ * CacheManager; cada clic posterior (aunque sea a un estado distinto) filtra
+ * ese mismo array en el navegador, sin volver a leer la hoja.
+ */
+function _verSolicitudesPorEstado(estado) {
+  var cacheado = CacheManager.get('solicitudes-todas');
+  if (cacheado) {
+    _renderizarSolicitudesPorEstado(estado, cacheado.filter(function(s) { return _coincideFiltroEstadoAgregado(s.estado, estado); }));
+    return;
+  }
+
+  // Si el prefetch en background (disparado al cargar el dashboard) ya está en
+  // vuelo, reutilizarlo en vez de disparar una segunda lectura de la hoja.
+  if (_prefetchSolicitudesPromise) {
+    _navId++;
+    var navIdEnCurso = _navId;
+    mostrarVista('viewLoading');
+    _prefetchSolicitudesPromise.then(function(datos) {
+      if (!_sigueVigente(navIdEnCurso)) return;
+      datos = datos || [];
+      _renderizarSolicitudesPorEstado(estado, datos.filter(function(s) { return _coincideFiltroEstadoAgregado(s.estado, estado); }));
+    });
+    return;
+  }
+
+  _navId++;
+  var navIdLocal = _navId;
+  mostrarVista('viewLoading');
+
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    document.getElementById('viewDashboard').innerHTML =
+      '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" onclick="_verSolicitudesPorEstado(\'' + estado + '\')">Reintentar</button></div>';
+    mostrarVista('viewDashboard');
+  }, 15000);
+
+  callServer('api_obtenerTodasLasSolicitudes')
+    .then(function(datos) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      datos = datos || [];
+      CacheManager.set('solicitudes-todas', datos);
+      _renderizarSolicitudesPorEstado(estado, datos.filter(function(s) { return _coincideFiltroEstadoAgregado(s.estado, estado); }));
+    })
+    .catch(function(err) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      console.error(err);
+      document.getElementById('viewDashboard').innerHTML =
+        '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar las solicitudes.</p>'
+        + '<button class="btn btn--primary" onclick="_verSolicitudesPorEstado(\'' + estado + '\')">Reintentar</button></div>';
+      mostrarVista('viewDashboard');
+    });
+}
+
+function _renderizarSolicitudesPorEstado(estado, solicitudes) {
+  var container = document.getElementById('viewDashboard');
+  var label = _ESTADO_LABELS[estado] || estado;
+
+  var html = '<div class="stack">'
+    + '<div><button class="btn btn--ghost" onclick="navegarA(\'dashboard\')">← Volver al inicio</button></div>'
+    + '<div class="flex flex--between"><h2>Solicitudes — ' + label + '</h2>'
+    + '<small>' + solicitudes.length + ' solicitud(es)</small></div>'
+    + '<div class="card card--flat" style="padding:0; overflow:hidden;"><table class="table">'
+    + '<thead><tr><th>ID Lote</th><th>Arrendatario</th><th>Identificación</th><th>Ciudad</th><th>Estado</th></tr></thead><tbody>';
+
+  if (solicitudes.length === 0) {
+    html += '<tr><td colspan="5" style="text-align:center;color:var(--color-mono-500);padding:var(--space-6);">No hay solicitudes en este estado.</td></tr>';
+  }
+
+  for (var i = 0; i < solicitudes.length; i++) {
+    var s = solicitudes[i];
+    html += '<tr style="cursor:pointer;" onclick="_verDetalleLote(\'' + s.idLote + '\')">'
+      + '<td style="font-family:var(--font-mono); font-size:var(--text-sm);">' + s.idLote + '</td>'
+      + '<td><strong>' + s.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + s.destino + '</small></td>'
+      + '<td style="font-size:var(--text-sm);">' + s.tipoDoc + ' ' + s.identificacion + '</td>'
+      + '<td style="font-size:var(--text-sm);">' + s.ciudad + '</td>'
+      + '<td>' + _badgeEstado(s.estado) + '</td>'
+      + '</tr>';
+  }
+
+  html += '</tbody></table></div></div>';
+  container.innerHTML = html;
+  mostrarVista('viewDashboard');
 }
 
 var _filtroEstadoActivo = '';
@@ -1147,9 +1332,12 @@ function cargarMisLotes(pagina) {
 function _renderizarLotesFiltrados() {
   var filtrados = CacheManager.get('lotes') || [];
 
-  // Filtrar por estado
-  if (_filtroEstadoActivo) {
-    filtrados = filtrados.filter(function(l) { return l.estados && l.estados[_filtroEstadoActivo]; });
+  // Filtrar por estado simplificado del LOTE (En proceso / Finalizado — el detalle
+  // granular por solicitud se filtra dentro del propio lote, ver _filtrarDetalleLotePorEstado)
+  if (_filtroEstadoActivo === 'FINALIZADO') {
+    filtrados = filtrados.filter(function(l) { return l.estadoPrincipal === 'TERMINADO'; });
+  } else if (_filtroEstadoActivo === 'EN PROCESO') {
+    filtrados = filtrados.filter(function(l) { return l.estadoPrincipal !== 'TERMINADO'; });
   }
 
   // Filtrar por búsqueda de ID
@@ -1181,7 +1369,7 @@ function _renderizarLotesConDatos(resultado) {
       var container = document.getElementById('viewDashboard');
       if (!resultado || resultado.datos.length === 0) {
         var msgVacio = _busquedaLoteActiva ? 'No se encontró el lote "' + _busquedaLoteActiva + '".'
-          : _filtroEstadoActivo ? 'No hay lotes con estado "' + _filtroEstadoActivo + '".'
+          : _filtroEstadoActivo ? 'No hay lotes en estado "' + (_filtroEstadoActivo === 'FINALIZADO' ? 'Finalizado' : 'En proceso') + '".'
           : 'No hay lotes para mostrar.';
         container.innerHTML = '<div class="stack">' + _filtroHeader()
           + '<div class="card card--flat" style="text-align:center; padding:var(--spacing-2xl);">'
@@ -1204,7 +1392,7 @@ function _renderizarLotesConDatos(resultado) {
           + '<td>' + lote.fecha + '</td>'
           + '<td>' + (lote.comercial || '-') + '</td>'
           + '<td style="text-align:center;">' + lote.contratos + '</td>'
-          + '<td>' + _badgeEstado(lote.estadoPrincipal) + '</td></tr>';
+          + '<td>' + _badgeEstadoLote(lote.estadoPrincipal) + '</td></tr>';
       }
 
       html += '</tbody></table></div>';
@@ -1228,16 +1416,12 @@ function _filtroHeader() {
     + '<button class="btn btn--primary" style="padding:10px 16px;" onclick="_buscarLote()">Buscar</button>'
     + '</div>';
 
-  // Select de estado
+  // Select de estado — a nivel de LOTE solo hay dos estados posibles (En proceso / Finalizado);
+  // el filtro por estado granular de cada solicitud vive dentro del detalle del lote.
   html += '<select class="input" style="width:auto; min-width:180px; padding:10px 14px; font-size:var(--text-sm);" onchange="_filtrarPorSelect(this.value)">'
     + '<option value="">Todos los estados</option>'
-    + '<option value="PENDIENTE RADICAR"' + (_filtroEstadoActivo === 'PENDIENTE RADICAR' ? ' selected' : '') + '>Pendiente radicar</option>'
-    + '<option value="RADICADO"' + (_filtroEstadoActivo === 'RADICADO' ? ' selected' : '') + '>Radicado</option>'
-    + '<option value="PENDIENTE ASIGNAR"' + (_filtroEstadoActivo === 'PENDIENTE ASIGNAR' ? ' selected' : '') + '>Pendiente asignar</option>'
-    + '<option value="EN ANÁLISIS"' + (_filtroEstadoActivo === 'EN ANÁLISIS' ? ' selected' : '') + '>En análisis</option>'
-    + '<option value="ERROR EN TERCEROS"' + (_filtroEstadoActivo === 'ERROR EN TERCEROS' ? ' selected' : '') + '>Error en terceros</option>'
-    + '<option value="PENDIENTE PAZ Y SALVO"' + (_filtroEstadoActivo === 'PENDIENTE PAZ Y SALVO' ? ' selected' : '') + '>Pendiente paz y salvo</option>'
-    + '<option value="TERMINADO"' + (_filtroEstadoActivo === 'TERMINADO' ? ' selected' : '') + '>Terminado</option>'
+    + '<option value="EN PROCESO"' + (_filtroEstadoActivo === 'EN PROCESO' ? ' selected' : '') + '>En proceso</option>'
+    + '<option value="FINALIZADO"' + (_filtroEstadoActivo === 'FINALIZADO' ? ' selected' : '') + '>Finalizado</option>'
     + '</select>';
 
   // Botón limpiar (si hay algún filtro activo)
@@ -1271,6 +1455,20 @@ function _limpiarFiltro() {
   _busquedaLoteActiva = '';
   _lotesPageActual = 1;
   _renderizarLotesFiltrados();
+}
+
+/**
+ * Estado simplificado de un LOTE (a diferencia de _badgeEstado, que es el estado
+ * granular de una SOLICITUD individual). Un lote se considera "Finalizado" solo
+ * cuando ninguna de sus solicitudes queda en un estado activo — es decir, cuando
+ * _obtenerEstadoPrincipal (backend) no encontró nada distinto de TERMINADO.
+ * El detalle solicitud por solicitud (con su estado granular) sigue disponible
+ * al entrar al lote — ver _renderizarDetalleLote.
+ */
+function _badgeEstadoLote(estadoPrincipal) {
+  return estadoPrincipal === 'TERMINADO'
+    ? '<span class="badge badge--success">Finalizado</span>'
+    : '<span class="badge badge--navy">En proceso</span>';
 }
 
 function _badgeEstado(estado) {
@@ -2798,62 +2996,199 @@ function cargarVistaUsuarios() {
     });
 }
 
+/**
+ * Construye la fila <tr> de un usuario, reutilizada tanto en los grupos planos
+ * (Admin/Asesor/Analista/Auxiliar) como dentro de los equipos comerciales.
+ */
+function _filaUsuarioHtml(u, extraInfo) {
+  return '<tr>'
+    + '<td style="width:200px;"><strong>' + u.nombre + '</strong></td>'
+    + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + u.email + '</td>'
+    + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + (extraInfo || '') + '</td>'
+    + '<td style="width:50px; text-align:center;">' + (u.activo ? '<span style="color:#0d7a54;">✓</span>' : '<span style="color:#bd0f14;">✗</span>') + '</td>'
+    + '<td style="width:60px;"><button class="btn btn--ghost" style="padding:4px 8px; font-size:var(--text-sm);" onclick=\'_mostrarFormUsuario(' + JSON.stringify(u).replace(/'/g, "\\'") + ')\'>Editar</button></td>'
+    + '</tr>';
+}
+
+/**
+ * Bloque de tarjeta con cabecera + tabla, para un grupo plano de usuarios
+ * (roles sin jerarquía comercial: Admin, Asesor, Analista, Auxiliar).
+ */
+function _grupoPlanoHtml(claveRol, etiqueta, badge, lista) {
+  if (!lista || lista.length === 0) return '';
+
+  var html = '<div class="card card--flat" style="padding:0; overflow:hidden;">'
+    + '<div style="padding:12px 16px; background:rgba(37,49,80,0.03); border-bottom:1px solid rgba(0,0,0,0.06);">'
+    + '<div class="flex flex--between" style="align-items:center;">'
+    + '<div class="flex flex--gap-sm" style="align-items:center;">'
+    + '<span class="badge ' + badge + '">' + claveRol + '</span>'
+    + '<strong style="font-size:var(--text-sm);">' + etiqueta + '</strong>'
+    + '</div>'
+    + '<small style="color:var(--color-mono-500);">' + lista.length + ' usuario(s)</small>'
+    + '</div></div>'
+    + '<table class="table"><tbody>';
+
+  for (var i = 0; i < lista.length; i++) {
+    var u = lista[i];
+    var extraInfo = (u.rol === 'ANALISTA') ? 'Cupo: ' + u.cupo : '';
+    html += _filaUsuarioHtml(u, extraInfo);
+  }
+
+  return html + '</tbody></table></div>';
+}
+
+/**
+ * Bloque "Equipos comerciales": agrupa Gerente → Director → Consultor según
+ * emailGerente/emailDirector, en vez de listar cada rol por separado.
+ * Directores sin gerente asignado y consultores sin director asignado se
+ * muestran aparte, para que un hueco en la jerarquía sea visible de un vistazo.
+ */
+function _bloqueEquiposComercialesHtml(usuarios) {
+  var gerentes = [];
+  var directores = [];
+  var consultores = [];
+  for (var i = 0; i < usuarios.length; i++) {
+    var u = usuarios[i];
+    if (u.rol === 'GERENTE') gerentes.push(u);
+    else if (u.rol === 'DIRECTOR') directores.push(u);
+    else if (u.rol === 'CONSULTOR') consultores.push(u);
+  }
+  if (gerentes.length === 0 && directores.length === 0 && consultores.length === 0) return '';
+
+  var emailsGerentes = {};
+  for (var g = 0; g < gerentes.length; g++) emailsGerentes[gerentes[g].email] = true;
+
+  var directoresPorGerente = {};
+  var directoresSinGerente = [];
+  for (var d = 0; d < directores.length; d++) {
+    var dir = directores[d];
+    var eg = dir.emailGerente || '';
+    if (eg && emailsGerentes[eg]) {
+      if (!directoresPorGerente[eg]) directoresPorGerente[eg] = [];
+      directoresPorGerente[eg].push(dir);
+    } else {
+      directoresSinGerente.push(dir);
+    }
+  }
+
+  var emailsDirectores = {};
+  for (var d2 = 0; d2 < directores.length; d2++) emailsDirectores[directores[d2].email] = true;
+
+  var consultoresPorDirector = {};
+  var consultoresSinDirector = [];
+  for (var c = 0; c < consultores.length; c++) {
+    var con = consultores[c];
+    var ed = con.emailDirector || '';
+    if (ed && emailsDirectores[ed]) {
+      if (!consultoresPorDirector[ed]) consultoresPorDirector[ed] = [];
+      consultoresPorDirector[ed].push(con);
+    } else {
+      consultoresSinDirector.push(con);
+    }
+  }
+
+  function tarjetaDirector(dir, indentado) {
+    var subLista = consultoresPorDirector[dir.email] || [];
+    var h = '<div style="' + (indentado ? 'margin-left:24px;border-left:2px solid rgba(37,49,80,0.08);padding-left:16px;' : '') + 'margin-top:12px;">'
+      + '<div class="flex flex--between" style="align-items:center;padding:10px 12px;background:rgba(37,49,80,0.03);border-radius:var(--radius-sm);">'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<span class="badge badge--navy">DIRECTOR</span>'
+      + '<strong style="font-size:var(--text-sm);">' + dir.nombre + '</strong>'
+      + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);">' + dir.email + '</span>'
+      + (dir.activo ? '' : ' <span style="color:#bd0f14;font-size:var(--text-sm);">(inactivo)</span>')
+      + '</div>'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<small style="color:var(--color-mono-500);">' + subLista.length + ' consultor(es)</small>'
+      + '<button class="btn btn--ghost" style="padding:4px 8px;font-size:var(--text-sm);" onclick=\'_mostrarFormUsuario(' + JSON.stringify(dir).replace(/'/g, "\\'") + ')\'>Editar</button>'
+      + '</div></div>';
+
+    if (subLista.length > 0) {
+      h += '<table class="table" style="margin-left:24px;"><tbody>';
+      for (var s = 0; s < subLista.length; s++) {
+        var consultor = subLista[s];
+        h += _filaUsuarioHtml(consultor, '');
+      }
+      h += '</tbody></table>';
+    }
+    return h + '</div>';
+  }
+
+  var html = '<div class="card card--flat" style="padding:16px;">'
+    + '<strong style="font-size:var(--text-sm);">Equipos comerciales</strong>';
+
+  for (var gi = 0; gi < gerentes.length; gi++) {
+    var ger = gerentes[gi];
+    var subDirectores = directoresPorGerente[ger.email] || [];
+    html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(0,0,0,0.06);">'
+      + '<div class="flex flex--between" style="align-items:center;">'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<span class="badge badge--red">GERENTE</span>'
+      + '<strong>' + ger.nombre + '</strong>'
+      + '<span style="font-size:var(--text-sm);color:var(--color-mono-500);">' + ger.email + '</span>'
+      + (ger.activo ? '' : ' <span style="color:#bd0f14;font-size:var(--text-sm);">(inactivo)</span>')
+      + '</div>'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<small style="color:var(--color-mono-500);">' + subDirectores.length + ' director(es)</small>'
+      + '<button class="btn btn--ghost" style="padding:4px 8px;font-size:var(--text-sm);" onclick=\'_mostrarFormUsuario(' + JSON.stringify(ger).replace(/'/g, "\\'") + ')\'>Editar</button>'
+      + '</div></div>';
+
+    if (subDirectores.length === 0) {
+      html += '<p style="margin:8px 0 0;font-size:var(--text-sm);color:var(--color-mono-500);">Sin directores asignados.</p>';
+    } else {
+      for (var sd = 0; sd < subDirectores.length; sd++) {
+        html += tarjetaDirector(subDirectores[sd], true);
+      }
+    }
+    html += '</div>';
+  }
+
+  if (directoresSinGerente.length > 0) {
+    html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(0,0,0,0.06);">'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<span class="badge badge--gray">SIN GERENTE</span>'
+      + '<strong style="font-size:var(--text-sm);">Directores sin gerente asignado</strong>'
+      + '</div>';
+    for (var ds = 0; ds < directoresSinGerente.length; ds++) {
+      html += tarjetaDirector(directoresSinGerente[ds], false);
+    }
+    html += '</div>';
+  }
+
+  if (consultoresSinDirector.length > 0) {
+    html += '<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(0,0,0,0.06);">'
+      + '<div class="flex flex--gap-sm" style="align-items:center;">'
+      + '<span class="badge badge--gray">SIN DIRECTOR</span>'
+      + '<strong style="font-size:var(--text-sm);">Consultores sin director asignado</strong>'
+      + '<small style="color:var(--color-mono-500);">' + consultoresSinDirector.length + ' usuario(s)</small>'
+      + '</div>'
+      + '<table class="table"><tbody>';
+    for (var cs = 0; cs < consultoresSinDirector.length; cs++) {
+      html += _filaUsuarioHtml(consultoresSinDirector[cs], '');
+    }
+    html += '</tbody></table></div>';
+  }
+
+  return html + '</div>';
+}
+
 function _renderizarUsuarios(usuarios) {
   var container = document.getElementById('viewDashboard');
 
-  // Agrupar por rol
-  var grupos = { LIDER: [], ADMIN: [], AUXILIAR: [], ANALISTA: [], COMERCIAL: [] };
+  var grupos = { ADMIN: [], ASESOR: [], ANALISTA: [], AUXILIAR: [] };
   for (var i = 0; i < usuarios.length; i++) {
-    var rol = usuarios[i].rol || 'COMERCIAL';
-    if (!grupos[rol]) grupos[rol] = [];
-    grupos[rol].push(usuarios[i]);
+    var rol = usuarios[i].rol;
+    if (grupos[rol]) grupos[rol].push(usuarios[i]);
   }
-
-  var ordenRoles = [
-    { key: 'ADMIN', label: 'Administradores', badge: 'badge--red' },
-    { key: 'LIDER', label: 'Líderes', badge: 'badge--navy' },
-    { key: 'AUXILIAR', label: 'Auxiliares de Análisis', badge: 'badge--orange' },
-    { key: 'ANALISTA', label: 'Analistas', badge: 'badge--teal' },
-    { key: 'COMERCIAL', label: 'Comerciales', badge: 'badge--gray' }
-  ];
 
   var html = '<div class="stack">'
     + '<div class="flex flex--between"><h2>Usuarios</h2>'
     + '<button class="btn btn--primary" onclick="_mostrarFormUsuario(null)">+ Nuevo usuario</button></div>';
 
-  for (var r = 0; r < ordenRoles.length; r++) {
-    var grupo = ordenRoles[r];
-    var lista = grupos[grupo.key] || [];
-    if (lista.length === 0) continue;
-
-    html += '<div class="card card--flat" style="padding:0; overflow:hidden;">'
-      + '<div style="padding:12px 16px; background:rgba(37,49,80,0.03); border-bottom:1px solid rgba(0,0,0,0.06);">'
-      + '<div class="flex flex--between" style="align-items:center;">'
-      + '<div class="flex flex--gap-sm" style="align-items:center;">'
-      + '<span class="badge ' + grupo.badge + '">' + grupo.key + '</span>'
-      + '<strong style="font-size:var(--text-sm);">' + grupo.label + '</strong>'
-      + '</div>'
-      + '<small style="color:var(--color-mono-500);">' + lista.length + ' usuario(s)</small>'
-      + '</div></div>'
-      + '<table class="table"><tbody>';
-
-    for (var j = 0; j < lista.length; j++) {
-      var u = lista[j];
-      var extraInfo = '';
-      if (u.rol === 'ANALISTA') extraInfo = 'Cupo: ' + u.cupo;
-      else if (u.rol === 'COMERCIAL' && u.director) extraInfo = 'Dir: ' + u.director.split('@')[0];
-
-      html += '<tr>'
-        + '<td style="width:200px;"><strong>' + u.nombre + '</strong></td>'
-        + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + u.email + '</td>'
-        + '<td style="font-size:var(--text-sm); color:var(--color-mono-500);">' + extraInfo + '</td>'
-        + '<td style="width:50px; text-align:center;">' + (u.activo ? '<span style="color:#0d7a54;">✓</span>' : '<span style="color:#bd0f14;">✗</span>') + '</td>'
-        + '<td style="width:60px;"><button class="btn btn--ghost" style="padding:4px 8px; font-size:var(--text-sm);" onclick=\'_mostrarFormUsuario(' + JSON.stringify(u).replace(/'/g, "\\'") + ')\'>Editar</button></td>'
-        + '</tr>';
-    }
-
-    html += '</tbody></table></div>';
-  }
+  html += _grupoPlanoHtml('ADMIN', 'Administradores', 'badge--red', grupos.ADMIN);
+  html += _grupoPlanoHtml('ASESOR', 'Asesores', 'badge--red', grupos.ASESOR);
+  html += _bloqueEquiposComercialesHtml(usuarios);
+  html += _grupoPlanoHtml('ANALISTA', 'Analistas', 'badge--teal', grupos.ANALISTA);
+  html += _grupoPlanoHtml('AUXILIAR', 'Auxiliares de Análisis', 'badge--orange', grupos.AUXILIAR);
 
   html += '</div>';
   container.innerHTML = html;
@@ -2862,7 +3197,7 @@ function _renderizarUsuarios(usuarios) {
 
 function _mostrarFormUsuario(usuario) {
   var esNuevo = !usuario;
-  var u = usuario || { email: '', nombre: '', rol: 'COMERCIAL', cupo: 0, director: '', backup: '', backupActivo: false, activo: true };
+  var u = usuario || { email: '', nombre: '', rol: 'CONSULTOR', cupo: 0, emailDirector: '', emailGerente: '', emailsAlternos: [], activo: true };
 
   // Crear modal overlay
   var modal = document.createElement('div');
@@ -2871,22 +3206,24 @@ function _mostrarFormUsuario(usuario) {
 
   modal.innerHTML = '<div style="background:white;border-radius:var(--radius-lg);width:100%;max-width:480px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-lg);">'
     + '<div style="padding:20px 24px;border-bottom:1px solid rgba(0,0,0,0.06);">'
-    + '<div class="flex flex--between"><h3 style="margin:0;">' + (esNuevo ? 'Nuevo usuario' : 'Editar: ' + u.nombre) + '</h3>'
+    + '<div class="flex flex--between"><h3 style="margin:0;">' + (esNuevo ? 'Nuevo usuario' : 'Editar: ' + (u.nombre || u.email)) + '</h3>'
     + '<button onclick="_cerrarModal()" style="background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--color-mono-500);">✕</button></div></div>'
     + '<div style="padding:24px;">'
     + '<div class="stack" style="gap:16px;">'
     + '<div><label>Email *</label><input class="input" id="uf_email" value="' + u.email + '" ' + (esNuevo ? '' : 'readonly style="opacity:0.6;"') + '></div>'
-    + '<div><label>Nombre *</label><input class="input" id="uf_nombre" value="' + u.nombre + '"></div>'
     + '<div><label>Rol *</label><select class="input" id="uf_rol" onchange="_toggleCamposRol()">'
-    + '<option value="COMERCIAL"' + (u.rol === 'COMERCIAL' ? ' selected' : '') + '>Comercial</option>'
-    + '<option value="AUXILIAR"' + (u.rol === 'AUXILIAR' ? ' selected' : '') + '>Auxiliar</option>'
+    + '<option value="CONSULTOR"' + (u.rol === 'CONSULTOR' ? ' selected' : '') + '>Consultor</option>'
+    + '<option value="DIRECTOR"' + (u.rol === 'DIRECTOR' ? ' selected' : '') + '>Director</option>'
+    + '<option value="GERENTE"' + (u.rol === 'GERENTE' ? ' selected' : '') + '>Gerente</option>'
     + '<option value="ANALISTA"' + (u.rol === 'ANALISTA' ? ' selected' : '') + '>Analista</option>'
-    + '<option value="LIDER"' + (u.rol === 'LIDER' ? ' selected' : '') + '>Líder</option>'
-    + '<option value="ADMIN"' + (u.rol === 'ADMIN' ? ' selected' : '') + '>Admin</option>'
+    + '<option value="AUXILIAR"' + (u.rol === 'AUXILIAR' ? ' selected' : '') + '>Auxiliar</option>'
+    + '<option value="ASESOR"' + (u.rol === 'ASESOR' ? ' selected' : '') + '>Asesor</option>'
+    + '<option value="ADMIN"' + (u.rol === 'ADMIN' ? ' selected' : '') + '>Administrador</option>'
     + '</select></div>'
     + '<div id="uf_cupoWrap" style="' + (u.rol === 'ANALISTA' ? '' : 'display:none;') + '"><label>Cupo de solicitudes</label><input class="input" id="uf_cupo" type="number" value="' + u.cupo + '"></div>'
-    + '<div id="uf_dirWrap" style="' + (u.rol === 'COMERCIAL' ? '' : 'display:none;') + '"><label>Director</label><input class="input" id="uf_director" value="' + u.director + '"></div>'
-    + '<div id="uf_backWrap" style="' + (u.rol === 'COMERCIAL' ? '' : 'display:none;') + '"><label>Backup</label><input class="input" id="uf_backup" value="' + u.backup + '"><label style="margin-top:8px;text-transform:none;font-size:var(--text-sm);"><input type="checkbox" id="uf_backupActivo" ' + (u.backupActivo ? 'checked' : '') + '> Backup activo</label></div>'
+    + '<div id="uf_dirWrap" style="' + (u.rol === 'CONSULTOR' ? '' : 'display:none;') + '"><label>Director (email)</label><input class="input" id="uf_emailDirector" value="' + (u.emailDirector || '') + '"></div>'
+    + '<div id="uf_gerWrap" style="' + (u.rol === 'DIRECTOR' ? '' : 'display:none;') + '"><label>Gerente (email)</label><input class="input" id="uf_emailGerente" value="' + (u.emailGerente || '') + '"></div>'
+    + '<div><label>Emails alternos (separados por coma)</label><input class="input" id="uf_emailsAlternos" value="' + ((u.emailsAlternos || []).join(', ')) + '"></div>'
     + '<div><label style="text-transform:none;font-size:var(--text-sm);"><input type="checkbox" id="uf_activo" ' + (u.activo ? 'checked' : '') + '> Usuario activo</label></div>'
     + '</div></div>'
     + '<div style="padding:16px 24px;border-top:1px solid rgba(0,0,0,0.06);display:flex;gap:12px;justify-content:flex-end;">'
@@ -2910,24 +3247,24 @@ function _cerrarModal() {
 function _toggleCamposRol() {
   var rol = document.getElementById('uf_rol').value;
   document.getElementById('uf_cupoWrap').style.display = rol === 'ANALISTA' ? '' : 'none';
-  document.getElementById('uf_dirWrap').style.display = rol === 'COMERCIAL' ? '' : 'none';
-  document.getElementById('uf_backWrap').style.display = rol === 'COMERCIAL' ? '' : 'none';
+  document.getElementById('uf_dirWrap').style.display = rol === 'CONSULTOR' ? '' : 'none';
+  document.getElementById('uf_gerWrap').style.display = rol === 'DIRECTOR' ? '' : 'none';
 }
 
 function _guardarUsuario(esNuevo) {
+  var emailsAlternosTexto = document.getElementById('uf_emailsAlternos').value || '';
   var datos = {
     email: document.getElementById('uf_email').value,
-    nombre: document.getElementById('uf_nombre').value,
     rol: document.getElementById('uf_rol').value,
     cupo: document.getElementById('uf_cupo').value,
-    director: document.getElementById('uf_director').value,
-    backup: document.getElementById('uf_backup').value,
-    backupActivo: document.getElementById('uf_backupActivo').checked,
+    emailDirector: document.getElementById('uf_emailDirector').value,
+    emailGerente: document.getElementById('uf_emailGerente').value,
+    emailsAlternos: emailsAlternosTexto.split(',').map(function(e) { return e.trim(); }).filter(function(e) { return e; }),
     activo: document.getElementById('uf_activo').checked
   };
 
-  if (!datos.email || !datos.nombre) {
-    _toast('Email y nombre son obligatorios.', 'warning');
+  if (!datos.email || !datos.rol) {
+    _toast('Email y rol son obligatorios.', 'warning');
     return;
   }
 
@@ -2941,7 +3278,11 @@ function _guardarUsuario(esNuevo) {
       for (var i = 0; i < lista.length; i++) {
         if (lista[i].email === datos.email) { idx = i; break; }
       }
-      if (idx >= 0) { lista[idx] = datos; } else { lista.push(datos); }
+      // "nombre" se deriva server-side (no hay columna NOMBRE); se conserva el valor
+      // ya cacheado para no mostrar "undefined" mientras no se recarga la lista.
+      var nombrePrevio = idx >= 0 ? lista[idx].nombre : datos.email;
+      var datosConNombre = Object.assign({}, datos, { nombre: nombrePrevio });
+      if (idx >= 0) { lista[idx] = datosConNombre; } else { lista.push(datosConNombre); }
       return lista;
     },
     render: function() { _renderizarUsuarios(CacheManager.get('usuarios') || []); },
@@ -2955,7 +3296,25 @@ function _guardarUsuario(esNuevo) {
 //  VISTA: DETALLE DE LOTE
 // ============================================================
 
+/** Etiquetas legibles de los estados granulares de una SOLICITUD (usadas en el filtro del detalle de lote). */
+var _ESTADO_LABELS = {
+  'TODOS': 'Todas',
+  'PENDIENTE RADICAR': 'Pendiente radicar',
+  'RADICADO': 'Radicado',
+  'PENDIENTE ASIGNAR': 'Pendiente asignar',
+  'EN ANÁLISIS': 'En análisis',
+  'ENVIO FORMATO LMI': 'Envío formato LMI',
+  'ENVIO CARTA LMI': 'Envío carta LMI',
+  'ERROR EN TERCEROS': 'Error en terceros',
+  'PENDIENTE PAZ Y SALVO': 'Pendiente paz y salvo',
+  'TERMINADO': 'Terminado'
+};
+
+var _detalleLoteDataActual = null;
+var _filtroEstadoDetalleActivo = '';
+
 function _verDetalleLote(idLote) {
+  _filtroEstadoDetalleActivo = '';
   SkeletonSystem.mostrar('viewDashboard', 'detalle', { campos: 8 });
   mostrarVista('viewDashboard');
 
@@ -2979,6 +3338,7 @@ function _verDetalleLote(idLote) {
           + '<button class="btn btn--ghost" onclick="cargarMisLotes(_lotesPageActual)">← Volver a lotes</button></div>');
         return;
       }
+      _detalleLoteDataActual = data;
       _renderizarDetalleLote(data);
     })
     .catch(function(err) {
@@ -2992,9 +3352,30 @@ function _verDetalleLote(idLote) {
     });
 }
 
+/** Cambia el filtro de estado dentro del detalle de un lote y vuelve a renderizar sin pedir datos al servidor. */
+function _filtrarDetalleLotePorEstado(valor) {
+  _filtroEstadoDetalleActivo = valor;
+  if (_detalleLoteDataActual) _renderizarDetalleLote(_detalleLoteDataActual);
+}
+
 function _renderizarDetalleLote(data) {
   var l = data.lote;
   var container = document.getElementById('viewDashboard');
+
+  // Estados presentes en este lote (en el orden canónico), para poblar el filtro
+  var estadosPresentes = {};
+  for (var e = 0; e < data.solicitudes.length; e++) {
+    estadosPresentes[data.solicitudes[e].estado] = true;
+  }
+  var opcionesFiltro = '<option value="">Todos los estados</option>';
+  for (var estadoKey in _ESTADO_LABELS) {
+    if (!estadosPresentes[estadoKey]) continue;
+    opcionesFiltro += '<option value="' + estadoKey + '"' + (_filtroEstadoDetalleActivo === estadoKey ? ' selected' : '') + '>' + _ESTADO_LABELS[estadoKey] + '</option>';
+  }
+
+  var solicitudesFiltradas = _filtroEstadoDetalleActivo
+    ? data.solicitudes.filter(function(s) { return s.estado === _filtroEstadoDetalleActivo; })
+    : data.solicitudes;
 
   var html = '<div class="stack">'
     + '<div><button class="btn btn--ghost" onclick="cargarMisLotes(_lotesPageActual)">← Volver a lotes</button></div>'
@@ -3005,8 +3386,9 @@ function _renderizarDetalleLote(data) {
     + '<h2 style="margin-bottom:4px; font-size:var(--text-lg);">' + l.idLote + '</h2>'
     + '<p style="margin:0; font-size:var(--text-sm); color:var(--color-mono-500);">Comercial: <strong>' + l.comercial + '</strong> · Póliza: <strong>' + l.poliza + '</strong> · Fecha: ' + l.fecha + '</p>'
     + '</div>'
-    + '<div class="flex flex--gap-sm">'
-    + '<span class="badge badge--navy">' + data.solicitudes.length + ' solicitud(es)</span>'
+    + '<div class="flex flex--gap-sm" style="align-items:center;">'
+    + '<select class="input" style="width:auto; padding:8px 12px; font-size:var(--text-sm);" onchange="_filtrarDetalleLotePorEstado(this.value)">' + opcionesFiltro + '</select>'
+    + '<span class="badge badge--navy">' + solicitudesFiltradas.length + ' de ' + data.solicitudes.length + ' solicitud(es)</span>'
     + '</div></div></div>'
     // Tabla de solicitudes
     + '<div class="card card--flat" style="padding:0; overflow:hidden;">'
@@ -3014,8 +3396,12 @@ function _renderizarDetalleLote(data) {
     + '<thead><tr><th>#</th><th>Arrendatario</th><th>Identificación</th><th>Dirección</th><th>Canon</th><th>Estado</th></tr></thead>'
     + '<tbody>';
 
-  for (var i = 0; i < data.solicitudes.length; i++) {
-    var s = data.solicitudes[i];
+  if (solicitudesFiltradas.length === 0) {
+    html += '<tr><td colspan="6" style="text-align:center; color:var(--color-mono-500); padding:var(--space-6);">No hay solicitudes con este estado.</td></tr>';
+  }
+
+  for (var i = 0; i < solicitudesFiltradas.length; i++) {
+    var s = solicitudesFiltradas[i];
     html += '<tr>'
       + '<td style="text-align:center; color:var(--color-mono-500);">' + (i + 1) + '</td>'
       + '<td><strong>' + s.arrendatario + '</strong><br><small style="color:var(--color-mono-500);">' + s.destino + '</small></td>'

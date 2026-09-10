@@ -58,6 +58,35 @@ function api_obtenerResumenDashboard() {
 }
 
 /**
+ * Retorna TODAS las solicitudes individuales (con su ID de lote) del equipo
+ * visible, en una sola lectura de Sheets cacheada (mismo patrón que
+ * api_obtenerTodosLosLotes). El frontend la pide UNA vez, la guarda en
+ * CacheManager y filtra localmente por estado en cada clic de tarjeta —
+ * así un dashboard con varias tarjetas clicables no dispara una lectura de
+ * la hoja por cada una.
+ * @returns {Array}
+ * @sheets_read 0-1
+ * @sheets_write 0
+ */
+function api_obtenerTodasLasSolicitudes() {
+  try {
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
+    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    var cacheKey = 'SOLICITUDES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+
+    var cached = CacheWrapper_getJSON(cacheKey);
+    if (cached) return cached;
+
+    var datos = obtenerTodasLasSolicitudes(emailsEquipo);
+    CacheWrapper_putJSON(cacheKey, datos, 60);
+    return datos;
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerTodasLasSolicitudes', e.message);
+    return [];
+  }
+}
+
+/**
  * Retorna los lotes del usuario logueado (paginado).
  * Usa getEmailsEquipoVisible para determinar la visibilidad jerárquica:
  * - null → muestra TODOS los lotes (ADMIN, ASESOR)
@@ -188,31 +217,31 @@ function api_obtenerUsuariosDashboard() {
 }
 
 /**
- * Retorna la lista de usuarios registrados, filtrada según la vista jerárquica del solicitante.
- * Accesible por DIRECTOR, GERENTE, ADMIN (y LIDER como alias de transición).
- * - ADMIN/ASESOR → todos los usuarios (sin filtro)
- * - DIRECTOR/GERENTE → solo usuarios de su equipo visible
+ * Retorna la lista completa de usuarios registrados, para el panel de gestión de Usuarios.
+ * Accesible únicamente por ADMIN/ASESOR — la gestión de usuarios (crear/editar roles,
+ * incluida la asignación de ADMIN) no se delega a DIRECTOR/GERENTE.
+ * Incluye "nombre" derivado del email (no existe columna NOMBRE en la hoja).
  * @returns {Array} Lista de usuarios
  * @sheets_read 1
  * @sheets_write 0
  */
 function api_obtenerUsuarios() {
   try {
-    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    verificarRol(['ADMIN', 'ASESOR']);
     var todos = UsuariosRepo_leerTodos();
-    var emailsVisibles = getEmailsEquipoVisible(usuario.email);
-
-    // null = acceso total (ADMIN/ASESOR)
-    if (emailsVisibles === null) {
-      return todos;
-    }
-
-    // Filtrar por emails del equipo visible
     var resultado = [];
     for (var i = 0; i < todos.length; i++) {
-      if (emailsVisibles.indexOf(todos[i].email) !== -1) {
-        resultado.push(todos[i]);
-      }
+      var u = todos[i];
+      resultado.push({
+        email: u.email,
+        nombre: emailANombre(u.email, 'COMPLETO'),
+        rol: u.rol,
+        activo: u.activo,
+        cupo: u.cupo,
+        emailDirector: u.emailDirector,
+        emailGerente: u.emailGerente,
+        emailsAlternos: u.emailsAlternos
+      });
     }
     return resultado;
   } catch (e) {
@@ -223,7 +252,7 @@ function api_obtenerUsuarios() {
 
 /**
  * Crea o actualiza un usuario en la pestaña USUARIOS (esquema v2 de 7 columnas).
- * Accesible por DIRECTOR, GERENTE, ADMIN (y LIDER como alias de transición).
+ * Accesible únicamente por ADMIN/ASESOR — ver nota en api_obtenerUsuarios.
  * Usa UsuariosRepo_guardar que valida ROL contra enum y unicidad de email.
  * @param {Object} datos - {email, rol, activo, cupo, emailDirector, emailGerente, emailsAlternos}
  * @param {boolean} esNuevo - true = crear, false = actualizar
@@ -233,7 +262,7 @@ function api_obtenerUsuarios() {
  */
 function api_guardarUsuario(datos, esNuevo) {
   try {
-    verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER']);
+    verificarRol(['ADMIN', 'ASESOR']);
 
     if (!datos || !datos.email || !datos.rol) {
       return { ok: false, mensaje: 'Email y rol son obligatorios.' };
