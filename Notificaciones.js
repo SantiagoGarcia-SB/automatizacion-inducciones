@@ -9,69 +9,6 @@ const BCC_AUDITORIA = PropertiesService.getScriptProperties().getProperty('BCC_A
 
 
 // ============================================================
-//  FUNCIÓN CANÓNICA DE ESCALAMIENTO PROGRESIVO
-//  Determina nivel, emoji y mensaje según días transcurridos.
-//  Reemplaza la lógica duplicada en enviarRecordatoriosPazYSalvoDiario
-//  y enviarRecordatoriosErrorTercerosDiario.
-// ============================================================
-
-/**
- * Determina el nivel de escalamiento basado en días transcurridos.
- * Función canónica reutilizable para todas las notificaciones con
- * escalamiento progresivo (paz y salvo, error en terceros, etc.).
- *
- * @param {number} diasTranscurridos — Días desde último aviso o ingreso (entero no negativo)
- * @returns {{nivel: string, emoji: string, mensajeExtra: string}}
- *   nivel: "normal"|"recordatorio"|"elevado"|"urgente"|"critico"
- *   emoji: Emoji para el asunto del correo
- *   mensajeExtra: HTML adicional según umbral alcanzado
- */
-function calcularEscalamiento(diasTranscurridos) {
-  var dias = typeof diasTranscurridos === "number" ? Math.floor(diasTranscurridos) : 0;
-  if (dias < 0) dias = 0;
-
-  if (dias >= 21) {
-    return {
-      nivel: "critico",
-      emoji: "🚨",
-      mensajeExtra: '<br><br><strong style="color:#BD0F14;">⚠️ ALERTA CR&Iacute;TICA:</strong> Este lote lleva m&aacute;s de 21 d&iacute;as sin respuesta. Se requiere acci&oacute;n inmediata para evitar el cierre del tr&aacute;mite.'
-    };
-  }
-
-  if (dias >= 14) {
-    return {
-      nivel: "urgente",
-      emoji: "⚠️",
-      mensajeExtra: '<br><br><strong style="color:#E65100;">Atenci&oacute;n:</strong> Este lote lleva m&aacute;s de 14 d&iacute;as en espera. Por favor priorizar el env&iacute;o del documento.'
-    };
-  }
-
-  if (dias >= 7) {
-    return {
-      nivel: "elevado",
-      emoji: "📌",
-      mensajeExtra: '<br><br><strong style="color:#253150;">Nota:</strong> Este lote supera los 7 d&iacute;as sin respuesta. El equipo de inducciones est&aacute; monitoreando.'
-    };
-  }
-
-  if (dias >= 3) {
-    return {
-      nivel: "recordatorio",
-      emoji: "🔔",
-      mensajeExtra: ""
-    };
-  }
-
-  // dias < 3: nivel normal, sin escalamiento
-  return {
-    nivel: "normal",
-    emoji: "",
-    mensajeExtra: ""
-  };
-}
-
-
-// ============================================================
 //  RESOLUCIÓN DE EMAIL POR LOTE (mapa pre-cargado)
 //  Función canónica reutilizable por todas las notificaciones.
 //  Validates: Requirements 3.1, 3.5
@@ -169,7 +106,6 @@ function ejecutarRecordatoriosDiarios() {
   for (var j = 1; j < dataCG.length; j++) {
     var idLote = String(dataCG[j][0]).trim();
     var estado = String(dataCG[j][9]).trim().toUpperCase();
-    var fIngreso = dataCG[j][2];
     var fAviso = dataCG[j][60]; // Columna BI (índice 60)
 
     if (!idLote) continue;
@@ -184,29 +120,36 @@ function ejecutarRecordatoriosDiarios() {
     if (!destino) continue;
 
     if (!destino[idLote]) {
-      var fechaRef = (fAviso instanceof Date && !isNaN(fAviso)) ? fAviso : fIngreso;
-      if (!(fechaRef instanceof Date) && typeof fechaRef === "string") {
-        var partes = fechaRef.split(/[/ -]/);
-        if (partes.length >= 3) {
-          fechaRef = new Date(partes[2], partes[1] - 1, partes[0]);
-        }
-      }
-
-      destino[idLote] = {
-        timestamp: (fechaRef instanceof Date && !isNaN(fechaRef)) ? new Date(fechaRef).setHours(0, 0, 0, 0) : null,
-        filas: []
-      };
+      destino[idLote] = { timestamp: null, filas: [] };
     }
+
+    if (fAviso instanceof Date && !isNaN(fAviso)) {
+      var timestampAviso = new Date(fAviso).setHours(0, 0, 0, 0);
+      if (destino[idLote].timestamp === null || timestampAviso > destino[idLote].timestamp) {
+        destino[idLote].timestamp = timestampAviso;
+      }
+    }
+
     destino[idLote].filas.push(j + 1); // fila 1-based en la hoja
   }
 
-  // ── 5. Calcular total de emails y verificar cuota ──
+  // ── 5. Calcular correos pendientes para hoy y verificar cuota ──
   var lotesPSIds = Object.keys(lotesPazYSalvo);
   var lotesETIds = Object.keys(lotesErrorTerceros);
-  var totalEmailsRequeridos = lotesPSIds.length + lotesETIds.length;
+  var totalEmailsRequeridos = 0;
+  var lotesPendientesCuota = [lotesPazYSalvo, lotesErrorTerceros];
+  for (var grupo = 0; grupo < lotesPendientesCuota.length; grupo++) {
+    var ids = Object.keys(lotesPendientesCuota[grupo]);
+    for (var l = 0; l < ids.length; l++) {
+      var timestampUltimoAviso = lotesPendientesCuota[grupo][ids[l]].timestamp;
+      if (timestampUltimoAviso === null || timestampUltimoAviso < hoy.getTime()) {
+        totalEmailsRequeridos++;
+      }
+    }
+  }
 
   if (totalEmailsRequeridos === 0) {
-    return; // Nada que enviar
+    return; // Todos los pendientes ya recibieron su recordatorio hoy
   }
 
   var cuotaRestante = MailApp.getRemainingDailyQuota();
@@ -245,22 +188,13 @@ function _procesarRecordatoriosEnLote_(sheetCG, lotesMapa, mapaLoteEmail, hoy, t
     if (!lotesMapa.hasOwnProperty(idLote)) continue;
 
     var lote = lotesMapa[idLote];
-    if (!lote.timestamp) continue;
-
-    var diffDias = Math.floor((hoy.getTime() - lote.timestamp) / (1000 * 60 * 60 * 24));
-    if (diffDias < 3) continue;
+    if (lote.timestamp !== null && lote.timestamp >= hoy.getTime()) continue;
 
     // ── Resolver email del comercial ──
     var emailReal = resolverEmailPorLote(mapaLoteEmail, idLote);
     if (!emailReal) continue;
 
-    // ── Calcular escalamiento ──
-    var escalamiento = calcularEscalamiento(diffDias);
-    var nivelEscalamiento = escalamiento.nivel;
-    var asuntoEmoji = escalamiento.emoji;
-    var mensajeExtra = escalamiento.mensajeExtra;
-
-    // ── Construir email ──
+    // ── Construir recordatorio diario ──
     var nombreComercial = emailANombre(emailReal, "PRIMER_NOMBRE") || "Ejecutivo Comercial";
     var cadenaJerarquica = obtenerCadenaJerarquica(emailReal);
     var ccs = [];
@@ -270,55 +204,29 @@ function _procesarRecordatoriosEnLote_(sheetCG, lotesMapa, mapaLoteEmail, hoy, t
       }
     }
     var ccsStr = ccs.filter(function(c) { return c && c.length > 0; }).join(",");
+    var descripcionPendiente = esPazYSalvo
+      ? 'el soporte de Paz y Salvo correspondiente'
+      : 'la informaci&oacute;n o los soportes necesarios para subsanar la novedad reportada en terceros';
 
-    var barraColor = diffDias >= 14 ? _C_ROJO : _C_GRIS;
-    var htmlBody;
-
-    if (esPazYSalvo) {
-      htmlBody = _envolver_([
-        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci\u00f3n urgente" : "Recordatorio"),
-        _bloque_barra_estado_(barraColor, "&#128260;", "Pendiente hace " + diffDias + " d\u00edas"),
-        _bloque_cuerpo_inicio_(
-          "Hola, " + nombreComercial,
-          "El lote <strong>" + idLote + "</strong> est&aacute; a la espera del soporte de Paz y Salvo para ser aprobado." + mensajeExtra
-        ),
-        _bloque_chips_([
-          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
-          { label: "D&iacute;as de espera", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
-        ]),
-        _bloque_nota_(
-          '<strong style="color:#253150;">C&oacute;mo enviar el soporte:</strong> ' +
-          'Responde a este correo usando <strong>"Responder a todos"</strong> y adjunta ' +
-          'el documento de Paz y Salvo. El equipo de inducciones lo gestionar&aacute; de inmediato.'
-        ),
-        _bloque_pie_()
-      ].join(""));
-    } else {
-      htmlBody = _envolver_([
-        _bloque_cabecera_(nivelEscalamiento === "critico" ? "Acci\u00f3n urgente" : "Recordatorio"),
-        _bloque_barra_estado_(barraColor, "&#9888;", "Error en terceros hace " + diffDias + " d\u00edas"),
-        _bloque_cuerpo_inicio_(
-          "Hola, " + nombreComercial,
-          "El lote <strong>" + idLote + "</strong> presenta errores en los datos de terceros que impiden continuar con el proceso de inducci&oacute;n. La operaci&oacute;n ya solicit&oacute; la correcci&oacute;n correspondiente." + mensajeExtra
-        ),
-        _bloque_chips_([
-          { label: "ID Lote", valor: idLote, colorVal: _C_ROJO },
-          { label: "D&iacute;as pendiente", valor: String(diffDias), colorVal: diffDias >= 14 ? _C_ROJO : _C_NAVY }
-        ]),
-        _bloque_nota_(
-          '<strong style="color:#253150;">Acci&oacute;n requerida:</strong> ' +
-          'Verifica y corrige los datos de terceros solicitados por el equipo de inducciones. ' +
-          'Una vez corregidos, responde a este correo usando <strong>"Responder a todos"</strong> ' +
-          'para que la operaci&oacute;n pueda continuar con el tr&aacute;mite.'
-        ),
-        _bloque_pie_()
-      ].join(""));
-    }
+    var htmlBody = _envolver_([
+      _bloque_cabecera_('Recordatorio'),
+      _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Pendiente para continuar la inducci&oacute;n'),
+      _bloque_cuerpo_inicio_(
+        'Hola, ' + nombreComercial,
+        'Esperamos que te encuentres muy bien.<br><br>'
+        + 'El proceso de inducci&oacute;n del lote <strong>' + idLote + '</strong> se encuentra temporalmente en espera, ya que a&uacute;n requerimos ' + descripcionPendiente + '.'
+        + '<br><br>Sabemos que previamente recibiste el detalle de lo requerido. Cuando lo tengas disponible, por favor responde a todos este correo para que el equipo pueda revisarlo y retomar el proceso.'
+        + '<br><br>Contar con esta informaci&oacute;n oportunamente nos permitir&aacute; continuar con la inducci&oacute;n y avanzar m&aacute;s r&aacute;pido hacia la entrega de resultados. Muchas gracias por tu apoyo.'
+      ),
+      _bloque_chips_([
+        { label: 'ID Lote', valor: idLote, colorVal: _C_ROJO },
+        { label: 'Pendiente', valor: esPazYSalvo ? 'Paz y Salvo' : 'Correcci&oacute;n de terceros', colorVal: _C_NAVY }
+      ]),
+      _bloque_pie_()
+    ].join(""));
 
     // ── Enviar email ──
-    var asuntoTipo = esPazYSalvo
-      ? (asuntoEmoji + " Paz y salvo " + (nivelEscalamiento === "critico" ? "URGENTE" : "a\u00fan pendiente") + " \u00b7 Lote " + idLote)
-      : (asuntoEmoji + " Error en terceros " + (nivelEscalamiento === "critico" ? "URGENTE" : "pendiente de correcci\u00f3n") + " \u00b7 Lote " + idLote);
+    var asuntoTipo = '⚠️ Recordatorio: pendiente para continuar la inducción · Lote ' + idLote;
 
     try {
       MailApp.sendEmail({

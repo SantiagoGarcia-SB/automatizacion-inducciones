@@ -9,32 +9,33 @@
  */
 
 /**
- * Notifica al comercial que una solicitud tiene error en terceros.
+ * Notifica al comercial que una solicitud tiene una novedad en terceros.
  * @param {string} uuid - UUID de la solicitud
  * @param {string} arrendatario - Nombre del arrendatario
  * @param {string} idLote - ID del lote
  * @param {string} emailComercial - Email del comercial
+ * @returns {boolean} true si el correo se envió correctamente.
  */
 function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
   if (!NotificationConfig_estaActiva('error_terceros')) {
     NotificationConfig_registrarSupresion('error_terceros');
-    return;
+    return false;
   }
-  if (!emailComercial || emailComercial.indexOf('@') === -1) return;
+  if (!emailComercial || emailComercial.indexOf('@') === -1) return false;
 
   var nombre = emailComercial.split('@')[0].split('.')[0];
   nombre = nombre.charAt(0).toUpperCase() + nombre.slice(1);
 
   var urlApp = ScriptApp.getService().getUrl() + '?v=2';
   var htmlBody = _envolver_([
-    _bloque_cabecera_('Acción requerida'),
-    _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Necesitamos tu ayuda'),
+    _bloque_cabecera_('Pendiente para continuar la inducción'),
+    _bloque_barra_estado_(_C_ROJO, '&#9888;', 'Necesitamos tu apoyo'),
     _bloque_cuerpo_inicio_(
       'Hola, ' + nombre,
-      'Encontramos un detalle que necesita corrección para la solicitud de <strong>' + arrendatario + '</strong> del lote <strong>' + idLote + '</strong>. Ingresa al aplicativo para ver qué necesitamos y enviar la información.'
+      'Encontramos un detalle que requiere correcci&oacute;n para la solicitud de <strong>' + arrendatario + '</strong> del lote <strong>' + idLote + '</strong>. Para continuar con el proceso de inducci&oacute;n, por favor responde a todos este correo con la informaci&oacute;n o los soportes solicitados.'
     ),
-    _bloque_boton_('Ver detalle y responder', urlApp),
-    _bloque_nota_('Si el botón no funciona, copia este enlace en tu navegador: ' + urlApp),
+    _bloque_boton_('Ver detalle solicitado', urlApp),
+    _bloque_nota_('Contar con esta informaci&oacute;n oportunamente nos permitir&aacute; retomar el proceso y avanzar m&aacute;s r&aacute;pido hacia la entrega de resultados.'),
     _bloque_pie_()
   ].join(''));
 
@@ -42,10 +43,12 @@ function notificarErrorAlComercial(uuid, arrendatario, idLote, emailComercial) {
     to: emailComercial,
     cc: obtenerCadenaJerarquica(emailComercial).join(','),
     bcc: BCC_AUDITORIA,
-    subject: '⚠️ Necesitamos tu ayuda · ' + arrendatario,
+    subject: '⚠️ Pendiente para continuar la inducción · ' + arrendatario,
     htmlBody: htmlBody,
     name: 'Inducciones · El Libertador'
   });
+
+  return true;
 }
 
 /**

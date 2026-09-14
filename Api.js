@@ -34,10 +34,10 @@ function api_obtenerUsuarioActual() {
  * @sheets_read 0-2
  * @sheets_write 0
  */
-function api_obtenerResumenDashboard() {
+function api_obtenerResumenDashboard(alcance) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
-    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
     // emailsEquipo === null → sin filtro (acceso total)
     // emailsEquipo es array → filtrar por esos emails
     var cacheKey = 'RESUMEN_' + _hashEquipoVisible(emailsEquipo);
@@ -68,11 +68,11 @@ function api_obtenerResumenDashboard() {
  * @sheets_read 0-1
  * @sheets_write 0
  */
-function api_obtenerTodasLasSolicitudes() {
+function api_obtenerTodasLasSolicitudes(alcance) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
-    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
-    var cacheKey = 'SOLICITUDES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
+    var cacheKey = 'SOLICITUDES_' + _hashEquipoVisible(emailsEquipo);
 
     var cached = CacheWrapper_getJSON(cacheKey);
     if (cached) return cached;
@@ -101,10 +101,10 @@ function api_obtenerTodasLasSolicitudes() {
  * @sheets_read 1-2
  * @sheets_write 0
  */
-function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta) {
+function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta, alcance) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
-    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
     // emailsEquipo === null → sin filtro (acceso total)
     // emailsEquipo es array → filtrar por esos emails
     return obtenerLotesDeComercial(emailsEquipo, pagina, porPagina, filtroEstado, busquedaId, fechaDesde, fechaHasta);
@@ -121,10 +121,19 @@ function api_obtenerMisLotes(pagina, porPagina, filtroEstado, busquedaId, fechaD
  * @sheets_read 1-2
  * @sheets_write 0
  */
-function api_obtenerDetalleLote(idLote) {
+function api_obtenerDetalleLote(idLote, alcance) {
   try {
-    verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
-    return obtenerDetalleLote(idLote);
+    var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
+    var detalle = obtenerDetalleLote(idLote);
+    if (!detalle.lote || emailsEquipo === null) return detalle;
+
+    var nombresPermitidos = _resolverNombresFiltro(emailsEquipo);
+    var comercial = String(detalle.lote.comercial || '').trim().toUpperCase();
+    if (!nombresPermitidos || nombresPermitidos.indexOf(comercial) === -1) {
+      throw new Error('RECURSO_NO_AUTORIZADO');
+    }
+    return detalle;
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDetalleLote', e.message);
     return { lote: null, solicitudes: [] };
@@ -140,13 +149,13 @@ function api_obtenerDetalleLote(idLote) {
  * @sheets_read 0-2
  * @sheets_write 0
  */
-function api_obtenerTodosLosLotes() {
+function api_obtenerTodosLosLotes(alcance) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'LIDER', 'DIRECTOR', 'GERENTE', 'ADMIN', 'ASESOR']);
-    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
     // null → acceso total (ADMIN/ASESOR), array → filtrar por esos emails
     var filtroEmail = emailsEquipo === null ? null : emailsEquipo;
-    var cacheKey = 'LOTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+    var cacheKey = 'LOTES_' + _hashEquipoVisible(emailsEquipo);
 
     // Intentar cache primero (CacheWrapper maneja fragmentación automáticamente)
     var cached = CacheWrapper_getJSON(cacheKey);
@@ -177,39 +186,12 @@ function api_obtenerTodosLosLotes() {
  * @sheets_read 1
  * @sheets_write 0
  */
-function api_obtenerUsuariosDashboard() {
+function api_obtenerUsuariosDashboard(alcance) {
   try {
     var usuario = verificarRol(['GERENTE', 'DIRECTOR', 'ADMIN', 'ASESOR', 'LIDER']);
     var todos = UsuariosRepo_leerTodos();
-    var emailsVisibles = getEmailsEquipoVisible(usuario.email);
-
-    var usuariosFiltrados = todos;
-
-    // Si emailsVisibles !== null, filtrar por equipo visible
-    if (emailsVisibles !== null) {
-      usuariosFiltrados = [];
-      for (var i = 0; i < todos.length; i++) {
-        if (emailsVisibles.indexOf(todos[i].email) !== -1) {
-          usuariosFiltrados.push(todos[i]);
-        }
-      }
-    }
-
-    // Mapear a campos mínimos (sin cupo, sin emailsAlternos)
-    var resultado = [];
-    for (var j = 0; j < usuariosFiltrados.length; j++) {
-      var u = usuariosFiltrados[j];
-      resultado.push({
-        email: u.email,
-        nombre: emailANombre(u.email, 'COMPLETO'),
-        rol: u.rol,
-        emailDirector: u.emailDirector || '',
-        emailGerente: u.emailGerente || '',
-        activo: u.activo
-      });
-    }
-
-    return resultado;
+    var emailsVisibles = _resolverEmailsAlcanceUsuario_(usuario, alcance);
+    return _mapearUsuariosDashboardPorAlcance_(todos, emailsVisibles);
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerUsuariosDashboard', e.message);
     return [];
@@ -523,12 +505,12 @@ function api_guardarEvaluacion(filaNum, datos, finalizar) {
  * @sheets_read 1 (0 en cache-hit)
  * @sheets_write 0
  */
-function api_obtenerMisErroresPendientes() {
+function api_obtenerMisErroresPendientes(alcance) {
   try {
     var usuario = verificarRol(['COMERCIAL', 'CONSULTOR', 'AUXILIAR', 'ANALISTA', 'DIRECTOR', 'GERENTE', 'ASESOR', 'ADMIN']);
-    var emailsEquipo = getEmailsEquipoVisible(usuario.email);
+    var emailsEquipo = _resolverEmailsAlcanceUsuario_(usuario, alcance);
     // null → sin filtro (ADMIN/ASESOR); array → filtrar por equipo visible
-    var cacheKey = 'ERRORES_PENDIENTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+    var cacheKey = 'ERRORES_PENDIENTES_' + _hashEquipoVisible(emailsEquipo);
     var cached = CacheWrapper_getJSON(cacheKey);
     if (cached) return cached;
 
@@ -846,20 +828,23 @@ function _eliminarMotivo(id) {
  * @sheets_read 0-4 (dependiendo de hits de cache)
  * @sheets_write 0
  */
-function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
+function api_obtenerDatosMetricas(fechaDesde, fechaHasta, alcance) {
   try {
     var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER', 'ASESOR']);
+    var emailsAlcance = _resolverEmailsAlcanceUsuario_(usuario, alcance);
+    var opcionesAlcance = (String(usuario.rol || '').toUpperCase() === 'DIRECTOR')
+      ? UsuariosRepo_getOpcionesAlcanceDirector(usuario.email)
+      : [];
 
     // ── 1. Usuarios para drill-down filters ──
     var usuarios = [];
     try {
       var todos = UsuariosRepo_leerTodos();
-      var emailsVisibles = getEmailsEquipoVisible(usuario.email);
       var usuariosFiltrados = todos;
-      if (emailsVisibles !== null) {
+      if (emailsAlcance !== null) {
         usuariosFiltrados = [];
         for (var i = 0; i < todos.length; i++) {
-          if (emailsVisibles.indexOf(todos[i].email) !== -1) {
+          if (emailsAlcance.indexOf(todos[i].email) !== -1) {
             usuariosFiltrados.push(todos[i]);
           }
         }
@@ -882,9 +867,8 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
     // ── 2. Lotes para gráficos de ranking/antigüedad/tendencia ──
     var lotes = [];
     try {
-      var emailsEquipo = getEmailsEquipoVisible(usuario.email);
-      var filtroEmail = emailsEquipo === null ? null : emailsEquipo;
-      var cacheKeyLotes = 'LOTES_' + (emailsEquipo === null ? 'GLOBAL' : usuario.email);
+      var filtroEmail = emailsAlcance === null ? null : emailsAlcance;
+      var cacheKeyLotes = 'LOTES_' + _hashEquipoVisible(emailsAlcance);
       var cachedLotes = CacheWrapper_getJSON(cacheKeyLotes);
       if (cachedLotes) {
         lotes = cachedLotes;
@@ -987,16 +971,19 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta) {
       _registrarEvento_('WARN', 'Api.js', 'api_obtenerDatosMetricas.desglose', e.message);
     }
 
+    metricasLotes = _filtrarMetricasPorLotesAutorizados_(metricasLotes, lotes);
+
     return {
       usuarios: usuarios,
       lotes: lotes,
+      opcionesAlcance: opcionesAlcance,
       metricasLotes: metricasLotes,
       historico: historico,
       desglose: desglose
     };
   } catch (e) {
     _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDatosMetricas', e.message);
-    return { usuarios: [], lotes: [], metricasLotes: _metricasLotesVacias(), historico: [], desglose: { desglose: {}, detalle: [] } };
+    return { usuarios: [], lotes: [], opcionesAlcance: [], metricasLotes: _metricasLotesVacias(), historico: [], desglose: { desglose: {}, detalle: [] } };
   }
 }
 
@@ -1175,4 +1162,69 @@ function api_enviarResultadosLote() {
     _registrarEvento_('ERROR', 'Api.js', 'api_enviarResultadosLote', e.message);
     return { ok: false, mensaje: 'Error al procesar el envío de resultados.' };
   }
+}
+/**
+ * Obtiene los correos autorizados para el alcance solicitado por el usuario.
+ * @param {{email:string,rol:string}} usuario - Sesión autorizada.
+ * @param {{tipo:string,directorEmail?:string}|null|undefined} alcance - Alcance solicitado por la interfaz.
+ * @returns {string[]|null} Correos visibles o null para acceso global.
+ * @private
+ */
+function _resolverEmailsAlcanceUsuario_(usuario, alcance) {
+  return getEmailsEquipoVisibleConAlcance(usuario, alcance);
+}
+
+/**
+ * Filtra usuarios por el alcance ya autorizado, sin exponer campos sensibles.
+ * @param {Array<UsuarioRecord>} usuarios - Usuarios registrados.
+ * @param {string[]|null} emailsVisibles - Correos permitidos.
+ * @returns {Array<Object>} Usuarios para el dashboard.
+ * @private
+ */
+function _mapearUsuariosDashboardPorAlcance_(usuarios, emailsVisibles) {
+  var resultado = [];
+  for (var i = 0; i < usuarios.length; i++) {
+    var usuario = usuarios[i];
+    if (emailsVisibles !== null && emailsVisibles.indexOf(usuario.email) === -1) continue;
+    resultado.push({
+      email: usuario.email,
+      nombre: emailANombre(usuario.email, 'COMPLETO'),
+      rol: usuario.rol,
+      emailDirector: usuario.emailDirector || '',
+      emailGerente: usuario.emailGerente || '',
+      activo: usuario.activo
+    });
+  }
+  return resultado;
+}
+/**
+ * Reduce el detalle de métricas a los lotes que ya fueron autorizados para el usuario.
+ * @param {{resumen:Object,detallePorLote:Array,sucursales?:string[]}} metricas - Métricas calculadas.
+ * @param {Array<{idLote:string}>} lotesAutorizados - Lotes visibles para el alcance.
+ * @returns {{resumen:Object,detallePorLote:Array,sucursales?:string[]}} Métricas sin lotes ajenos.
+ * @private
+ */
+function _filtrarMetricasPorLotesAutorizados_(metricas, lotesAutorizados) {
+  if (!metricas || !Array.isArray(metricas.detallePorLote)) return metricas;
+
+  var idsAutorizados = {};
+  for (var i = 0; i < lotesAutorizados.length; i++) {
+    var idLote = String(lotesAutorizados[i].idLote || '').toUpperCase().trim();
+    if (idLote) idsAutorizados[idLote] = true;
+  }
+
+  var detalleFiltrado = [];
+  var sucursales = {};
+  for (var j = 0; j < metricas.detallePorLote.length; j++) {
+    var detalle = metricas.detallePorLote[j];
+    var codigoLote = String(detalle.codigoLote || '').toUpperCase().trim();
+    if (!idsAutorizados[codigoLote]) continue;
+    detalleFiltrado.push(detalle);
+    var sucursal = String(detalle.sucursal || '').trim();
+    if (sucursal) sucursales[sucursal] = true;
+  }
+
+  metricas.detallePorLote = detalleFiltrado;
+  if (Array.isArray(metricas.sucursales)) metricas.sucursales = Object.keys(sucursales).sort();
+  return metricas;
 }

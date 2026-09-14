@@ -443,3 +443,27 @@ function getEmailsEquipoVisible(email) {
 
   return resultado;
 }
+/**
+ * Resuelve el alcance de datos del usuario autenticado. Los Directores pueden
+ * ampliar temporalmente su consulta a equipos de su misma gerencia; los demás
+ * roles conservan el alcance jerárquico existente.
+ *
+ * @param {{email:string,rol:string}} usuario - Sesión autorizada.
+ * @param {{tipo:string,directorEmail?:string}|null|undefined} alcance - Alcance solicitado.
+ * @returns {string[]|null} Correos visibles o null para acceso global.
+ * @throws {Error} ALCANCE_INVALIDO si un alcance no está autorizado.
+ */
+function getEmailsEquipoVisibleConAlcance(usuario, alcance) {
+  var tipoAlcance = alcance && typeof alcance === 'object' ? String(alcance.tipo || '').toUpperCase().trim() : '';
+  if (!tipoAlcance) {
+    return getEmailsEquipoVisible(usuario.email);
+  }
+
+  var rol = String(usuario.rol || '').toUpperCase().trim();
+  if (rol === 'LIDER') rol = 'DIRECTOR';
+  if (rol !== 'DIRECTOR') {
+    throw new Error('ALCANCE_INVALIDO');
+  }
+
+  return UsuariosRepo_resolverAlcanceDirector(usuario.email, alcance);
+}

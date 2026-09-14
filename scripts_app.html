@@ -8,6 +8,29 @@
 /** Datos del usuario logueado (se llenan al iniciar) */
 var APP_USUARIO = null;
 
+/** Alcance de consulta elegido por un Director; null conserva el equipo propio. */
+var APP_ALCANCE = null;
+
+/**
+ * Actualiza el alcance de consulta y descarta datos que pertenecían al alcance anterior.
+ * @param {{tipo:string,directorEmail?:string}|null} alcance - Alcance autorizado por el servidor.
+ */
+function actualizarAlcanceDirector(alcance) {
+  APP_ALCANCE = alcance || null;
+  CacheManager.invalidar([
+    'dashboard',
+    'lotes',
+    'solicitudes-todas',
+    'usuarios-dash',
+    'errores',
+    'metricas-lotes',
+    'metricas-lotes-rango',
+    'metricas-lotes-ref'
+  ]);
+  _prefetchLotesPromise = null;
+  _prefetchSolicitudesPromise = null;
+}
+
 /**
  * CacheManager — Almacén en memoria de sesión con invalidación selectiva.
  * Persiste SOLO durante la sesión del navegador (no usa localStorage).
@@ -445,7 +468,7 @@ function inicializarApp() {
   if (CacheManager.get('dashboard')) {
     promesaResumen = Promise.resolve(CacheManager.get('dashboard'));
   } else {
-    promesaResumen = callServer('api_obtenerResumenDashboard').then(function(r) {
+    promesaResumen = callServer('api_obtenerResumenDashboard', APP_ALCANCE).then(function(r) {
       CacheManager.set('dashboard', r);
       return r;
     });
@@ -489,10 +512,11 @@ function inicializarApp() {
     var fechaDesde = _formatearFechaISOUtil(primerDia);
     var fechaHasta = _formatearFechaISOUtil(hoy);
 
-    callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta)
+    callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta, APP_ALCANCE)
       .then(function(datos) {
         if (datos.usuarios) CacheManager.set('usuarios-dash', datos.usuarios);
         if (datos.lotes) CacheManager.set('lotes', datos.lotes);
+        if (datos.opcionesAlcance) CacheManager.set('opciones-alcance-director', datos.opcionesAlcance);
         if (datos.metricasLotes) {
           CacheManager.set('metricas-lotes', datos.metricasLotes);
           CacheManager.set('metricas-lotes-rango', { fechaDesde: fechaDesde, fechaHasta: fechaHasta });
@@ -527,7 +551,7 @@ function _formatearFechaISOUtil(fecha) {
 var _prefetchLotesPromise = null;
 
 function _prefetchLotesEnBackground() {
-  _prefetchLotesPromise = callServer('api_obtenerTodosLosLotes')
+  _prefetchLotesPromise = callServer('api_obtenerTodosLosLotes', APP_ALCANCE)
     .then(function(datos) {
       _prefetchLotesPromise = null;
       if (datos && !CacheManager.get('lotes')) {
@@ -554,7 +578,7 @@ var _prefetchSolicitudesPromise = null;
 
 function _prefetchSolicitudesEnBackground() {
   if (CacheManager.get('solicitudes-todas') || _prefetchSolicitudesPromise) return;
-  _prefetchSolicitudesPromise = callServer('api_obtenerTodasLasSolicitudes')
+  _prefetchSolicitudesPromise = callServer('api_obtenerTodasLasSolicitudes', APP_ALCANCE)
     .then(function(datos) {
       _prefetchSolicitudesPromise = null;
       if (datos && !CacheManager.get('solicitudes-todas')) {
@@ -638,7 +662,7 @@ var _HOVER_PREFETCH = {
   },
   'errores': function() {
     if (CacheManager.get('errores')) return;
-    return callServer('api_obtenerMisErroresPendientes').then(function(d) {
+    return callServer('api_obtenerMisErroresPendientes', APP_ALCANCE).then(function(d) {
       CacheManager.set('errores', d || []);
     }).catch(function() { /* silencioso — se reintenta al navegar */ });
   },
@@ -758,7 +782,7 @@ function _cargarUsuariosDash(callback) {
   }
 
   var navIdLocal = _navId;
-  callServer('api_obtenerUsuariosDashboard')
+  callServer('api_obtenerUsuariosDashboard', APP_ALCANCE)
     .then(function(datos) {
       if (!_sigueVigente(navIdLocal)) return;
       CacheManager.set('usuarios-dash', datos || []);
@@ -791,7 +815,7 @@ function cargarDashboard() {
       + '<button class="btn btn--primary" onclick="cargarDashboard()">Reintentar</button></div>');
   }, 15000);
 
-  callServer('api_obtenerResumenDashboard')
+  callServer('api_obtenerResumenDashboard', APP_ALCANCE)
     .then(function(r) {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
@@ -987,12 +1011,18 @@ function _inicializarFiltrosYGraficos() {
     var rol = APP_USUARIO ? APP_USUARIO.rol : '';
     var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
 
-    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
+    var opcionesAlcance = CacheManager.get('opciones-alcance-director') || [];
+    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario, opcionesAlcance, APP_ALCANCE);
     filtersContainer.innerHTML = filtrosHtml;
     _actualizarVisibilidadFiltroEquipo(filtrosHtml !== '');
 
-    DrillDownFilters._onFiltroChange = function() {
+    DrillDownFilters._onFiltroChange = function(filtros) {
       if (!_sigueVigente(navIdLocal)) return;
+      if (filtros.alcanceCambiado) {
+        actualizarAlcanceDirector(filtros.alcance);
+        cargarVistaMetricasLotes();
+        return;
+      }
       _aplicarFiltroDirectorComercial(CacheManager.get('lotes'), usuarios);
     };
 
@@ -1013,7 +1043,7 @@ function _aplicarFiltroDirectorComercial(lotes, usuarios) {
   if (typeof MetricasLotesView === 'undefined' || !MetricasLotesView.aplicarFiltroComercial) return;
 
   if (!lotes) {
-    callServer('api_obtenerTodosLosLotes')
+    callServer('api_obtenerTodosLosLotes', APP_ALCANCE)
       .then(function(datos) {
         CacheManager.set('lotes', datos || []);
         _aplicarFiltroDirectorComercial(datos || [], usuarios);
@@ -1200,7 +1230,7 @@ function _verSolicitudesPorEstado(estado) {
     mostrarVista('viewDashboard');
   }, 15000);
 
-  callServer('api_obtenerTodasLasSolicitudes')
+  callServer('api_obtenerTodasLasSolicitudes', APP_ALCANCE)
     .then(function(datos) {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
@@ -1307,7 +1337,7 @@ function cargarMisLotes(pagina) {
   }, 15000);
 
   // Reutilizar prefetch en vuelo si existe (evita llamada duplicada)
-  var promesa = _prefetchLotesPromise || callServer('api_obtenerTodosLosLotes');
+  var promesa = _prefetchLotesPromise || callServer('api_obtenerTodosLosLotes', APP_ALCANCE);
 
   promesa
     .then(function(datos) {
@@ -2403,7 +2433,7 @@ function cargarVistaErroresComercial() {
       + '<button class="btn btn--primary" onclick="cargarVistaErroresComercial()">Reintentar</button></div>');
   }, 15000);
 
-  callServer('api_obtenerMisErroresPendientes')
+  callServer('api_obtenerMisErroresPendientes', APP_ALCANCE)
     .then(function(errores) {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
@@ -3327,7 +3357,7 @@ function _verDetalleLote(idLote) {
       + '<button class="btn btn--primary" onclick="_verDetalleLote(\'' + idLote + '\')">Reintentar</button></div>');
   }, 15000);
 
-  callServer('api_obtenerDetalleLote', idLote)
+  callServer('api_obtenerDetalleLote', idLote, APP_ALCANCE)
     .then(function(data) {
       clearTimeout(timeoutId);
       if (!_sigueVigente(navIdLocal)) return;
@@ -3488,13 +3518,14 @@ function cargarVistaMetricasLotes() {
   }
 
   // Llamada unificada al backend (1 solo round-trip)
-  callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta)
+  callServer('api_obtenerDatosMetricas', fechaDesde, fechaHasta, APP_ALCANCE)
     .then(function(datos) {
       if (!_sigueVigente(navIdLocal)) return;
 
       // Poblar caches para uso futuro (drill-down filter changes, etc.)
       if (datos.usuarios) CacheManager.set('usuarios-dash', datos.usuarios);
       if (datos.lotes) CacheManager.set('lotes', datos.lotes);
+      if (datos.opcionesAlcance) CacheManager.set('opciones-alcance-director', datos.opcionesAlcance);
       if (datos.metricasLotes) CacheManager.set('metricas-lotes-ref', datos.metricasLotes);
 
       _renderizarMetricasCompleta(
@@ -3603,7 +3634,8 @@ function _renderizarMetricasCompleta(usuarios, lotes, metricasLotes, historico, 
   if (filtersContainer) {
     var rol = APP_USUARIO ? APP_USUARIO.rol : '';
     var emailUsuario = APP_USUARIO ? APP_USUARIO.email : '';
-    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario);
+    var opcionesAlcance = CacheManager.get('opciones-alcance-director') || [];
+    var filtrosHtml = DrillDownFilters.render(rol, usuarios, emailUsuario, opcionesAlcance, APP_ALCANCE);
     filtersContainer.innerHTML = filtrosHtml;
     _actualizarVisibilidadFiltroEquipo(filtrosHtml !== '');
 

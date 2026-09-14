@@ -402,11 +402,11 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar, filaNum
     hojaErrores.getRange(ultimaFila + 1, 1, filasNuevas.length, 11).setValues(filasNuevas);
   }
 
-  // Notificar al comercial por correo (best-effort, lecturas para notificación excluidas del conteo de escritura)
+  // Notificar al comercial y registrar el aviso exitoso para no duplicar el recordatorio diario.
+  var notificacionEnviada = false;
   try {
     var arrendatarioNotif = String(hojaControl.getRange(fila, 24).getValue() || '');
     var idLoteNotif = String(hojaControl.getRange(fila, 1).getValue() || '');
-    // Buscar email del comercial
     var hojaLog = ss.getSheetByName('Hoja_Control');
     var emailComercial = '';
     if (hojaLog) {
@@ -415,12 +415,20 @@ function marcarErrorEnTerceros(uuid, participantes, nota, emailAuxiliar, filaNum
         if (String(dataLog[lg][5] || '').trim() === idLoteNotif) { emailComercial = String(dataLog[lg][1] || '').trim(); break; }
       }
     }
-    notificarErrorAlComercial(uuid, arrendatarioNotif, idLoteNotif, emailComercial);
+    notificacionEnviada = notificarErrorAlComercial(uuid, arrendatarioNotif, idLoteNotif, emailComercial) === true;
+    if (notificacionEnviada) {
+      hojaControl.getRange(fila, 61).setValue(new Date());
+    }
   } catch (errMail) {
-    console.warn('Notificación de error no enviada: ' + errMail.message);
+    _registrarEvento_('ERROR', 'Repositorios_ColaAuxiliarRepo.js', 'Notificación de error no enviada', errMail.message);
   }
 
-  return { ok: true, mensaje: 'Error registrado. Se notificó al comercial.' };
+  return {
+    ok: true,
+    mensaje: notificacionEnviada
+      ? 'Error registrado y correo enviado al comercial.'
+      : 'Error registrado. No fue posible enviar el correo al comercial.'
+  };
 }
 
 // ============================================================

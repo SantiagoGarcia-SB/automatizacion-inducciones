@@ -226,20 +226,21 @@ describe('ejecutarRecordatoriosDiarios', () => {
       // Should send 2 emails — one for each type
       expect(sendEmailMock).toHaveBeenCalledTimes(2);
 
-      // First call should be paz y salvo (processed first)
+      // Ambos envíos usan la misma plantilla; el detalle se conserva en el cuerpo.
       const firstCall = sendEmailMock.mock.calls[0][0];
       expect(firstCall.to).toBe('ps@empresa.com');
-      expect(firstCall.subject).toContain('Paz y salvo');
+      expect(firstCall.subject).toContain('pendiente para continuar la inducción');
+      expect(firstCall.htmlBody).toContain('Paz y Salvo');
 
-      // Second call should be error en terceros
       const secondCall = sendEmailMock.mock.calls[1][0];
       expect(secondCall.to).toBe('et@empresa.com');
-      expect(secondCall.subject).toContain('Error en terceros');
+      expect(secondCall.subject).toContain('pendiente para continuar la inducción');
+      expect(secondCall.htmlBody).toContain('Correcci&oacute;n de terceros');
     });
   });
 
-  describe('skips lotes with less than 3 days elapsed', () => {
-    it('does not send reminders for lotes with fewer than 3 days', () => {
+  describe('daily cadence per lote', () => {
+    it('sends a reminder when the last successful send was yesterday', () => {
       const oneDayAgo = new Date();
       oneDayAgo.setDate(oneDayAgo.getDate() - 1);
 
@@ -254,6 +255,31 @@ describe('ejecutarRecordatoriosDiarios', () => {
       ]);
       globalThis.__setCGLastRow(2);
 
+      getRemainingDailyQuotaMock.mockReturnValue(100);
+
+      ejecutarRecordatoriosDiarios();
+
+      expect(sendEmailMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not send a second reminder on the same day', () => {
+      var hoy = new Date();
+
+      globalThis.__setHCData([
+        ['Header', 'Email', '', '', '', 'IdLote'],
+        ['', 'avisado@empresa.com', '', '', '', 'LOTE-AVISADO']
+      ]);
+      var encabezado = new Array(61).fill('');
+      encabezado[0] = 'IdLote';
+      encabezado[9] = 'Estado';
+      encabezado[60] = 'FechaAviso';
+      var filaAvisada = new Array(61).fill('');
+      filaAvisada[0] = 'LOTE-AVISADO';
+      filaAvisada[2] = hoy;
+      filaAvisada[9] = 'PENDIENTE PAZ Y SALVO';
+      filaAvisada[60] = hoy;
+      globalThis.__setCGData([encabezado, filaAvisada]);
+      globalThis.__setCGLastRow(2);
       getRemainingDailyQuotaMock.mockReturnValue(100);
 
       ejecutarRecordatoriosDiarios();

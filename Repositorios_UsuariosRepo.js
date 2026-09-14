@@ -335,3 +335,150 @@ function UsuariosRepo_buscarPorEmail(email) {
   // 3. No encontrado
   return null;
 }
+/**
+ * Resuelve el conjunto de correos que un Director puede consultar según el alcance elegido.
+ * Solo permite el equipo propio, el equipo de un Director activo de la misma gerencia,
+ * o todos los equipos asociados a esa gerencia.
+ *
+ * @param {string} emailDirector - Email del Director autenticado.
+ * @param {{tipo:string,directorEmail?:string}|null|undefined} alcance - Alcance solicitado desde la interfaz.
+ * @returns {string[]} Correos autorizados para consultar.
+ * @throws {Error} ALCANCE_INVALIDO si el alcance no pertenece al Director autenticado.
+ */
+function UsuariosRepo_resolverAlcanceDirector(emailDirector, alcance) {
+  var emailNorm = String(emailDirector || '').toLowerCase().trim();
+  var directorAutenticado = UsuariosRepo_buscarPorEmail(emailNorm);
+  if (!directorAutenticado || !directorAutenticado.activo || directorAutenticado.rol !== 'DIRECTOR') {
+    throw new Error('ALCANCE_INVALIDO');
+  }
+
+  var alcanceNormalizado = _normalizarAlcanceDirector_(alcance);
+  var todos = UsuariosRepo_leerTodos();
+
+  if (alcanceNormalizado.tipo === 'MI_EQUIPO') {
+    return _obtenerEquipoDirector_(todos, emailNorm);
+  }
+
+  var emailGerente = String(directorAutenticado.emailGerente || '').toLowerCase().trim();
+  if (!emailGerente) {
+    throw new Error('ALCANCE_INVALIDO');
+  }
+
+  if (alcanceNormalizado.tipo === 'EQUIPO_DIRECTOR') {
+    var directorSeleccionado = UsuariosRepo_buscarPorEmail(alcanceNormalizado.directorEmail);
+    if (!directorSeleccionado || !directorSeleccionado.activo || directorSeleccionado.rol !== 'DIRECTOR' ||
+        String(directorSeleccionado.emailGerente || '').toLowerCase().trim() !== emailGerente) {
+      throw new Error('ALCANCE_INVALIDO');
+    }
+    return _obtenerEquipoDirector_(todos, directorSeleccionado.email);
+  }
+
+  var equiposGerencia = [];
+  for (var i = 0; i < todos.length; i++) {
+    var usuario = todos[i];
+    if (usuario.rol !== 'DIRECTOR' || String(usuario.emailGerente || '').toLowerCase().trim() !== emailGerente) continue;
+    equiposGerencia = equiposGerencia.concat(_obtenerEquipoDirector_(todos, usuario.email));
+  }
+  return _eliminarDuplicadosEmails_(equiposGerencia);
+}
+
+/**
+ * Retorna las opciones de alcance disponibles para un Director autenticado.
+ * @param {string} emailDirector - Email del Director autenticado.
+ * @returns {Array<{tipo:string,directorEmail?:string,nombre:string}>} Opciones autorizadas para la interfaz.
+ */
+function UsuariosRepo_getOpcionesAlcanceDirector(emailDirector) {
+  var emailNorm = String(emailDirector || '').toLowerCase().trim();
+  var directorAutenticado = UsuariosRepo_buscarPorEmail(emailNorm);
+  var opciones = [{ tipo: 'MI_EQUIPO', nombre: 'Mi equipo' }];
+
+  if (!directorAutenticado || !directorAutenticado.activo || directorAutenticado.rol !== 'DIRECTOR') {
+    return opciones;
+  }
+
+  var emailGerente = String(directorAutenticado.emailGerente || '').toLowerCase().trim();
+  if (!emailGerente) return opciones;
+
+  var todos = UsuariosRepo_leerTodos();
+  var tieneOtroDirector = false;
+  for (var i = 0; i < todos.length; i++) {
+    var usuario = todos[i];
+    if (usuario.rol !== 'DIRECTOR' || !usuario.activo || usuario.email === emailNorm) continue;
+    if (String(usuario.emailGerente || '').toLowerCase().trim() !== emailGerente) continue;
+    opciones.push({
+      tipo: 'EQUIPO_DIRECTOR',
+      directorEmail: usuario.email,
+      nombre: 'Equipo de ' + emailANombre(usuario.email, 'COMPLETO')
+    });
+    tieneOtroDirector = true;
+  }
+
+  if (tieneOtroDirector) {
+    opciones.push({ tipo: 'TODA_GERENCIA', nombre: 'Toda mi gerencia' });
+  }
+
+  return opciones;
+}
+
+/**
+ * Normaliza y valida la forma del alcance recibido desde la interfaz.
+ * @param {{tipo:string,directorEmail?:string}|null|undefined} alcance - Alcance solicitado.
+ * @returns {{tipo:string,directorEmail?:string}} Alcance normalizado.
+ * @private
+ */
+function _normalizarAlcanceDirector_(alcance) {
+  if (alcance === null || alcance === undefined) return { tipo: 'MI_EQUIPO' };
+  if (typeof alcance !== 'object' || Array.isArray(alcance)) throw new Error('ALCANCE_INVALIDO');
+
+  var claves = Object.keys(alcance).sort();
+  var tipo = String(alcance.tipo || '').toUpperCase().trim();
+  if (tipo === 'MI_EQUIPO' || tipo === 'TODA_GERENCIA') {
+    if (claves.length !== 1 || claves[0] !== 'tipo') throw new Error('ALCANCE_INVALIDO');
+    return { tipo: tipo };
+  }
+
+  if (tipo === 'EQUIPO_DIRECTOR') {
+    if (claves.length !== 2 || claves[0] !== 'directorEmail' || claves[1] !== 'tipo') throw new Error('ALCANCE_INVALIDO');
+    var directorEmail = String(alcance.directorEmail || '').toLowerCase().trim();
+    if (!directorEmail || directorEmail.indexOf('@') === -1) throw new Error('ALCANCE_INVALIDO');
+    return { tipo: tipo, directorEmail: directorEmail };
+  }
+
+  throw new Error('ALCANCE_INVALIDO');
+}
+
+/**
+ * Obtiene el Director y sus subordinados directos sin repetir correos.
+ * @param {UsuarioRecord[]} usuarios - Usuarios registrados.
+ * @param {string} emailDirector - Email del Director objetivo.
+ * @returns {string[]} Correos del equipo.
+ * @private
+ */
+function _obtenerEquipoDirector_(usuarios, emailDirector) {
+  var emailNorm = String(emailDirector || '').toLowerCase().trim();
+  var equipo = [emailNorm];
+  for (var i = 0; i < usuarios.length; i++) {
+    if (usuarios[i].emailDirector === emailNorm && usuarios[i].email !== emailNorm) {
+      equipo.push(usuarios[i].email);
+    }
+  }
+  return _eliminarDuplicadosEmails_(equipo);
+}
+
+/**
+ * Elimina correos repetidos conservando el orden de la primera aparición.
+ * @param {string[]} emails - Correos a normalizar.
+ * @returns {string[]} Correos únicos.
+ * @private
+ */
+function _eliminarDuplicadosEmails_(emails) {
+  var vistos = {};
+  var resultado = [];
+  for (var i = 0; i < emails.length; i++) {
+    var email = String(emails[i] || '').toLowerCase().trim();
+    if (!email || vistos[email]) continue;
+    vistos[email] = true;
+    resultado.push(email);
+  }
+  return resultado;
+}
