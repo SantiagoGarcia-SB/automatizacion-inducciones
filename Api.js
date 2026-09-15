@@ -1228,3 +1228,177 @@ function _filtrarMetricasPorLotesAutorizados_(metricas, lotesAutorizados) {
   if (Array.isArray(metricas.sucursales)) metricas.sucursales = Object.keys(sucursales).sort();
   return metricas;
 }
+/**
+ * Lista entregas Ley 2300 para administración, con filtros y paginación estrictos.
+ * @param {{idLote?:string,solicitud?:string,estado?:string,causaFallo?:string,soloPendientes?:boolean}} filtros Filtros permitidos.
+ * @param {number} pagina Página 1-based entre 1 y 100000.
+ * @param {number} porPagina Tamaño entre 1 y 100.
+ * @returns {{datos:Object[],total:number,pagina:number,totalPaginas:number}} Resultado seguro sin PII.
+ */
+function api_obtenerEntregasLey2300(filtros, pagina, porPagina) {
+  try {
+    verificarRol(['ADMIN']);
+    _apiLey2300_validarConsultaListado(filtros, pagina, porPagina);
+    return EntregasLey2300_listar(filtros, pagina, porPagina);
+  } catch (error) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerEntregasLey2300', 'No fue posible consultar las entregas Ley 2300.');
+    return _apiLey2300_listadoVacio();
+  }
+}
+
+/**
+ * Obtiene el detalle enmascarado e historial sanitizado de una entrega.
+ * @param {string} entregaId Identificador opaco de entrega.
+ * @returns {{entrega:Object|null,historial:Object[]}} Detalle seguro.
+ */
+function api_obtenerDetalleEntregaLey2300(entregaId) {
+  try {
+    verificarRol(['ADMIN']);
+    _apiLey2300_validarEntregaId(entregaId);
+    return EntregasLey2300_obtenerDetalle(entregaId);
+  } catch (error) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerDetalleEntregaLey2300', 'No fue posible consultar el detalle de la entrega.');
+    return { entrega: null, historial: [] };
+  }
+}
+
+/**
+ * Obtiene conteos accionables de entregas sin exponer filas ni datos de contacto.
+ * @returns {{total:number,porEstado:Object,pendientesCorreccion:number,pendientesConciliacion:number}} Resumen seguro.
+ */
+function api_obtenerResumenEntregasLey2300() {
+  try {
+    verificarRol(['ADMIN']);
+    var resumen = EntregasLey2300_obtenerResumen();
+    resumen.agenda = _apiLey2300_resumirAgendaVigente();
+    return resumen;
+  } catch (error) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerResumenEntregasLey2300', 'No fue posible consultar el resumen de entregas.');
+    return _apiLey2300_resumenVacio();
+  }
+}
+
+/**
+ * Coordina una corrección de contacto usando exclusivamente la identidad ADMIN de sesión.
+ * @param {{entregaId:string,versionEsperada:number,contacto:string}} comando Comando estricto sin actor ni contexto de fuente.
+ * @returns {{ok:boolean,mensaje:string,entrega:Object|null}} Resultado seguro de la corrección.
+ */
+function api_corregirContactoLey2300(comando) {
+  try {
+    var usuario = verificarRol(['ADMIN']);
+    _apiLey2300_validarComandoCorreccion(comando);
+    return EntregasLey2300_corregirContacto(comando, usuario.email);
+  } catch (error) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_corregirContactoLey2300', 'No fue posible procesar la corrección.');
+    return { ok: false, mensaje: 'No fue posible procesar la corrección.', entrega: null };
+  }
+}
+
+/** @param {Object} filtros Filtros del cliente. @param {number} pagina Página. @param {number} porPagina Límite. @returns {void} */
+function _apiLey2300_validarConsultaListado(filtros, pagina, porPagina) {
+  if (!_apiLey2300_esObjetoPlano(filtros) || !Number.isInteger(pagina) || pagina < 1 || pagina > 100000 ||
+      !Number.isInteger(porPagina) || porPagina < 1 || porPagina > 100) throw new Error('La solicitud no es válida.');
+  var permitidas = ['idLote', 'solicitud', 'participante', 'canal', 'estado', 'causaFallo', 'fechaDesde', 'fechaHasta', 'soloPendientes'];
+  var claves = Object.keys(filtros);
+  for (var indice = 0; indice < claves.length; indice++) {
+    var clave = claves[indice];
+    if (permitidas.indexOf(clave) === -1 || (clave === 'soloPendientes' ? typeof filtros[clave] !== 'boolean' : typeof filtros[clave] !== 'string') ||
+        (clave !== 'soloPendientes' && filtros[clave].trim().length > 128)) throw new Error('La solicitud no es válida.');
+  }
+  if (filtros.participante && ENTREGAS_LEY2300_PARTICIPANTES.indexOf(filtros.participante.trim().toUpperCase()) === -1) throw new Error('La solicitud no es válida.');
+  if (filtros.canal && ENTREGAS_LEY2300_CANALES.indexOf(filtros.canal.trim().toUpperCase()) === -1) throw new Error('La solicitud no es válida.');
+  if (filtros.estado && ENTREGAS_LEY2300_ESTADOS.indexOf(filtros.estado.trim().toUpperCase()) === -1) throw new Error('La solicitud no es válida.');
+  if (filtros.causaFallo && ENTREGAS_LEY2300_CAUSAS.indexOf(filtros.causaFallo.trim().toUpperCase()) === -1) throw new Error('La solicitud no es válida.');
+  var desde = _apiLey2300_fechaFiltro(filtros.fechaDesde);
+  var hasta = _apiLey2300_fechaFiltro(filtros.fechaHasta);
+  if (desde && hasta && desde > hasta) throw new Error('La solicitud no es válida.');
+}
+
+/** @param {string} entregaId Identificador opaco. @returns {void} */
+function _apiLey2300_validarEntregaId(entregaId) {
+  if (typeof entregaId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(entregaId)) throw new Error('La solicitud no es válida.');
+}
+
+/** @param {Object} comando Comando cliente. @returns {void} */
+function _apiLey2300_validarComandoCorreccion(comando) {
+  if (!_apiLey2300_esObjetoPlano(comando)) throw new Error('La solicitud no es válida.');
+  var claves = Object.keys(comando);
+  var permitidas = ['entregaId', 'versionEsperada', 'contacto'];
+  for (var indice = 0; indice < claves.length; indice++) if (permitidas.indexOf(claves[indice]) === -1) throw new Error('La solicitud no es válida.');
+  _apiLey2300_validarEntregaId(comando.entregaId);
+  if (!Number.isInteger(comando.versionEsperada) || comando.versionEsperada < 1 || comando.versionEsperada > 1000000 ||
+      typeof comando.contacto !== 'string' || !comando.contacto.trim() || comando.contacto.trim().length > 254) throw new Error('La solicitud no es válida.');
+}
+
+/** @param {*} valor Valor a inspeccionar. @returns {boolean} true solo para objetos literales. */
+function _apiLey2300_esObjetoPlano(valor) {
+  return !!valor && Object.prototype.toString.call(valor) === '[object Object]' &&
+    (Object.getPrototypeOf(valor) === Object.prototype || Object.getPrototypeOf(valor) === null);
+}
+
+/** @returns {{datos:Object[],total:number,pagina:number,totalPaginas:number}} Valor seguro para fallas de listado. */
+function _apiLey2300_listadoVacio() {
+  return { datos: [], total: 0, pagina: 1, totalPaginas: 0 };
+}
+
+/** @param {string=} valor Fecha yyyy-mm-dd. @returns {number} Epoch UTC o 0 si está vacía. */
+function _apiLey2300_fechaFiltro(valor) {
+  if (!valor) return 0;
+  var texto = String(valor).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(texto)) throw new Error('La solicitud no es válida.');
+  var fecha = new Date(texto + 'T00:00:00.000Z');
+  if (isNaN(fecha.getTime()) || fecha.toISOString().slice(0, 10) !== texto) throw new Error('La solicitud no es válida.');
+  return fecha.getTime();
+}
+
+/** @returns {{activa:boolean,frecuencia:string,proximaEjecucionEstimada:string,nota:string}} Agenda segura para ADMIN. */
+function _apiLey2300_resumirAgendaVigente() {
+  var vacia = { activa: false, frecuencia: 'No disponible', proximaEjecucionEstimada: '', nota: 'La estimación depende de la agenda de Apps Script.' };
+  if (typeof NotificationConfig_listar !== 'function') return vacia;
+  var politicas = NotificationConfig_listar();
+  var politica = politicas.filter(function(item) { return item && item.id === 'cumplimiento_ley_2300'; })[0];
+  if (!politica || !Array.isArray(politica.agendas) || !politica.agendas.length) return vacia;
+  var agenda = politica.agendas[0];
+  if (!Number.isInteger(agenda.hora) || !Number.isInteger(agenda.minuto) || !Number.isInteger(agenda.cadaDias)) return vacia;
+  var ultima = _apiLey2300_ultimaEjecucion();
+  var proxima = ultima ? _apiLey2300_siguienteAgenda(ultima, agenda) : null;
+  return {
+    activa: politica.activa === true,
+    frecuencia: 'Cada ' + agenda.cadaDias + ' día(s) a las ' + _apiLey2300_horaAgenda(agenda),
+    proximaEjecucionEstimada: proxima ? proxima.toISOString() : '',
+    nota: proxima ? 'Estimación basada en la última ejecución y CONFIG_NOTIFICACIONES; Apps Script puede variar la hora.' : 'Sin una ejecución registrada no se puede estimar el próximo intervalo de Apps Script.'
+  };
+}
+
+/** @param {{hora:number,minuto:number}} agenda Agenda validada. @returns {string} Hora HH:mm. */
+function _apiLey2300_horaAgenda(agenda) {
+  return ('0' + agenda.hora).slice(-2) + ':' + ('0' + agenda.minuto).slice(-2);
+}
+
+/** @returns {Date|null} Última ejecución registrada o null si no existe/está corrupta. */
+function _apiLey2300_ultimaEjecucion() {
+  if (typeof PropertiesService === 'undefined') return null;
+  try {
+    var valor = Number(PropertiesService.getScriptProperties().getProperty('LEY2300_ULTIMA_EJECUCION_MS'));
+    var fecha = new Date(valor);
+    return valor > 0 && !isNaN(fecha.getTime()) ? fecha : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+/** @param {Date} ultima Última ejecución conocida. @param {{cadaDias:number,hora:number,minuto:number}} agenda Agenda vigente. @returns {Date} Próxima fecha estimada. */
+function _apiLey2300_siguienteAgenda(ultima, agenda) {
+  var proxima = new Date(ultima.getTime());
+  proxima.setDate(proxima.getDate() + agenda.cadaDias);
+  proxima.setHours(agenda.hora, agenda.minuto, 0, 0);
+  while (proxima.getTime() <= Date.now()) proxima.setDate(proxima.getDate() + agenda.cadaDias);
+  return proxima;
+}
+
+/** @returns {{total:number,porEstado:Object,pendientesCorreccion:number,pendientesConciliacion:number,agenda:Object}} Valor seguro para fallas de resumen. */
+function _apiLey2300_resumenVacio() {
+  var porEstado = {};
+  for (var indice = 0; indice < ENTREGAS_LEY2300_ESTADOS.length; indice++) porEstado[ENTREGAS_LEY2300_ESTADOS[indice]] = 0;
+  return { total: 0, porEstado: porEstado, pendientesCorreccion: 0, pendientesConciliacion: 0, agenda: _apiLey2300_resumirAgendaVigente() };
+}

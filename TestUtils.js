@@ -158,8 +158,8 @@ function probarEnvioSmsInfobip() {
     return;
   }
 
-  var resultado = _enviarSmsInfobip(NUMERO_PRUEBA, 'Prueba', 'Inmobiliaria Test');
-  Logger.log('Resultado: ' + JSON.stringify(resultado));
+  var resultado = _enviarSmsInfobip({ celular: NUMERO_PRUEBA, nombre: 'Prueba', inmobiliaria: 'Inmobiliaria Test' });
+  Logger.log('Resultado: ' + JSON.stringify({ ok: resultado.ok, tipo: resultado.tipo, causa: resultado.causa, statusCode: resultado.statusCode }));
 }
 
 /**
@@ -211,9 +211,9 @@ function testEnvioLey2300() {
   if (CELULAR_PRUEBA.indexOf('XXX') !== -1) {
     Logger.log('\n📱 SMS: ⏭️ SALTADO (cambia CELULAR_PRUEBA por un número real)');
   } else {
-    Logger.log('\n📱 Enviando SMS a ' + CELULAR_PRUEBA + '...');
-    resultadoSms = _enviarSmsInfobip(CELULAR_PRUEBA, NOMBRE_PRUEBA, INMOBILIARIA_PRUEBA);
-    Logger.log('   ' + (resultadoSms.ok ? '✅ ' : '❌ ') + resultadoSms.mensaje);
+    Logger.log('\n📱 Enviando SMS de prueba...');
+    resultadoSms = _enviarSmsInfobip({ celular: CELULAR_PRUEBA, nombre: NOMBRE_PRUEBA, inmobiliaria: INMOBILIARIA_PRUEBA });
+    Logger.log('   ' + (resultadoSms.ok ? '✅ Aceptado' : '❌ Rechazado'));
   }
 
   // ── 3. Test EMAIL ──
@@ -221,9 +221,9 @@ function testEnvioLey2300() {
   if (!emailFrom || !templateId) {
     Logger.log('\n📧 Email: ⏭️ SALTADO (faltan INFOBIP_EMAIL_FROM o INFOBIP_EMAIL_TEMPLATE_ID)');
   } else {
-    Logger.log('\n📧 Enviando Email a ' + EMAIL_PRUEBA + '...');
-    resultadoEmail = _enviarEmailInfobip(EMAIL_PRUEBA, NOMBRE_PRUEBA, INMOBILIARIA_PRUEBA);
-    Logger.log('   ' + (resultadoEmail.ok ? '✅ ' : '❌ ') + resultadoEmail.mensaje);
+    Logger.log('\n📧 Enviando Email de prueba...');
+    resultadoEmail = _enviarEmailInfobip({ email: EMAIL_PRUEBA, nombre: NOMBRE_PRUEBA, inmobiliaria: INMOBILIARIA_PRUEBA });
+    Logger.log('   ' + (resultadoEmail.ok ? '✅ Aceptado' : '❌ Rechazado'));
     if (resultadoEmail.messageId) {
       Logger.log('   MessageId: ' + resultadoEmail.messageId);
     }
@@ -578,4 +578,159 @@ function PRUEBA_enviarResultadosLote() {
   Logger.log("  ⚠️  NO se registró en Historico_Envios");
   Logger.log("  ⚠️  NO se envió al comercial real (" + contacto.ejecutivo + ")");
   Logger.log("═══════════════════════════════════════════════");
+}
+/**
+ * Diagnóstico manual y estrictamente de lectura para Gestión de Entregas Ley 2300.
+ * No envía comunicaciones, no crea recursos y no revela PII, secretos ni identificadores.
+ * @returns {Object} Resumen sanitizado para revisión manual.
+ */
+function diagnosticarGestionEntregasLey2300() {
+  var propiedades = PropertiesService.getScriptProperties();
+  var control = _diagnosticoLey2300_abrirLibro_(getHojaControlId());
+  var analisis = _diagnosticoLey2300_abrirLibro_(getArchivoAnalisisId());
+  var resultado = _diagnosticoLey2300_construirResultado_(
+    control, analisis, _diagnosticoLey2300_propiedades_(propiedades), _diagnosticoLey2300_trigger_()
+  );
+  Logger.log('DIAGNOSTICO_LEY2300 ' + JSON.stringify(resultado));
+  return resultado;
+}
+
+/** @param {string} libroId Identificador interno del libro. @returns {{disponible:boolean,libro:Object|null}} */
+function _diagnosticoLey2300_abrirLibro_(libroId) {
+  try {
+    return { disponible: true, libro: SpreadsheetApp.openById(libroId) };
+  } catch (error) {
+    return { disponible: false, libro: null };
+  }
+}
+
+/** @param {GoogleAppsScript.Properties.Properties} propiedades Servicio de propiedades. @returns {Object} Presencia sin valores. */
+function _diagnosticoLey2300_propiedades_(propiedades) {
+  return {
+    infobipBaseUrl: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'INFOBIP_BASE_URL'),
+    infobipApiKey: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'INFOBIP_API_KEY'),
+    infobipEmailFrom: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'INFOBIP_EMAIL_FROM'),
+    infobipEmailTemplateId: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'INFOBIP_EMAIL_TEMPLATE_ID'),
+    infobipSender: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'INFOBIP_SENDER'),
+    ley2300HmacSecret: { configurada: _diagnosticoLey2300_propiedadConfigurada_(propiedades, 'LEY2300_HMAC_SECRET'), recomendada: true }
+  };
+}
+
+/** @param {Object} propiedades Servicio de propiedades. @param {string} nombre Nombre conocido. @returns {boolean} */
+function _diagnosticoLey2300_propiedadConfigurada_(propiedades, nombre) {
+  return !!String(propiedades.getProperty(nombre) || '').trim();
+}
+
+/** @returns {{consultable:boolean,procesarDatosMejoradoConfigurado:boolean}} Estado del trigger sin agenda. */
+function _diagnosticoLey2300_trigger_() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    return {
+      consultable: true,
+      procesarDatosMejoradoConfigurado: triggers.some(function(trigger) {
+        return trigger.getHandlerFunction() === 'procesarDatosMejorado';
+      })
+    };
+  } catch (error) {
+    return { consultable: false, procesarDatosMejoradoConfigurado: false };
+  }
+}
+
+/** @param {Object} control Libro de control disponible. @param {Object} analisis Libro de análisis disponible. @param {Object} propiedades Presencia sanitizada. @param {Object} trigger Estado sanitizado. @returns {Object} */
+function _diagnosticoLey2300_construirResultado_(control, analisis, propiedades, trigger) {
+  var entregas = _diagnosticoLey2300_leerHoja_(control.libro, 'Entregas_Ley2300', ENTREGAS_LEY2300_ENCABEZADOS, true);
+  return {
+    modo: 'SOLO_LECTURA', propiedades: propiedades, trigger: trigger,
+    control: {
+      disponible: control.disponible,
+      controlGeneral: _diagnosticoLey2300_leerHoja_(control.libro, 'Control_General', [], false),
+      configuracionNotificaciones: _diagnosticoLey2300_leerPolitica_(control.libro),
+      entregas: entregas,
+      eventos: _diagnosticoLey2300_leerHoja_(control.libro, 'Entregas_Ley2300_Eventos', ENTREGAS_LEY2300_EVENTOS_ENCABEZADOS, false),
+      operaciones: _diagnosticoLey2300_leerHoja_(control.libro, 'Operaciones_Ley2300', OPERACIONES_LEY2300_ENCABEZADOS, false)
+    },
+    analisis: { disponible: analisis.disponible, registroAnalisis: _diagnosticoLey2300_leerHoja_(analisis.libro, 'registro analisis', [], false) }
+  };
+}
+
+/** @param {Object|null} libro Libro abierto. @param {string} nombre Nombre de hoja conocido. @param {string[]} esperados Encabezados canónicos. @param {boolean} contarEstados Indica si se deben contar estados. @returns {Object} */
+function _diagnosticoLey2300_leerHoja_(libro, nombre, esperados, contarEstados) {
+  var base = { existe: false, legible: false, esquemaValido: null, encabezadosFaltantes: [] };
+  if (contarEstados) base.conteoPorEstado = _diagnosticoLey2300_contarEstados_([]);
+  if (!libro) return base;
+  try {
+    var hoja = libro.getSheetByName(nombre);
+    if (!hoja) return base;
+    base.existe = true;
+    var filas = hoja.getLastRow();
+    if (!filas) { base.esquemaValido = !esperados.length; return base; }
+    var encabezados = hoja.getRange(1, 1, 1, Math.max(1, hoja.getLastColumn())).getValues()[0];
+    base.legible = true;
+    base.encabezadosFaltantes = esperados.filter(function(esperado) { return encabezados.indexOf(esperado) === -1; });
+    base.esquemaValido = base.encabezadosFaltantes.length === 0;
+    if (contarEstados) base.conteoPorEstado = _diagnosticoLey2300_leerConteoEstados_(hoja, encabezados, filas);
+    return base;
+  } catch (error) {
+    return base;
+  }
+}
+
+/** @param {Object} hoja Hoja de entregas. @param {Array} encabezados Encabezados leídos. @param {number} filas Total de filas. @returns {Object} */
+function _diagnosticoLey2300_leerConteoEstados_(hoja, encabezados, filas) {
+  var columna = encabezados.indexOf('ESTADO');
+  if (columna === -1 || filas < 2) return _diagnosticoLey2300_contarEstados_([]);
+  var valores = hoja.getRange(2, columna + 1, filas - 1, 1).getValues();
+  return _diagnosticoLey2300_contarEstados_(valores.map(function(fila) { return fila[0]; }));
+}
+
+/** @param {Array} estados Estados persistidos. @returns {Object} Conteos sin filas ni destinos. */
+function _diagnosticoLey2300_contarEstados_(estados) {
+  var permitidos = ENTREGAS_LEY2300_ESTADOS || [];
+  var conteos = { NO_RECONOCIDO: 0 };
+  permitidos.forEach(function(estado) { conteos[estado] = 0; });
+  estados.forEach(function(valor) {
+    var estado = String(valor || '').trim().toUpperCase();
+    conteos[permitidos.indexOf(estado) === -1 ? 'NO_RECONOCIDO' : estado]++;
+  });
+  return conteos;
+}
+
+/** @param {Object|null} libro Libro de control. @returns {Object} Estado de política sin horario. */
+function _diagnosticoLey2300_leerPolitica_(libro) {
+  var base = { hojaExiste: false, politicaEncontrada: false, esquemaValido: null, activa: null, agendaConfigurada: false };
+  if (!libro) return base;
+  try {
+    var hoja = libro.getSheetByName('CONFIG_NOTIFICACIONES');
+    if (!hoja || hoja.getLastRow() < 1) return base;
+    base.hojaExiste = true;
+    var columnas = hoja.getLastColumn();
+    var encabezados = hoja.getRange(1, 1, 1, columnas).getValues()[0];
+    var id = encabezados.indexOf('ID'); var activa = encabezados.indexOf('ACTIVA'); var agenda = encabezados.indexOf('AGENDA_JSON');
+    base.esquemaValido = id !== -1 && activa !== -1 && agenda !== -1;
+    if (!base.esquemaValido || hoja.getLastRow() < 2) return base;
+    var filas = hoja.getRange(2, 1, hoja.getLastRow() - 1, columnas).getValues();
+    var politica = filas.filter(function(fila) { return String(fila[id] || '').trim() === 'cumplimiento_ley_2300'; })[0];
+    if (!politica) return base;
+    base.politicaEncontrada = true;
+    base.activa = politica[activa] === true || String(politica[activa] || '').trim().toUpperCase() === 'TRUE';
+    base.agendaConfigurada = !!String(politica[agenda] || '').trim();
+    return base;
+  } catch (error) {
+    return base;
+  }
+}
+/**
+ * Depuración manual y explícita de retención Ley 2300. No está conectada a triggers.
+ * Para ejecutar, establezca CONFIRMACION_EXPLICITA con el texto indicado en la guía,
+ * revíselo en código y ejecute manualmente esta función desde Apps Script.
+ */
+function depurarRetencionEntregasLey2300Manual() {
+  var CONFIRMACION_EXPLICITA = '';
+  if (CONFIRMACION_EXPLICITA !== ENTREGAS_LEY2300_CONFIRMACION_RETENCION) {
+    Logger.log('No se ejecutó la depuración: se requiere confirmación explícita.');
+    return;
+  }
+  var actor = Session.getActiveUser().getEmail();
+  var resultado = EntregasLey2300_depurarRetencion({ confirmacion: CONFIRMACION_EXPLICITA }, actor);
+  Logger.log(JSON.stringify(resultado));
 }

@@ -399,6 +399,7 @@ var MENUS_POR_ROL = {
     { id: 'usuarios', icon: '👥', label: 'Usuarios' },
     { id: 'asignaciones', icon: '🔀', label: 'Asignaciones' },
     { id: 'reportes', icon: '📈', label: 'Reportes' },
+    { id: 'entregas-ley-2300', icon: '📨', label: 'Entregas Ley 2300' },
     { id: 'sep2', icon: '', label: '---' },
     { id: 'logs', icon: '🔧', label: 'Logs sistema' },
     { id: 'config', icon: '⚙️', label: 'Configuración' }
@@ -754,6 +755,9 @@ function navegarA(seccion) {
       break;
     case 'radicar':
       mostrarVistaRadicar();
+      break;
+    case 'entregas-ley-2300':
+      cargarVistaEntregasLey2300(1);
       break;
     case 'config':
       cargarVistaConfiguracion();
@@ -4842,6 +4846,310 @@ function _escHtml(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ============================================================
+//  VISTA: ENTREGAS LEY 2300 (EXCLUSIVA ADMIN)
+// ============================================================
+
+var _entregasLey2300Pagina = 1;
+var _entregasLey2300Filtros = { idLote: '', solicitud: '', participante: '', canal: '', estado: '', causaFallo: '', fechaDesde: '', fechaHasta: '', soloPendientes: true };
+
+/** @param {number} pagina Página solicitada. @returns {string} Clave de caché de la consulta actual. */
+function _claveCacheEntregasLey2300(pagina) {
+  return 'entregas-ley-2300:' + pagina + ':' + JSON.stringify(_entregasLey2300Filtros);
+}
+
+/** @param {number} pagina Página 1-based a cargar. @returns {void} */
+function cargarVistaEntregasLey2300(pagina) {
+  _entregasLey2300Pagina = pagina || 1;
+  var claveCache = _claveCacheEntregasLey2300(_entregasLey2300Pagina);
+  var cached = CacheManager.get(claveCache);
+  if (cached) {
+    _renderizarEntregasLey2300(cached);
+    return;
+  }
+
+  SkeletonSystem.mostrar('viewDashboard', 'tabla', {
+    columnas: ['Lote', 'Solicitud', 'Destino', 'Canal', 'Estado', ''], filas: 6, titulo: 'Entregas Ley 2300'
+  });
+  mostrarVista('viewDashboard');
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard', '<div class="card" style="text-align:center;padding:var(--space-8);">'
+      + '<p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p>'
+      + '<button class="btn btn--primary" type="button" onclick="cargarVistaEntregasLey2300(1)">Reintentar</button></div>');
+  }, 15000);
+
+  Promise.all([
+    callServer('api_obtenerEntregasLey2300', _entregasLey2300Filtros, _entregasLey2300Pagina, 20),
+    callServer('api_obtenerResumenEntregasLey2300')
+  ])
+    .then(function(respuestas) {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      var listado = respuestas[0] || { datos: [], total: 0, pagina: 1, totalPaginas: 0 };
+      var seguro = { datos: listado.datos || [], total: listado.total || 0, pagina: listado.pagina || 1, totalPaginas: listado.totalPaginas || 0, resumen: respuestas[1] || null };
+      CacheManager.set(claveCache, seguro);
+      _renderizarEntregasLey2300(seguro);
+    })
+    .catch(function() {
+      clearTimeout(timeoutId);
+      if (!_sigueVigente(navIdLocal)) return;
+      SkeletonSystem.reemplazar('viewDashboard', '<div class="card" style="text-align:center;padding:var(--space-8);">'
+        + '<p style="color:var(--color-mono-500);">No pudimos cargar las entregas.</p>'
+        + '<button class="btn btn--primary" type="button" onclick="cargarVistaEntregasLey2300(1)">Reintentar</button></div>');
+    });
+}
+
+/** @returns {string} Controles seguros de búsqueda y filtrado. */
+function _controlesEntregasLey2300() {
+  var filtros = _entregasLey2300Filtros;
+  return '<div class="flex flex--gap-md" style="align-items:center;flex-wrap:wrap;margin-bottom:var(--space-4);">'
+    + '<input class="input" id="entregasFiltroLote" type="search" maxlength="128" placeholder="Buscar por lote" value="' + _escHtml(filtros.idLote) + '">'
+    + '<input class="input" id="entregasFiltroSolicitud" type="search" maxlength="128" placeholder="Buscar por solicitud" value="' + _escHtml(filtros.solicitud) + '">'
+    + '<select class="input" id="entregasFiltroParticipante"><option value="">Todos los participantes</option>'
+    + _opcionesFiltroEntrega('participante', ['INQ', 'COA1', 'COA2', 'COA3', 'COA4', 'COA5']) + '</select>'
+    + '<select class="input" id="entregasFiltroCanal"><option value="">Todos los canales</option>'
+    + _opcionesFiltroEntrega('canal', ['EMAIL', 'SMS']) + '</select>'
+    + '<label>Desde <input class="input" id="entregasFiltroFechaDesde" type="date" value="' + _escHtml(filtros.fechaDesde) + '"></label>'
+    + '<label>Hasta <input class="input" id="entregasFiltroFechaHasta" type="date" value="' + _escHtml(filtros.fechaHasta) + '"></label>'
+    + '<select class="input" id="entregasFiltroEstado"><option value="">Todos los estados</option>'
+    + _opcionesFiltroEntrega('estado', ['PENDIENTE', 'EN_PROCESO', 'ENVIADO', 'PENDIENTE_CORRECCION', 'LISTO_PARA_REINTENTO', 'FALLIDO_DEFINITIVO', 'PENDIENTE_CONCILIACION'])
+    + '</select><select class="input" id="entregasFiltroAlcance"><option value="pendientes"' + (filtros.soloPendientes ? ' selected' : '') + '>Solo trabajo pendiente</option><option value="todos"' + (!filtros.soloPendientes ? ' selected' : '') + '>Todos los registros no eliminados</option></select><select class="input" id="entregasFiltroCausa"><option value="">Todas las causas</option>'
+    + _opcionesFiltroEntrega('causaFallo', ['DATOS_CONTACTO', 'TEMPORAL', 'CONFIGURACION', 'RECHAZO_DEFINITIVO', 'AMBIGUO'])
+    + '</select><button class="btn btn--primary" type="button" onclick="_aplicarFiltrosEntregasLey2300()">Buscar</button>'
+    + '<button class="btn btn--ghost" type="button" onclick="_limpiarFiltrosEntregasLey2300()">Limpiar</button></div>';
+}
+
+/** @param {string} campo Campo del filtro. @param {string[]} valores Valores allowlisted. @returns {string} Opciones HTML estáticas. */
+function _opcionesFiltroEntrega(campo, valores) {
+  var actual = _entregasLey2300Filtros[campo];
+  var html = '';
+  for (var indice = 0; indice < valores.length; indice++) {
+    html += '<option value="' + valores[indice] + '"' + (actual === valores[indice] ? ' selected' : '') + '>' + valores[indice] + '</option>';
+  }
+  return html;
+}
+
+/** @returns {void} */
+function _aplicarFiltrosEntregasLey2300() {
+  _entregasLey2300Filtros = {
+    idLote: String((document.getElementById('entregasFiltroLote') || {}).value || '').trim(),
+    solicitud: String((document.getElementById('entregasFiltroSolicitud') || {}).value || '').trim(),
+    participante: String((document.getElementById('entregasFiltroParticipante') || {}).value || '').trim(),
+    canal: String((document.getElementById('entregasFiltroCanal') || {}).value || '').trim(),
+    estado: String((document.getElementById('entregasFiltroEstado') || {}).value || '').trim(),
+    causaFallo: String((document.getElementById('entregasFiltroCausa') || {}).value || '').trim(),
+    fechaDesde: String((document.getElementById('entregasFiltroFechaDesde') || {}).value || '').trim(),
+    fechaHasta: String((document.getElementById('entregasFiltroFechaHasta') || {}).value || '').trim(),
+    soloPendientes: String((document.getElementById('entregasFiltroAlcance') || {}).value || 'pendientes') !== 'todos'
+  };
+  cargarVistaEntregasLey2300(1);
+}
+
+/** @returns {void} */
+function _limpiarFiltrosEntregasLey2300() {
+  _entregasLey2300Filtros = { idLote: '', solicitud: '', participante: '', canal: '', estado: '', causaFallo: '', fechaDesde: '', fechaHasta: '', soloPendientes: true };
+  cargarVistaEntregasLey2300(1);
+}
+
+/** @param {{datos:Object[],total:number,pagina:number,totalPaginas:number}} resultado Página segura. @returns {void} */
+function _renderizarEntregasLey2300(resultado) {
+  var container = document.getElementById('viewDashboard');
+  if (!container) return;
+  var datos = resultado && Array.isArray(resultado.datos) ? resultado.datos : [];
+  var html = '<div class="stack"><div class="flex flex--between" style="align-items:center;"><div><h2>Entregas Ley 2300</h2><p style="margin:0;color:var(--color-mono-500);">Gestión exclusiva de administración. Los destinos están enmascarados.</p></div><span class="badge badge--navy">Solo ADMIN</span></div>'
+    + _resumenAgendaEntregasLey2300(resultado.resumen) + _controlesEntregasLey2300();
+  if (!datos.length) {
+    container.innerHTML = html + '<div class="card card--flat" style="text-align:center;padding:var(--space-8);"><h3>No hay entregas para mostrar.</h3></div></div>';
+    mostrarVista('viewDashboard');
+    return;
+  }
+  html += '<div class="card card--flat" style="padding:0;overflow:hidden;"><table class="table"><thead><tr><th>Lote</th><th>Solicitud</th><th>Destino</th><th>Canal</th><th>Estado</th><th></th></tr></thead><tbody>';
+  for (var indice = 0; indice < datos.length; indice++) {
+    var entrega = datos[indice] || {};
+    html += '<tr><td>' + _escHtml(entrega.idLote) + '</td><td>' + _escHtml(entrega.solicitud) + '</td><td>' + _escHtml(entrega.destinoMascarado) + '</td><td>' + _escHtml(entrega.canal) + '</td><td>' + _badgeEstadoEntrega(entrega.estado) + '</td>'
+      + '<td><button class="btn btn--ghost js-entrega-detalle" type="button" data-entrega-id="' + _escHtml(entrega.entregaId) + '">Ver detalle</button></td></tr>';
+  }
+  html += '</tbody></table></div>' + _paginacionEntregasLey2300(resultado) + '</div>';
+  container.innerHTML = html;
+  _enlazarAccionesEntregasLey2300(container);
+  mostrarVista('viewDashboard');
+}
+
+/** @param {Object|null} resumen Conteos y agenda ADMIN. @returns {string} Resumen escapado con estimación de Apps Script. */
+function _resumenAgendaEntregasLey2300(resumen) {
+  var seguro = resumen || {};
+  var agenda = seguro.agenda || {};
+  var proxima = agenda.proximaEjecucionEstimada ? _formatearFechaEntrega(agenda.proximaEjecucionEstimada) : 'No disponible';
+  return '<div class="card card--flat"><strong>' + _escHtml(seguro.total || 0) + ' entrega(s)</strong> · '
+    + 'Correcciones: ' + _escHtml(seguro.pendientesCorreccion || 0) + ' · Conciliación: ' + _escHtml(seguro.pendientesConciliacion || 0)
+    + '<br><small>Agenda vigente: ' + _escHtml(agenda.frecuencia || 'No disponible') + '. Próxima ejecución estimada: ' + _escHtml(proxima) + '. '
+    + _escHtml(agenda.nota || 'Apps Script puede variar la hora de ejecución.') + '</small></div>';
+}
+
+/** @param {string} estado Estado de la entrega. @returns {string} Badge con etiqueta escapada. */
+function _badgeEstadoEntrega(estado) {
+  var etiqueta = _escHtml(estado || 'SIN_ESTADO');
+  var clase = estado === 'ENVIADO' || estado === 'LISTO_PARA_REINTENTO' ? 'badge--success' :
+    estado === 'PENDIENTE_CORRECCION' || estado === 'PENDIENTE_CONCILIACION' ? 'badge--orange' : 'badge--gray';
+  return '<span class="badge ' + clase + '">' + etiqueta + '</span>';
+}
+
+/** @param {{pagina:number,totalPaginas:number,total:number}} resultado Resultado paginado. @returns {string} HTML con controles numéricos seguros. */
+function _paginacionEntregasLey2300(resultado) {
+  var pagina = Number(resultado.pagina) || 1;
+  var totalPaginas = Number(resultado.totalPaginas) || 0;
+  if (totalPaginas <= 1) return '';
+  return '<div class="flex flex--between" style="align-items:center;"><small>' + _escHtml(resultado.total) + ' entrega(s)</small>'
+    + '<div class="flex flex--gap-sm"><button class="btn btn--ghost" type="button" ' + (pagina <= 1 ? 'disabled' : '') + ' onclick="cargarVistaEntregasLey2300(' + (pagina - 1) + ')">← Anterior</button>'
+    + '<span>Página ' + pagina + ' de ' + totalPaginas + '</span><button class="btn btn--ghost" type="button" ' + (pagina >= totalPaginas ? 'disabled' : '') + ' onclick="cargarVistaEntregasLey2300(' + (pagina + 1) + ')">Siguiente →</button></div></div>';
+}
+
+/** @param {Element} container Contenedor de la vista. @returns {void} */
+function _enlazarAccionesEntregasLey2300(container) {
+  var botones = container.querySelectorAll('.js-entrega-detalle');
+  for (var indice = 0; indice < botones.length; indice++) {
+    botones[indice].addEventListener('click', function() { _verDetalleEntregaLey2300(this.getAttribute('data-entrega-id')); });
+  }
+}
+
+/** @param {string} entregaId Identificador opaco. @returns {void} */
+function _verDetalleEntregaLey2300(entregaId) {
+  var claveCache = 'entrega-ley-2300-detalle:' + entregaId;
+  var cached = CacheManager.get(claveCache);
+  if (cached) {
+    _renderizarDetalleEntregaLey2300(cached);
+    return;
+  }
+  SkeletonSystem.mostrar('viewDashboard', 'detalle', { titulo: 'Detalle de entrega' });
+  mostrarVista('viewDashboard');
+  var navIdLocal = _navId;
+  var timeoutId = setTimeout(function() {
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard', '<div class="card" style="text-align:center;padding:var(--space-8);"><p style="color:var(--color-mono-500);">No pudimos conectar con el servidor.</p><button class="btn btn--primary" type="button" onclick="cargarVistaEntregasLey2300(_entregasLey2300Pagina)">Volver</button></div>');
+  }, 15000);
+  callServer('api_obtenerDetalleEntregaLey2300', entregaId).then(function(detalle) {
+    clearTimeout(timeoutId);
+    if (!_sigueVigente(navIdLocal)) return;
+    var seguro = detalle || { entrega: null, historial: [] };
+    CacheManager.set(claveCache, seguro);
+    _renderizarDetalleEntregaLey2300(seguro);
+  }).catch(function() {
+    clearTimeout(timeoutId);
+    if (!_sigueVigente(navIdLocal)) return;
+    SkeletonSystem.reemplazar('viewDashboard', '<div class="card" style="text-align:center;padding:var(--space-8);"><p style="color:var(--color-mono-500);">No pudimos cargar el detalle.</p><button class="btn btn--primary" type="button" onclick="cargarVistaEntregasLey2300(_entregasLey2300Pagina)">Volver</button></div>');
+  });
+}
+
+/** @param {{entrega:Object|null,historial:Object[]}} detalle Detalle enmascarado. @returns {void} */
+function _renderizarDetalleEntregaLey2300(detalle) {
+  var container = document.getElementById('viewDashboard');
+  var entrega = detalle && detalle.entrega;
+  if (!container || !entrega) {
+    cargarVistaEntregasLey2300(_entregasLey2300Pagina);
+    return;
+  }
+  var puedeCorregir = entrega.estado === 'PENDIENTE_CORRECCION' && (entrega.canal === 'EMAIL' || entrega.canal === 'SMS');
+  var html = '<div class="stack"><div class="flex flex--between" style="align-items:center;"><button class="btn btn--ghost" type="button" onclick="cargarVistaEntregasLey2300(_entregasLey2300Pagina)">← Entregas</button><span class="badge badge--navy">Solo ADMIN</span></div>'
+    + '<div class="card"><div class="flex flex--between" style="align-items:center;"><h2>Detalle de entrega</h2>' + _badgeEstadoEntrega(entrega.estado) + '</div>'
+    + '<dl><dt>Lote</dt><dd>' + _escHtml(entrega.idLote) + ' <button class="btn btn--ghost js-entrega-lote" type="button" data-lote-id="' + _escHtml(entrega.idLote) + '">Ver lote</button></dd>'
+    + '<dt>Solicitud</dt><dd>' + _escHtml(entrega.solicitud) + '</dd><dt>Participante</dt><dd>' + _escHtml(entrega.participante) + '</dd><dt>Canal</dt><dd>' + _escHtml(entrega.canal) + '</dd><dt>Destino</dt><dd>' + _escHtml(entrega.destinoMascarado) + '</dd><dt>Intentos</dt><dd>' + _escHtml(entrega.intentos) + ' de ' + _escHtml(entrega.maxIntentos) + '</dd></dl>'
+    + (puedeCorregir ? '<button class="btn btn--primary js-entrega-corregir" type="button">Corregir contacto</button>' : '') + '</div>'
+    + _historialEntregaLey2300(detalle.historial || []) + '</div>';
+  container.innerHTML = html;
+  var lote = container.querySelector('.js-entrega-lote');
+  if (lote) lote.addEventListener('click', function() { _verDetalleLote(this.getAttribute('data-lote-id')); });
+  var correccion = container.querySelector('.js-entrega-corregir');
+  if (correccion) correccion.addEventListener('click', function() { _abrirModalCorreccionEntregaLey2300(entrega); });
+  mostrarVista('viewDashboard');
+}
+
+/** @param {Object[]} historial Registros sanitizados. @returns {string} Historial HTML escapado. */
+function _historialEntregaLey2300(historial) {
+  var html = '<div class="card"><h3>Historial</h3>';
+  if (!historial.length) return html + '<p style="color:var(--color-mono-500);">No hay eventos para esta entrega.</p></div>';
+  html += '<div class="stack stack--tight">';
+  for (var indice = 0; indice < historial.length; indice++) {
+    var item = historial[indice] || {};
+    html += '<div style="border-left:3px solid var(--color-mono-200);padding-left:var(--space-3);"><strong>' + _escHtml(item.tipo === 'CORRECCION' ? item.operacion : item.evento) + '</strong> · ' + _escHtml(item.estadoNuevo) + '<br><small>' + _escHtml(item.destinoMascarado || item.valorNuevoMascarado || '') + ' ' + _escHtml(item.detalle) + ' · ' + _formatearFechaEntrega(item.creadaEn) + '</small></div>';
+  }
+  return html + '</div></div>';
+}
+
+/** @param {string} fecha Fecha ISO. @returns {string} Fecha segura para HTML. */
+function _formatearFechaEntrega(fecha) {
+  var valor = new Date(fecha);
+  return _escHtml(isNaN(valor.getTime()) ? '' : valor.toLocaleString('es-CO'));
+}
+
+/** @param {Object} entrega DTO seguro. @returns {void} */
+function _abrirModalCorreccionEntregaLey2300(entrega) {
+  if (!entrega || (entrega.canal !== 'EMAIL' && entrega.canal !== 'SMS')) return;
+  var modal = document.createElement('div');
+  modal.id = 'modalCorreccionEntregaLey2300';
+  modal.className = 'modal-overlay';
+  modal.setAttribute('role', 'dialog');
+  modal.setAttribute('aria-modal', 'true');
+  modal.setAttribute('aria-labelledby', 'correccionEntregaTitulo');
+  modal._entregaLey2300 = entrega;
+  var esCorreo = entrega.canal === 'EMAIL';
+  modal.innerHTML = '<div class="modal-content"><div class="modal-header modal-header--navy"><h3 id="correccionEntregaTitulo">Corregir contacto</h3><button class="modal-close js-cerrar-correccion" type="button" aria-label="Cerrar">✕</button></div>'
+    + '<div class="modal-body"><p>Se actualizará solo el contacto de esta entrega. El canal se deriva de la entrega registrada.</p><dl><dt>Canal</dt><dd>' + _escHtml(entrega.canal) + '</dd><dt>Destino actual</dt><dd>' + _escHtml(entrega.destinoMascarado) + '</dd></dl>'
+    + '<label for="correccionContactoLey2300">' + (esCorreo ? 'Nuevo correo electrónico' : 'Nuevo celular colombiano') + '</label><input class="input" id="correccionContactoLey2300" type="' + (esCorreo ? 'email' : 'tel') + '" inputmode="' + (esCorreo ? 'email' : 'tel') + '" maxlength="254" autocomplete="off" required>'
+    + '<p style="color:var(--color-mono-500);">Confirma el valor antes de enviarlo. No se mostrará nuevamente sin enmascarar.</p></div>'
+    + '<div class="modal-footer"><button class="btn btn--ghost js-cerrar-correccion" type="button">Cancelar</button><button class="btn btn--primary js-confirmar-correccion" type="button">Confirmar corrección</button></div></div>';
+  modal.addEventListener('click', function(evento) { if (evento.target === modal) _cerrarModalCorreccionEntregaLey2300(); });
+  modal.addEventListener('keydown', function(evento) { if (evento.key === 'Escape') _cerrarModalCorreccionEntregaLey2300(); });
+  document.body.appendChild(modal);
+  var cierres = modal.querySelectorAll('.js-cerrar-correccion');
+  for (var indice = 0; indice < cierres.length; indice++) cierres[indice].addEventListener('click', _cerrarModalCorreccionEntregaLey2300);
+  modal.querySelector('.js-confirmar-correccion').addEventListener('click', _enviarCorreccionEntregaLey2300);
+  setTimeout(function() { var input = document.getElementById('correccionContactoLey2300'); if (input) input.focus(); }, 0);
+}
+
+/** @returns {void} */
+function _cerrarModalCorreccionEntregaLey2300() {
+  var modal = document.getElementById('modalCorreccionEntregaLey2300');
+  if (modal) modal.remove();
+}
+
+/** @returns {void} */
+function _enviarCorreccionEntregaLey2300() {
+  var modal = document.getElementById('modalCorreccionEntregaLey2300');
+  var input = document.getElementById('correccionContactoLey2300');
+  var boton = modal && modal.querySelector('.js-confirmar-correccion');
+  var entrega = modal && modal._entregaLey2300;
+  if (!modal || !input || !boton || !entrega || !input.value.trim()) { _toast('No fue posible procesar la corrección.', 'error'); return; }
+  if (!window.confirm('¿Confirmas la corrección del contacto para esta entrega?')) return;
+  boton.disabled = true;
+  callServer('api_corregirContactoLey2300', { entregaId: entrega.entregaId, versionEsperada: entrega.version, contacto: input.value.trim() })
+    .then(function(resultado) {
+      if (!resultado || !resultado.ok) {
+        boton.disabled = false;
+        _toast('No fue posible procesar la corrección.', 'error');
+        return;
+      }
+      _invalidarCacheEntregasLey2300();
+      _cerrarModalCorreccionEntregaLey2300();
+      _toast('La corrección fue aplicada.', 'success');
+      cargarVistaEntregasLey2300(_entregasLey2300Pagina);
+    })
+    .catch(function() {
+      boton.disabled = false;
+      _toast('No fue posible procesar la corrección.', 'error');
+    });
+}
+
+/** @returns {void} */
+function _invalidarCacheEntregasLey2300() {
+  var claves = Object.keys(CacheManager._store || {});
+  for (var indice = 0; indice < claves.length; indice++) {
+    if (claves[indice].indexOf('entregas-ley-2300:') === 0 || claves[indice].indexOf('entrega-ley-2300-detalle:') === 0) CacheManager.invalidar(claves[indice]);
+  }
+  CacheManager.invalidar(['lotes', 'dashboard']);
 }
 
 // Abre un modal con las filas que tienen errores, mostrando el inquilino e

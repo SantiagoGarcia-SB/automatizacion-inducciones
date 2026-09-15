@@ -344,6 +344,13 @@ export class MockSheet {
     return this;
   }
 
+  /** Elimina filas contiguas para escenarios de retención. */
+  deleteRows(rowPosition, howMany) {
+    this._callLog.push({ method: 'deleteRows', rowPosition, howMany });
+    this._fullData.splice(rowPosition - 1, howMany);
+    return this;
+  }
+
   /** Congela las primeras N filas */
   setFrozenRows(numRows) {
     this._callLog.push({ method: 'setFrozenRows', numRows });

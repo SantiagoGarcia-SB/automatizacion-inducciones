@@ -26,7 +26,7 @@ El flujo completo abarca:
 | `Reportes.js` | Backend (GAS) | Reporte diario de gestión de inducciones por correo (métricas + tabla de seguimiento por lote), leyendo `Control_General`, `registro analisis` e `Historico_Envios`. Estrictamente de lectura. |
 | `Notificaciones.js` | Backend (GAS) | Construcción modular de correos HTML con diseño corporativo (bloques reutilizables), envío de notificaciones de radicación exitosa (comercial + líderes), correo de solicitud de paz y salvo (trigger `onEdit`) y recordatorio diario de lotes estancados. |
 | `Sincronizacion.js` | Backend (GAS) | Motor de sincronización automática que replica registros con estado `RADICADO` o `ERROR EN TERCEROS` desde `Control_General` hacia la hoja de análisis, manteniendo consecutividad por lote y actualizando estados. |
-| `Cumplimiento.js` | Backend (GAS) | Cumplimiento Ley 2300: genera CSV de contacto (correo/celular) de solicitudes aprobadas cada 15 días para envío manual a Infobip. **Envío automático vía API de Infobip pendiente** — ver [Pendientes](#pendientes--próximos-pasos). |
+| `Cumplimiento.js` | Backend (GAS) | Gestión de Entregas Ley 2300: procesa entregas por UUID/participante/canal mediante ledger, registra trazabilidad enmascarada y deriva el estado de automatización. La bandeja ADMIN gestiona correcciones, reintentos y conciliaciones; no expone contactos completos. |
 | `Index.html` | Frontend | Estructura HTML de la aplicación web: formulario de radicación, barra de consulta de lotes, zona de carga de archivos (Excel y PDF), panel de errores y modal de progreso. |
 | `Estilos.html` | Frontend | Hoja de estilos CSS con variables de diseño, componentes visuales (cards, drop zones, botones, modales, badges de estado) y animaciones. |
 | `Scripts.html` | Frontend | Lógica JavaScript del cliente: inicialización de zonas drag-and-drop, validaciones de formulario, conversión de archivos a Base64, comunicación con el backend vía `google.script.run`, consulta de lotes y persistencia local (borrador en `localStorage`). |
@@ -168,7 +168,7 @@ Los triggers de sincronización se configuran desde el editor de Apps Script. La
 | `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Se asegura al guardar una configuración; la notificación se activa/desactiva desde Configuración. |
 | `ejecutarRecordatoriosDiarios` | Time-driven | Hora y frecuencia desde Configuración. |
 | `sincronizarUnificado` | Time-driven | Cada 10 minutos; se configura con `configurarTriggerSincronizacionUnificada`. |
-| `procesarDatosMejorado` | Time-driven | Intervalo, hora y activación desde Configuración. |
+| `procesarDatosMejorado` | Time-driven | Trigger administrado por la política `cumplimiento_ley_2300` en `CONFIG_NOTIFICACIONES`; su activación y agenda vigente se configuran desde ADMIN, sin frecuencia fija embebida. |
 | `enviarReporteGestionInducciones` | Time-driven | Días, horarios y activación desde Configuración. Valores iniciales: lunes a viernes 5:00pm y sábado 12:30pm. |
 | `enviarReportesCierreMes` | Time-driven | Día del mes, hora y activación desde Configuración. |
 | `verificarSaludDelSistema` | Time-driven | Hora, frecuencia y activación desde Configuración. |
@@ -185,12 +185,23 @@ Configurables en el editor de Apps Script (⚙️ Configuración del proyecto �
 | `VERTEX_PROJECT_ID` | ID del proyecto GCP (`proyecto-ia-servicios-bolivar`). |
 | `VERTEX_LOCATION` | Región de Vertex AI (`us-central1`). |
 | `VERTEX_MODEL` | Modelo de Gemini a usar (`gemini-2.5-flash-lite`). |
+| `INFOBIP_BASE_URL` | Base URL de Infobip para los canales de Ley 2300. |
+| `INFOBIP_API_KEY` | Credencial de Infobip para los canales de Ley 2300. |
+| `INFOBIP_EMAIL_FROM` | Remitente de correo verificado para Ley 2300. |
+| `INFOBIP_EMAIL_TEMPLATE_ID` | ID de la plantilla de correo Ley 2300. |
+| `INFOBIP_SENDER` | Remitente SMS, cuando aplique. |
+| `LEY2300_HMAC_SECRET` | Secreto opcional y recomendado para huellas HMAC de destinos; nunca registrar su valor. |
 
 ---
 
-## Pendientes / Próximos pasos
+## Operación de Entregas Ley 2300
 
-- **Automatizar envío de Ley 2300 vía API de Infobip** (reemplazar la subida manual de CSV en `Cumplimiento.js` por un envío directo). Bloqueado: la cuenta de Infobip no tiene un remitente alfanumérico de SMS configurado (canal requerido — WhatsApp está disponible pero se descarta a propósito para evitar interacciones con el bot de la empresa). En espera de guía de la coordinación de operaciones sobre cómo solicitar ese remitente antes de construir la integración.
+- **Bandeja ADMIN y estados:** La gestión accionable se realiza en la bandeja ADMIN de Entregas Ley 2300. Por defecto muestra `PENDIENTE`, `EN_PROCESO`, `PENDIENTE_CORRECCION`, `LISTO_PARA_REINTENTO`, `FALLIDO_DEFINITIVO` y `PENDIENTE_CONCILIACION`; `ENVIADO` solo aparece con el selector explícito de todos los registros no eliminados. Los destinos permanecen enmascarados.
+- **Cierre automático:** Tras confirmar `Estado Automatización = Procesado`, el trigger registra un marcador temporal bajo su lock, elimina el grupo completo de entregas `ENVIADO` del UUID y sus bitácoras asociadas, y conserva una auditoría agregada sin PII. Si una fase se interrumpe, el siguiente trigger reanuda el cierre antes de preparar fuentes. Las fuentes procesadas se omiten en corridas posteriores, por lo que no se recrean ni reenvían contactos. Los grupos parciales nunca pierden entregas `ENVIADO`.
+- **Corrección y reintento:** Una corrección actualiza y verifica de forma coordinada `Control_General` y `registro analisis`. Solo al completar ambos pasos queda lista para reintento en la siguiente ejecución configurada. Los fallos temporales respetan el máximo de intentos y el circuito de EMAIL pausa nuevas invocaciones después de cinco fallos consecutivos.
+- **Conciliación y migración:** Resultados ambiguos y correcciones incompletas requieren conciliación. Los históricos con marca `Parcial` se migran a conciliación sin envío ni consumo de intentos.
+- **Retención:** Las entregas y bitácoras operativas tienen una retención máxima de 90 días, con depuración manual autorizada y trazable. Solo se depuran grupos completos totalmente `ENVIADO`, cuya fuente sigue `Procesado`, usando `ENVIADA_EN` para calcular antigüedad; `FALLIDO_DEFINITIVO` y grupos parciales se conservan.
+- **Preflight seguro:** `diagnosticarGestionEntregasLey2300()` en `TestUtils.js` solo lee la presencia de hojas, propiedades, política/trigger y conteos agregados. No envía comunicaciones ni escribe datos. Consulte [la guía operativa](docs/configuracion-email-ley2300.md) antes de operar o migrar.
 
 ---
 
@@ -226,3 +237,13 @@ Configurables en el editor de Apps Script (⚙️ Configuración del proyecto �
 
 - **Equipo de Desarrollo CRM** — Investigaciones y Cobranzas El Libertador
 - Contacto: desarrollocrmlibertador@ellibertador.co
+
+
+### Gestión segura de Entregas Ley 2300
+
+- Antes de seleccionar nuevas comunicaciones, el proceso recupera reclamos `EN_PROCESO` vencidos como `PENDIENTE_CONCILIACION`, con control de versión y trazabilidad; no los reenvía automáticamente.
+- La URL de Infobip se valida como HTTPS y contra la allowlist oficial antes de construir solicitudes con API key o datos de contacto. No se aceptan hosts privados, IPs, credenciales en URL ni puertos no estándar.
+- La bandeja ADMIN incorpora filtros por participante, canal y rango de fecha; también presenta la agenda vigente y una próxima ejecución **estimada** desde `CONFIG_NOTIFICACIONES`. Apps Script puede variar el horario real.
+- El reporte administrativo incluye comunicaciones fallidas definitivas. Los destinos continúan enmascarados en UI, reportes y bitácoras.
+- La depuración de retención es estrictamente manual: `depurarRetencionEntregasLey2300Manual()` exige confirmación explícita, lock, auditoría agregada y solo elimina registros terminales con más de 90 días. No existe un trigger de purga.
+- Los contactos vacíos o inválidos se registran como `PENDIENTE_CORRECCION` sin persistir su valor; se corrigen exclusivamente desde ADMIN y nunca se envían al proveedor. La estimación de la próxima agenda usa la última ejecución registrada; si no existe, la bandeja lo informa en lugar de inventar una fecha.
