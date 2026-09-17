@@ -168,7 +168,10 @@ function sincronizarLoteAutomatico() {
           if (indicesRad[colRad] !== undefined && indicesAnl[colAnl] !== undefined) {
             var valorNuevo  = filaOrigen[indicesRad[colRad]];
             var valorActual = datosAnalisis[indiceArr][indicesAnl[colAnl]];
-            if (valorActual !== valorNuevo) {
+            var valoresDiferentes = valorActual instanceof Date && valorNuevo instanceof Date
+              ? valorActual.getTime() !== valorNuevo.getTime()
+              : valorActual !== valorNuevo;
+            if (valoresDiferentes) {
               var filaFisicaUpd = indiceArr + 1;
               if (!actualizacionesPorFila[filaFisicaUpd]) actualizacionesPorFila[filaFisicaUpd] = {};
               actualizacionesPorFila[filaFisicaUpd][indicesAnl[colAnl] + 1] = valorNuevo;

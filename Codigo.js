@@ -388,6 +388,15 @@ function motorDeAuditoria(formData) {
         }
       });
 
+      if (String(fila[1] || "").trim() && !normalizarFechaContrato_(fila[1])) {
+        errores.push({
+          fila: nF,
+          col: 2,
+          campo: "Fecha Inicio de Contrato",
+          motivo: "Usa una fecha válida: dd/MM/yyyy, yyyy-MM-dd o 24 DE MAYO DE 2026."
+        });
+      }
+
       // ── 2. CELULAR O CORREO DEL INQUILINO ──
       const celularInq = String(fila[12] || "").trim().replace(/[\s-]/g, "");
       const correoInq  = String(fila[13] || "").trim();
@@ -586,7 +595,7 @@ function motorDeAuditoria(formData) {
       filaFinal[10] = nombreComercial;
       filaFinal[11] = tasaNegociacionLimpia;
       filaFinal[12] = filaE[0];
-      filaFinal[13] = limpiarFecha(filaE[1]);
+      filaFinal[13] = normalizarFechaContrato_(filaE[1]);
       filaFinal[14] = filaE[2];
       filaFinal[15] = tipoNegociacion;
       filaFinal[16] = formData.poliza;
@@ -670,9 +679,14 @@ function motorDeAuditoria(formData) {
 
       const ultimaFila = hojaMaestra.getLastRow();
       retry(() => {
-        hojaMaestra
-          .getRange(ultimaFila + 1, 1, filasParaInsertar.length, filasParaInsertar[0].length)
-          .setValues(filasParaInsertar);
+        const rangoRegistros = hojaMaestra.getRange(
+          ultimaFila + 1,
+          1,
+          filasParaInsertar.length,
+          filasParaInsertar[0].length
+        );
+        rangoRegistros.setValues(filasParaInsertar);
+        rangoRegistros.offset(0, 13, filasParaInsertar.length, 1).setNumberFormat("dd/MM/yyyy");
       });
     }
 
@@ -836,14 +850,86 @@ function convertirExcelAGoogleSheets(blob) {
   ).id);
 }
 
-function limpiarFecha(valor) {
-  if (!valor) return "";
-  if (valor instanceof Date) return Utilities.formatDate(valor, "GMT-5", "yyyy/MM/dd");
-  if (typeof valor === 'number') {
-    const fecha = new Date((valor - 25569) * 86400 * 1000);
-    return Utilities.formatDate(fecha, "GMT-5", "yyyy/MM/dd");
+/**
+ * Convierte formatos de fecha permitidos a un Date para persistirlo en Sheets.
+ * @param {*} valor Valor obtenido de la planilla.
+ * @returns {Date|null} Fecha normalizada o null cuando el formato no es válido.
+ */
+function normalizarFechaContrato_(valor) {
+  if (valor instanceof Date && !isNaN(valor.getTime())) {
+    const partesFecha = Utilities.formatDate(valor, "GMT-5", "yyyy/M/d").split("/");
+    return _crearFechaContrato_(partesFecha[0], partesFecha[1], partesFecha[2]);
   }
-  return String(valor);
+
+  if (typeof valor === "number" && isFinite(valor) && valor > 0) {
+    const serial = Math.floor(valor);
+    const fechaExcel = new Date(Date.UTC(1899, 11, 30 + serial, 17));
+    return _crearFechaContrato_(fechaExcel.getUTCFullYear(), fechaExcel.getUTCMonth() + 1, fechaExcel.getUTCDate());
+  }
+
+  const texto = _normalizarTextoFechaContrato_(valor);
+  if (!texto) return null;
+
+  let coincidencia = texto.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (coincidencia) return _crearFechaContrato_(coincidencia[3], coincidencia[2], coincidencia[1]);
+
+  coincidencia = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (coincidencia) return _crearFechaContrato_(coincidencia[1], coincidencia[2], coincidencia[3]);
+
+  const meses = {
+    ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6,
+    JULIO: 7, AGOSTO: 8, SEPTIEMBRE: 9, OCTUBRE: 10, NOVIEMBRE: 11, DICIEMBRE: 12
+  };
+
+  coincidencia = texto.match(/^(\d{1,2})\s+(?:DE\s+)?([A-Z]+)\s+(?:(?:DEL|DE)\s+)?(\d{4})$/);
+  if (coincidencia && meses[coincidencia[2]]) {
+    return _crearFechaContrato_(coincidencia[3], meses[coincidencia[2]], coincidencia[1]);
+  }
+
+  coincidencia = texto.match(/^([A-Z]+)\s+(\d{1,2})\s+(?:(?:DEL|DE)\s+)?(\d{4})$/);
+  if (coincidencia && meses[coincidencia[1]]) {
+    return _crearFechaContrato_(coincidencia[3], meses[coincidencia[1]], coincidencia[2]);
+  }
+
+  return null;
+}
+
+/**
+ * Elimina acentos y separadores decorativos antes de interpretar una fecha textual.
+ * @param {*} valor Valor de la planilla.
+ * @returns {string} Texto apto para validar.
+ */
+function _normalizarTextoFechaContrato_(valor) {
+  const texto = String(valor === null || valor === undefined ? "" : valor).trim();
+  if (!texto || texto.length > 80) return "";
+
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[.,]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Construye una fecha de calendario a mediodía GMT-5 para prevenir corrimientos de día.
+ * @param {number|string} anio Año de la fecha.
+ * @param {number|string} mes Mes de la fecha, de 1 a 12.
+ * @param {number|string} dia Día de la fecha.
+ * @returns {Date|null} Fecha válida o null.
+ */
+function _crearFechaContrato_(anio, mes, dia) {
+  const anioNumero = Number(anio);
+  const mesNumero = Number(mes);
+  const diaNumero = Number(dia);
+  if (!Number.isInteger(anioNumero) || !Number.isInteger(mesNumero) || !Number.isInteger(diaNumero)) return null;
+  if (anioNumero < 1900 || anioNumero > 2100 || mesNumero < 1 || mesNumero > 12 || diaNumero < 1 || diaNumero > 31) return null;
+
+  const fecha = new Date(Date.UTC(anioNumero, mesNumero - 1, diaNumero, 17));
+  return fecha.getUTCFullYear() === anioNumero && fecha.getUTCMonth() === mesNumero - 1 && fecha.getUTCDate() === diaNumero
+    ? fecha
+    : null;
 }
 
 function consultarLote(idLote) {

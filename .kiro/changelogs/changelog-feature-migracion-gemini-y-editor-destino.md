@@ -24,3 +24,7 @@
 
 ### Corregido
 - Se corrigió la depuración de retención para que nunca elimine una entrega exitosa aislada de una solicitud que permanece parcial.
+
+### Corregido
+- Se normalizó la Fecha Inicio de Contrato desde formatos Excel y textos inequívocos en español, se validaron valores inválidos por fila y se persistieron fechas reales con formato `dd/MM/yyyy` en la radicación.
+- Se ajustó la sincronización para comparar fechas por su valor temporal y evitar actualizaciones innecesarias.

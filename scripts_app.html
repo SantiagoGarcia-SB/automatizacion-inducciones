@@ -4680,6 +4680,53 @@ function _validarDestinoLocal(valor) {
   return null; // válido a nivel heurístico
 }
 
+function _crearFechaContratoLocal(anio, mes, dia) {
+  var anioNumero = Number(anio);
+  var mesNumero = Number(mes);
+  var diaNumero = Number(dia);
+  if (!Number.isInteger(anioNumero) || !Number.isInteger(mesNumero) || !Number.isInteger(diaNumero)) return null;
+  if (anioNumero < 1900 || anioNumero > 2100 || mesNumero < 1 || mesNumero > 12 || diaNumero < 1 || diaNumero > 31) return null;
+
+  var fecha = new Date(Date.UTC(anioNumero, mesNumero - 1, diaNumero, 17));
+  return fecha.getUTCFullYear() === anioNumero && fecha.getUTCMonth() === mesNumero - 1 && fecha.getUTCDate() === diaNumero
+    ? fecha
+    : null;
+}
+
+function _normalizarFechaContratoLocal(valor) {
+  if (valor instanceof Date && !isNaN(valor.getTime())) {
+    return _crearFechaContratoLocal(valor.getUTCFullYear(), valor.getUTCMonth() + 1, valor.getUTCDate());
+  }
+
+  if (typeof valor === 'number' && isFinite(valor) && valor > 0) {
+    var fechaExcel = new Date(Date.UTC(1899, 11, 30 + Math.floor(valor), 17));
+    return _crearFechaContratoLocal(fechaExcel.getUTCFullYear(), fechaExcel.getUTCMonth() + 1, fechaExcel.getUTCDate());
+  }
+
+  var texto = String(valor === null || valor === undefined ? '' : valor).trim();
+  if (!texto || texto.length > 80) return null;
+  texto = texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  var coincidencia = texto.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (coincidencia) return _crearFechaContratoLocal(coincidencia[3], coincidencia[2], coincidencia[1]);
+
+  coincidencia = texto.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (coincidencia) return _crearFechaContratoLocal(coincidencia[1], coincidencia[2], coincidencia[3]);
+
+  var meses = {
+    ENERO: 1, FEBRERO: 2, MARZO: 3, ABRIL: 4, MAYO: 5, JUNIO: 6,
+    JULIO: 7, AGOSTO: 8, SEPTIEMBRE: 9, OCTUBRE: 10, NOVIEMBRE: 11, DICIEMBRE: 12
+  };
+
+  coincidencia = texto.match(/^(\d{1,2})\s+(?:DE\s+)?([A-Z]+)\s+(?:(?:DEL|DE)\s+)?(\d{4})$/);
+  if (coincidencia && meses[coincidencia[2]]) return _crearFechaContratoLocal(coincidencia[3], meses[coincidencia[2]], coincidencia[1]);
+
+  coincidencia = texto.match(/^([A-Z]+)\s+(\d{1,2})\s+(?:(?:DEL|DE)\s+)?(\d{4})$/);
+  if (coincidencia && meses[coincidencia[1]]) return _crearFechaContratoLocal(coincidencia[3], meses[coincidencia[1]], coincidencia[2]);
+
+  return null;
+}
+
 // ── Pre-validación frontend ──
 function _preValidarExcel(data) {
   var errores = [];
@@ -4699,6 +4746,15 @@ function _preValidarExcel(data) {
         errores.push({ fila: nF, col: idx + 1, campo: String(titulos[idx] || 'Col '+(idx+1)), motivo: 'Dato faltante.' });
       }
     });
+
+    if (String(fila[1] || '').trim() && !_normalizarFechaContratoLocal(fila[1])) {
+      errores.push({
+        fila: nF,
+        col: 2,
+        campo: 'Fecha Inicio de Contrato',
+        motivo: 'Usa una fecha válida: dd/MM/yyyy, yyyy-MM-dd o 24 DE MAYO DE 2026.'
+      });
+    }
 
     // Celular o correo (se marcan ambas celdas: celular col 13, correo col 14)
     var cel = String(fila[12] || '').trim().replace(/[\s-]/g, '');

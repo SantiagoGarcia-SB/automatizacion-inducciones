@@ -223,7 +223,10 @@ function sincronizarUnificado() {
           if (indicesControl[colRad] !== undefined && indicesAnalisis[colAnl] !== undefined) {
             var valorNuevo  = filaOrigen[indicesControl[colRad]];
             var valorActual = datosAnalisis[indiceArr][indicesAnalisis[colAnl]];
-            if (valorActual !== valorNuevo) {
+            var valoresDiferentes = valorActual instanceof Date && valorNuevo instanceof Date
+              ? valorActual.getTime() !== valorNuevo.getTime()
+              : valorActual !== valorNuevo;
+            if (valoresDiferentes) {
               var filaFisicaUpd = indiceArr + 1;
               if (!actualizacionesPorFila[filaFisicaUpd]) actualizacionesPorFila[filaFisicaUpd] = {};
               actualizacionesPorFila[filaFisicaUpd][indicesAnalisis[colAnl] + 1] = valorNuevo;
