@@ -166,6 +166,7 @@ Los triggers de sincronización se configuran desde el editor de Apps Script. La
 | Función | Evento | Administración |
 |---------|--------|----------------|
 | `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Se asegura al guardar una configuración; la notificación se activa/desactiva desde Configuración. |
+| `registrarCambioEstadoManual` | `onEdit` en `Control_General` | Registra cada cambio individual y manual del desplegable `Estado` en `Historial_Estados`. Un administrador debe ejecutar una vez `configurarTriggerHistorialEstados`. |
 | `ejecutarRecordatoriosDiarios` | Time-driven | Hora y frecuencia desde Configuración. |
 | `sincronizarUnificado` | Time-driven | Cada 10 minutos; se configura con `configurarTriggerSincronizacionUnificada`. |
 | `procesarDatosMejorado` | Time-driven | Trigger administrado por la política `cumplimiento_ley_2300` en `CONFIG_NOTIFICACIONES`; su activación y agenda vigente se configuran desde ADMIN, sin frecuencia fija embebida. |
@@ -212,6 +213,7 @@ Configurables en el editor de Apps Script (⚙️ Configuración del proyecto �
 │  Google Sheets: "Hoja de Control" (ID_HOJA_CONTROL)         │
 │  ├── Control_General  → Registro maestro de contratos       │
 │  ├── Hoja_Control     → Log de auditoría (éxito/fallo)      │
+│  ├── Historial_Estados → Bitácora de cambios manuales de Estado │
 │  └── CORREOS          → Mapeo comercial → director          │
 └─────────────────────────────────────────────────────────────┘
           │ sincronización automática
