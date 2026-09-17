@@ -30,3 +30,6 @@
 - Se ajustó la sincronización para comparar fechas por su valor temporal y evitar actualizaciones innecesarias.
 ### Agregado
 - Se agregó la bitácora `Historial_Estados` para conservar fecha, solicitud, estados anterior y nuevo, usuario y origen de cambios manuales en `Control_General`.
+
+### Corregido
+- Se validó la tasa de negociación en cliente y servidor para aceptar únicamente decimales con coma y valores estrictamente mayores que 1 y menores que 5, preservando el valor validado en la radicación y las notificaciones.

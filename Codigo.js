@@ -568,16 +568,23 @@ function motorDeAuditoria(formData) {
     const estadoCartera   = "PAZ Y SALVO";
     const filasParaInsertar = [];
 
-    // Normaliza a coma decimal sin importar cómo llegue el dato (front legacy,
-    // front nuevo o una llamada directa a la API): mismo criterio que la
-    // máscara de #tasaNegociacion / #rad_tasa, así siempre queda consistente
-    // en Control_General y en las notificaciones.
-    let tasaNegociacionLimpia = "";
-    if (formData.tasaNegociacion) {
-      tasaNegociacionLimpia = formData.tasaNegociacion.toString().replace(/\./g, ',').replace(/[^0-9,]/g, '');
-      const partesTasa = tasaNegociacionLimpia.split(',');
-      if (partesTasa.length > 2) tasaNegociacionLimpia = partesTasa[0] + ',' + partesTasa.slice(1).join('');
+    const tasaNegociacionLimpia = String(formData.tasaNegociacion == null ? "" : formData.tasaNegociacion).trim();
+    if (!/^\d+(,\d+)?$/.test(tasaNegociacionLimpia)) {
+      return {
+        status: "ERROR",
+        detalles: [{ fila: "SISTEMA", campo: "Tasa de negociación", motivo: "La tasa debe contener solo números y una única coma decimal (ejemplo: 2,3)." }]
+      };
     }
+
+    const tasaNumerica = Number(tasaNegociacionLimpia.replace(',', '.'));
+    if (!Number.isFinite(tasaNumerica) || tasaNumerica <= 1 || tasaNumerica >= 5) {
+      return {
+        status: "ERROR",
+        detalles: [{ fila: "SISTEMA", campo: "Tasa de negociación", motivo: "La tasa debe ser mayor que 1 y menor que 5." }]
+      };
+    }
+
+    formData.tasaNegociacion = tasaNegociacionLimpia;
 
     let contadorRegistro = 1;
 
