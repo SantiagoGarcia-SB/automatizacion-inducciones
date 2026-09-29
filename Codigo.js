@@ -524,7 +524,7 @@ function motorDeAuditoria(formData) {
       }
 
       // ── 6. DUPLICADOS VERTICALES ──
-      const llaveVertical = `${String(fila[11] || "").trim()}|${String(fila[5] || "").trim()}`.toUpperCase();
+      const llaveVertical = `${_limpiarIdentificacion_(fila[11])}|${String(fila[5] || "").trim()}`.toUpperCase();
       if (mapaLlavesUnicas[llaveVertical]) {
         errores.push({ fila: nF, campo: "DUPLICADO", motivo: `Contrato repetido — misma identificación y dirección (ver fila ${mapaLlavesUnicas[llaveVertical]}).` });
       } else {
@@ -767,14 +767,20 @@ function _limpiarCorreo_(valor) {
 }
 
 /**
- * Limpia un número de identificación: quita puntos de miles y espacios.
+ * Limpia un número de identificación: quita puntos/comas de miles y espacios.
+ * Si la celda llega como número (SheetJS lee el valor crudo), se redondea
+ * antes de convertir a texto: Excel puede guardar 52905167 como
+ * 52905166.999999985 y al quitar el punto decimal quedaba "52905166999999985".
  * Ejemplos:
- *   "1.032.456.789" → "1032456789"
- *   "A1234567"      → "A1234567" (pasaportes se dejan sin puntos)
+ *   "1.032.456.789"     → "1032456789"
+ *   "52905167,"         → "52905167"
+ *   52905166.999999985  → "52905167"
+ *   "A1234567"          → "A1234567" (pasaportes se dejan sin puntos)
  */
 function _limpiarIdentificacion_(valor) {
-  if (!valor) return "";
-  return String(valor).trim().replace(/\./g, "").replace(/\s/g, "");
+  if (valor === null || valor === undefined || valor === "") return "";
+  if (typeof valor === "number") return String(Math.round(valor));
+  return String(valor).trim().replace(/[.,\s]/g, "");
 }
 
 /**
