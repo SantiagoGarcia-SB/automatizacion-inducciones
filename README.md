@@ -167,6 +167,9 @@ Los triggers de sincronización se configuran desde el editor de Apps Script. La
 |---------|--------|----------------|
 | `enviarCorreoPazYSalvo` | `onEdit` en la hoja de cálculo | Se asegura al guardar una configuración; la notificación se activa/desactiva desde Configuración. |
 | `registrarCambioEstadoManual` | `onEdit` en `Control_General` | Registra cada cambio individual y manual del desplegable `Estado` en `Historial_Estados`. Un administrador debe ejecutar una vez `configurarTriggerHistorialEstados`. |
+| `notificarAsignacionesPendientes` | Por tiempo (cada 5 min por defecto) | Detecta nombres nuevos en `ASIGNADA A…` de `registro analisis`, envía un correo por analista con sus casos y sella `F.H Asignacion` (hora de envío) y `Analista Notificado` en `Control_General`; rellena `Fecha Evaluacion`. Requiere la pestaña `Config_Analistas` (`NOMBRE_EN_SHEET`, `EMAIL`, `ACTIVO`). Ejecutar una vez `configurarTriggerAsignaciones`; para probar sin enviar, `previsualizarAsignacionesPendientes`. Las filas con `Fecha Evaluacion` ya digitada y sin `F.H Asignacion` se consideran históricas y se ignoran. |
+
+**Tiempos por etapa** (`Servicios_TiemposEtapas.js`, tarjetas en Métricas): Ingreso→Radicación (`F.H Radicación SAI` − `Fecha ingreso`), Radicación→Asignación (`F.H Asignacion` − `F.H Radicación SAI`) y Análisis→Resultado (`F.H Resultado SAI` − `F.H Asignacion`), todo desde `Control_General`. Se filtra por sucursal con los chips existentes; en Eje Cafetero se desglosa por ciudad (`TIEMPOS_SUCURSALES_DETALLE_CIUDAD`).
 | `ejecutarRecordatoriosDiarios` | Time-driven | Hora y frecuencia desde Configuración. |
 | `sincronizarUnificado` | Time-driven | Cada 10 minutos; se configura con `configurarTriggerSincronizacionUnificada`. |
 | `procesarDatosMejorado` | Time-driven | Trigger administrado por la política `cumplimiento_ley_2300` en `CONFIG_NOTIFICACIONES`; su activación y agenda vigente se configuran desde ADMIN, sin frecuencia fija embebida. |

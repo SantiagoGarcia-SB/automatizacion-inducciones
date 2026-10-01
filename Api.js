@@ -987,6 +987,53 @@ function api_obtenerDatosMetricas(fechaDesde, fechaHasta, alcance) {
   }
 }
 
+/**
+ * API: Tiempos entre etapas (Ingreso→Radicación, Radicación→Asignación,
+ * Análisis→Resultado) con agregado total, por sucursal y por ciudad.
+ * El filtro de sucursal se aplica en el cliente sobre este resultado.
+ *
+ * Clave de cache: TIEMPOS_ETAPAS_{desde}_{hasta}_{equipo}. TTL 300 s.
+ *
+ * @param {string} fechaDesde - YYYY-MM-DD
+ * @param {string} fechaHasta - YYYY-MM-DD (rango máximo 183 días)
+ * @param {{tipo:string,directorEmail?:string}} [alcance]
+ * @returns {{total:Object, sucursales:Object, sucursalesConDetalleCiudad:string[]}}
+ * @sheets_read 0 en cache-hit, ~8 lecturas de columna en cache-miss
+ * @sheets_write 0
+ */
+function api_obtenerTiemposEtapas(fechaDesde, fechaHasta, alcance) {
+  try {
+    var usuario = verificarRol(['DIRECTOR', 'GERENTE', 'ADMIN', 'LIDER', 'ASESOR']);
+
+    var regexFecha = /^\d{4}-\d{2}-\d{2}$/;
+    if (typeof fechaDesde !== 'string' || typeof fechaHasta !== 'string' ||
+        !regexFecha.test(fechaDesde) || !regexFecha.test(fechaHasta)) {
+      return TiemposEtapas_vacio_();
+    }
+    var desde = new Date(fechaDesde + 'T00:00:00');
+    var hasta = new Date(fechaHasta + 'T00:00:00');
+    if (isNaN(desde.getTime()) || isNaN(hasta.getTime()) || desde.getTime() > hasta.getTime()) {
+      return TiemposEtapas_vacio_();
+    }
+    if (Math.ceil((hasta.getTime() - desde.getTime()) / (1000 * 60 * 60 * 24)) > 183) {
+      return TiemposEtapas_vacio_();
+    }
+
+    var emailsAlcance = _resolverEmailsAlcanceUsuario_(usuario, alcance);
+    var cacheKey = 'TIEMPOS_ETAPAS_' + fechaDesde + '_' + fechaHasta + '_' + _hashEquipoVisible(emailsAlcance);
+    var enCache = CacheWrapper_getJSON(cacheKey);
+    if (enCache) return enCache;
+
+    var resultado = calcularTiemposEtapas(fechaDesde, fechaHasta, emailsAlcance);
+    var payload = JSON.stringify(resultado);
+    if (payload.length <= 512000) CacheWrapper_putJSON(cacheKey, resultado, 300);
+    return resultado;
+  } catch (e) {
+    _registrarEvento_('ERROR', 'Api.js', 'api_obtenerTiemposEtapas', e.message);
+    return TiemposEtapas_vacio_();
+  }
+}
+
 // ============================================================
 //  API — MÉTRICAS OPERATIVAS DE LOTES
 // ============================================================
