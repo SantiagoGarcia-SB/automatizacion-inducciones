@@ -1,8 +1,9 @@
 /**
  * Unit tests: Asignaciones.js
  *
- * El admin escribe el NOMBRE del analista en ASIGNADA A…; el trigger envía un
- * correo por analista y sella en Control_General la hora de envío.
+ * El admin escribe el NOMBRE del analista en ASIGNADA A…; el onEdit anota la fila,
+ * el trigger envía un correo por analista y sella en Control_General la hora de envío.
+ * Solo se asigna si Fecha Evaluacion está vacía.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -21,7 +22,6 @@ function loadSource() {
     buscarColumna: Asignaciones_buscarColumna_,
     construirMapa: Asignaciones_construirMapaAnalistas_,
     detectar: Asignaciones_detectarPendientes_,
-    esHistorica: Asignaciones_esAsignacionHistorica_,
     construirCorreo: Asignaciones_construirCorreo_,
     construirAsunto: Asignaciones_construirAsunto_,
     notificar: notificarAsignacionesPendientes,
@@ -99,12 +99,13 @@ describe('utilidades puras', () => {
     expect(c.html.indexOf('Importante tener en cuenta')).toBeLessThan(c.html.indexOf('Casos asignados'));
   });
 
-  describe('detectar pendientes', () => {
+  describe('detectar pendientes (solo lo que está en la cola)', () => {
     const mapa = {
       'MARIA PEREZ': { nombre: 'María Pérez', email: 'maria@x.co' },
       'LUIS MORA': { nombre: 'Luis Mora', email: 'luis@x.co' }
     };
     const base = (o = {}) => ({
+      cola: ['u1'],
       asignadas: ['María Pérez'],
       fechasEvaluacion: [''],
       registroSai: [''],
@@ -114,14 +115,16 @@ describe('utilidades puras', () => {
       ...o
     });
 
-    it('asignación nueva: nombre sin fecha previa', () => {
+    it('asignación nueva: nombre escrito y Fecha Evaluacion vacía', () => {
       const r = a.detectar(base());
       expect(r.porEmail['maria@x.co'].casos).toHaveLength(1);
       expect(r.porEmail['maria@x.co'].casos[0]).toMatchObject({ filaRegistro: 2, uuid: 'u1', filaControl: 5, reasignado: false });
+      expect(r.resueltos).toEqual([]); // sale de la cola cuando el envío resulta exitoso
     });
 
     it('agrupa varios casos del mismo analista (nombre con distinta forma)', () => {
       const r = a.detectar(base({
+        cola: ['u1', 'u2', 'u3'],
         asignadas: ['María Pérez', 'MARIA  PEREZ', 'Luis Mora'],
         fechasEvaluacion: ['', '', ''],
         registroSai: ['', '', ''],
@@ -132,62 +135,49 @@ describe('utilidades puras', () => {
       expect(r.porEmail['luis@x.co'].casos).toHaveLength(1);
     });
 
-    it('ignora asignaciones históricas: Fecha Evaluacion digitada y sin F.H Asignacion', () => {
-      const r = a.detectar(base({ fechasEvaluacion: [new Date()] }));
-      expect(r.porEmail).toEqual({});
-    });
-
-    it('con fecha de corte: Fecha Evaluacion digitada a mano de HOY cuenta como nueva; anterior al corte es histórica', () => {
-      const corte = new Date(2026, 9, 2);
-      const hoy = a.detectar(base({ fechasEvaluacion: [new Date(2026, 9, 2)], fechaCorte: corte }));
-      expect(hoy.porEmail['maria@x.co'].casos).toHaveLength(1);
-
-      const ayer = a.detectar(base({ fechasEvaluacion: [new Date(2026, 9, 1)], fechaCorte: corte }));
-      expect(ayer.porEmail).toEqual({});
-      expect(ayer.omitidas.historicas).toBe(1);
-
-      const texto = a.detectar(base({ fechasEvaluacion: ['02/10/2026'], fechaCorte: corte }));
-      expect(texto.porEmail['maria@x.co'].casos).toHaveLength(1);
-    });
-
-    it('las omitidas se cuentan por motivo para diagnosticar', () => {
+    it('solo mira lo anotado en la cola: una fila asignada antes y sin anotar no genera correo', () => {
       const r = a.detectar(base({
-        asignadas: ['María Pérez', 'María Pérez', 'María Pérez', 'María Pérez'],
-        fechasEvaluacion: ['', new Date(2026, 8, 1), '', ''],
-        registroSai: ['', '', 'x@x.co', ''],
-        uuids: ['u1', 'u2', 'u3', 'uX'],
-        indiceControl: {
-          u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' },
-          u2: { fila: 6 },
-          u3: { fila: 7 }
-        },
-        fechaCorte: new Date(2026, 9, 2)
+        asignadas: ['María Pérez', 'María Pérez'],
+        fechasEvaluacion: ['', ''],
+        registroSai: ['', ''],
+        uuids: ['u1', 'u2'],
+        indiceControl: { u1: { fila: 5 }, u2: { fila: 6 } }
       }));
-      expect(r.omitidas).toEqual({ analizadas: 1, sinFilaControl: 1, historicas: 1, yaNotificadas: 1 });
+      expect(r.porEmail['maria@x.co'].casos.map(c => c.uuid)).toEqual(['u1']);
     });
 
-    it('fecha ilegible o sin corte se trata como histórica (prudencia)', () => {
-      expect(a.esHistorica('pendiente', new Date(2026, 9, 2))).toBe(true);
-      expect(a.esHistorica(new Date(2026, 9, 2), null)).toBe(true);
-      expect(a.esHistorica('', new Date(2026, 9, 2))).toBe(false);
+    it('Fecha Evaluacion ya diligenciada: no se asigna, se reporta y sale de la cola', () => {
+      const r = a.detectar(base({ fechasEvaluacion: [new Date(2026, 9, 1)] }));
+      expect(r.porEmail).toEqual({});
+      expect(r.bloqueadas).toEqual([{ filaRegistro: 2, uuid: 'u1', nombreEnSheet: 'María Pérez' }]);
+      expect(r.resueltos).toEqual(['u1']);
+      expect(r.omitidas.fechaOcupada).toBe(1);
+    });
+
+    it('un texto cualquiera en Fecha Evaluacion también la deja ocupada', () => {
+      expect(a.detectar(base({ fechasEvaluacion: ['pendiente'] })).bloqueadas).toHaveLength(1);
     });
 
     it('ignora lo ya notificado al mismo analista', () => {
       const r = a.detectar(base({ indiceControl: { u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' } } }));
       expect(r.porEmail).toEqual({});
+      expect(r.resueltos).toEqual(['u1']);
+      expect(r.omitidas.yaNotificadas).toBe(1);
     });
 
-    it('reasignación: analista distinto al notificado', () => {
+    it('reasignación: analista distinto al notificado; la Fecha Evaluacion llena es la que puso el sistema', () => {
       const r = a.detectar(base({
         asignadas: ['Luis Mora'],
         fechasEvaluacion: [new Date()],
         indiceControl: { u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' } }
       }));
       expect(r.porEmail['luis@x.co'].casos[0].reasignado).toBe(true);
+      expect(r.bloqueadas).toEqual([]);
     });
 
-    it('ignora casos ya analizados (REGISTRO ANALISTA SAI lleno) y filas sin asignar', () => {
+    it('sale de la cola sin enviar: ya analizada, sin nombre, fila que ya no existe', () => {
       const r = a.detectar(base({
+        cola: ['u1', 'u2', 'uX'],
         asignadas: ['María Pérez', ''],
         fechasEvaluacion: ['', ''],
         registroSai: ['maria@x.co', ''],
@@ -195,17 +185,22 @@ describe('utilidades puras', () => {
         indiceControl: { u1: { fila: 5 }, u2: { fila: 6 } }
       }));
       expect(r.porEmail).toEqual({});
+      expect(r.resueltos.sort()).toEqual(['u1', 'u2', 'uX']);
+      expect(r.omitidas).toMatchObject({ analizadas: 1, sinAsignar: 1, noEncontradas: 1 });
     });
 
-    it('nombres sin correo se reportan y no se notifican; UUID sin fila en Control_General se cuenta', () => {
+    it('nombre sin correo: se reporta y SIGUE en la cola; UUID sin fila en Control_General se cuenta y sale', () => {
       const r = a.detectar(base({
+        cola: ['u1', 'u2'],
         asignadas: ['Desconocido', 'María Pérez'],
         fechasEvaluacion: ['', ''],
         registroSai: ['', ''],
-        uuids: ['u1', 'uX'],
+        uuids: ['u1', 'u2'],
         indiceControl: { u1: { fila: 5 } }
       }));
       expect(r.sinCorreo).toEqual({ DESCONOCIDO: 1 });
+      expect(r.sinCorreoUuids).toEqual(['u1']);
+      expect(r.resueltos).toEqual(['u2']);
       expect(r.sinFilaControl).toBe(1);
       expect(r.porEmail).toEqual({});
     });
@@ -218,15 +213,16 @@ describe('notificarAsignacionesPendientes()', () => {
   const HDR_ANALISIS = ['UUID_SISTEMA', 'codigo lote', 'Arrendatario', 'Póliza', 'ciudad', 'sucursal', 'ASIGNADA A…', 'REGISTRO ANALISTA SAI', 'Fecha Evaluacion', 'Solicitud Inquilino'];
   const HDR_CONTROL = ['ID Lote', 'UUID_SISTEMA'];
 
-  let analisis, control, config, enviados, a, props, lockRetenidoAlEnviar;
+  let analisis, control, enviados, a, props, lockRetenidoAlEnviar;
 
-  function setup({ filasAnalisis, filasControl, filasConfig, falla = false }) {
+  function setup({ filasAnalisis, filasControl, filasConfig, falla = false, cola = [] }) {
     analisis = createSpreadsheetApp({ 'registro analisis': [HDR_ANALISIS, ...filasAnalisis] });
     control = createSpreadsheetApp({
       Control_General: [HDR_CONTROL, ...filasControl],
       Config_Analistas: filasConfig || [
         ['NOMBRE_EN_SHEET', 'EMAIL', 'ACTIVO'],
-        ['María Pérez', 'maria@x.co', true]
+        ['María Pérez', 'maria@x.co', true],
+        ['Luis Mora', 'luis@x.co', true]
       ]
     });
     enviados = [];
@@ -244,7 +240,7 @@ describe('notificarAsignacionesPendientes()', () => {
         enviados.push(o);
       })
     };
-    props = {};
+    props = cola.length ? { ASIGNACIONES_COLA: cola.join(',') } : {};
     globalThis.PropertiesService = {
       getScriptProperties: () => ({
         getProperty: (k) => (k in props ? props[k] : null),
@@ -278,10 +274,11 @@ describe('notificarAsignacionesPendientes()', () => {
     vi.useRealTimers();
   });
 
-  it('envía un correo por analista, sella F.H Asignacion/Analista Notificado y rellena Fecha Evaluacion', () => {
+  it('envía un correo por analista, sella F.H Asignacion/Analista Notificado, rellena Fecha Evaluacion y vacía la cola', () => {
     setup({
       filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez')],
-      filasControl: [['L1', 'u1'], ['L1', 'u2']]
+      filasControl: [['L1', 'u1'], ['L1', 'u2']],
+      cola: ['u1', 'u2']
     });
 
     const antes = Date.now();
@@ -317,150 +314,249 @@ describe('notificarAsignacionesPendientes()', () => {
     expect(celda(hojaAnalisis(), 2, 9)).toBeInstanceOf(Date);
     // Historial
     expect(control._spreadsheet.getSheetByName('Historial_Asignaciones')._fullData).toHaveLength(3);
+    // La cola queda vacía
+    expect(props['ASIGNACIONES_COLA']).toBeUndefined();
   });
 
-  it('segunda corrida no vuelve a enviar lo ya notificado (ni con la compuerta forzada)', () => {
+  it('solo notifica lo anotado: una fila con nombre que no está en la cola no genera correo', () => {
+    setup({
+      filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez')],
+      filasControl: [['L1', 'u1'], ['L1', 'u2']],
+      cola: ['u2']
+    });
+    const r = a.notificar();
+    expect(r.casos).toBe(1);
+    expect(celda(hojaControl(), 3, 4)).toBe('María Pérez');
+    expect(celda(hojaControl(), 2, 4)).toBeFalsy();
+  });
+
+  it('sin nada en la cola sale de inmediato sin abrir ningún libro', () => {
     setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-    a.notificar();
-    expect(a.notificar().correos).toBe(0);
-    expect(a.notificar({ forzar: true }).correos).toBe(0);
-    expect(enviados).toHaveLength(1);
-  });
-
-  it('si falla el envío no sella (se reintenta en la próxima corrida)', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], falla: true });
+    const abrir = vi.fn(globalThis.SpreadsheetRegistry_get);
+    globalThis.SpreadsheetRegistry_get = abrir;
     const r = a.notificar();
-    expect(r.ok).toBe(false);
-    expect(r.correos).toBe(0);
-    expect(celda(hojaControl(), 2, 3)).toBeFalsy(); // la fila del mock es corta: sin sello
-    expect(celda(hojaAnalisis(), 2, 9)).toBeFalsy();
-  });
-
-  it('asignación histórica (Fecha Evaluacion ya digitada) no genera correo', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez', new Date(2026, 7, 1))], filasControl: [['L1', 'u1']] });
-    const r = a.notificar();
-    expect(r.correos).toBe(0);
+    expect(r.omitida).toBe(true);
+    expect(abrir).not.toHaveBeenCalled();
     expect(enviados).toHaveLength(0);
   });
 
-  it('nombre sin correo: no envía, no sella y avisa al admin una sola vez', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'Desconocido')], filasControl: [['L1', 'u1']] });
-    const r1 = a.notificar();
-    const r2 = a.notificar({ forzar: true });
-    expect(r1.correos).toBe(0);
-    expect(r1.sinCorreo).toEqual({ DESCONOCIDO: 1 });
-    const avisos = enviados.filter(e => e.to === 'audit@x.co');
-    expect(avisos).toHaveLength(1);
-    expect(r2.correos).toBe(0);
+  it('segunda corrida no vuelve a enviar lo ya notificado', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], cola: ['u1'] });
+    a.notificar();
+    expect(a.notificar().omitida).toBe(true);
+    // Aunque el onEdit vuelva a anotar el mismo caso con el mismo nombre
+    props['ASIGNACIONES_COLA'] = 'u1';
+    expect(a.notificar().correos).toBe(0);
+    expect(enviados).toHaveLength(1);
+    expect(props['ASIGNACIONES_COLA']).toBeUndefined();
   });
 
-  it('simular no envía ni escribe nada', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+  it('Fecha Evaluacion ya diligenciada: no envía, avisa al admin y saca el caso de la cola', () => {
+    setup({
+      filasAnalisis: [filaAnalisis('u1', 'María Pérez', new Date(2026, 9, 1))],
+      filasControl: [['L1', 'u1']],
+      cola: ['u1']
+    });
+    const r = a.notificar();
+    expect(r.correos).toBe(0);
+    expect(r.bloqueadas).toHaveLength(1);
+    expect(enviados.filter(e => e.to === 'maria@x.co')).toHaveLength(0);
+    const avisos = enviados.filter(e => e.to === 'audit@x.co');
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0].subject).toContain('Fecha Evaluacion');
+    expect(avisos[0].htmlBody).toContain('fila 2');
+    expect(props['ASIGNACIONES_COLA']).toBeUndefined();
+    expect(celda(hojaControl(), 2, 4)).toBeFalsy(); // sin sello
+  });
+
+  it('el admin deja la fecha vacía y vuelve a escribir el nombre: ahora sí se asigna', () => {
+    setup({
+      filasAnalisis: [filaAnalisis('u1', 'María Pérez', new Date(2026, 9, 1))],
+      filasControl: [['L1', 'u1']],
+      cola: ['u1']
+    });
+    a.notificar();
+    hojaAnalisis()._fullData[1][8] = ''; // limpia Fecha Evaluacion
+    props['ASIGNACIONES_COLA'] = 'u1';   // el onEdit vuelve a anotar
+    const r = a.notificar();
+    expect(r.correos).toBe(1);
+  });
+
+  it('reasignación: aunque Fecha Evaluacion tenga la fecha del sistema, se notifica al nuevo analista', () => {
+    setup({
+      filasAnalisis: [filaAnalisis('u1', 'María Pérez')],
+      filasControl: [['L1', 'u1']],
+      cola: ['u1']
+    });
+    a.notificar();
+    hojaAnalisis()._fullData[1][6] = 'Luis Mora';
+    props['ASIGNACIONES_COLA'] = 'u1';
+
+    const r = a.notificar();
+    expect(r.correos).toBe(1);
+    expect(enviados[enviados.length - 1].to).toBe('luis@x.co');
+    expect(enviados[enviados.length - 1].htmlBody).toContain('REASIGNADO');
+    expect(celda(hojaControl(), 2, 4)).toBe('Luis Mora');
+  });
+
+  it('si falla el envío no sella y el caso sigue en la cola para reintentar en el siguiente ciclo', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], falla: true, cola: ['u1'] });
+    const r = a.notificar();
+    expect(r.ok).toBe(false);
+    expect(r.correos).toBe(0);
+    expect(celda(hojaControl(), 2, 3)).toBeFalsy();
+    expect(celda(hojaAnalisis(), 2, 9)).toBeFalsy();
+    expect(props['ASIGNACIONES_COLA']).toBe('u1');
+    expect(a.hayTrabajo()).toBe(true);
+  });
+
+  describe('nombre sin correo en Config_Analistas', () => {
+    it('no envía, no sella, avisa una sola vez y el caso sigue en la cola', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'Desconocido')], filasControl: [['L1', 'u1']], cola: ['u1'] });
+      const r1 = a.notificar();
+      const r2 = a.notificar({ forzar: true });
+      expect(r1.correos).toBe(0);
+      expect(r1.sinCorreo).toEqual({ DESCONOCIDO: 1 });
+      expect(enviados.filter(e => e.to === 'audit@x.co')).toHaveLength(1);
+      expect(r2.correos).toBe(0);
+      expect(props['ASIGNACIONES_COLA']).toBe('u1');
+    });
+
+    it('no se reintenta en cada ciclo de 5 min: espera una hora o a que entre algo nuevo', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'Desconocido')], filasControl: [['L1', 'u1']], cola: ['u1'] });
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 9, 2, 9, 0));
+      a.notificar();
+
+      vi.setSystemTime(new Date(2026, 9, 2, 9, 5));
+      expect(a.hayTrabajo()).toBe(false);
+      expect(a.notificar().omitida).toBe(true);
+
+      props['ASIGNACIONES_COLA'] = 'u1,u2'; // entró una asignación nueva
+      expect(a.hayTrabajo()).toBe(true);
+
+      props['ASIGNACIONES_COLA'] = 'u1';
+      a.notificar();
+      vi.setSystemTime(new Date(2026, 9, 2, 10, 5));
+      expect(a.hayTrabajo()).toBe(true);
+    });
+
+    it('cuando el admin agrega el nombre a Config_Analistas, el caso sale en el siguiente intento', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'Luis Mora')], filasControl: [['L1', 'u1']], cola: ['u1'],
+        filasConfig: [['NOMBRE_EN_SHEET', 'EMAIL', 'ACTIVO']] });
+      a.notificar();
+      expect(enviados.filter(e => e.to === 'luis@x.co')).toHaveLength(0);
+
+      control._spreadsheet.getSheetByName('Config_Analistas')._fullData.push(['Luis Mora', 'luis@x.co', true]);
+      const r = a.notificar({ forzar: true });
+      expect(r.correos).toBe(1);
+      expect(props['ASIGNACIONES_COLA']).toBeUndefined();
+    });
+  });
+
+  it('simular no envía, no escribe y no toca la cola', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], cola: ['u1'] });
     const r = a.notificar({ simular: true });
     expect(r.correos).toBe(1);
     expect(r.casos).toBe(1);
     expect(enviados).toHaveLength(0);
     expect(celda(hojaAnalisis(), 2, 9)).toBe('');
+    expect(props['ASIGNACIONES_COLA']).toBe('u1');
   });
 
   it('no retiene el lock global mientras envía correos ni al terminar', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], cola: ['u1'] });
     a.notificar();
     expect(lockRetenidoAlEnviar).toEqual([false]);
     expect(globalThis.LockService.getScriptLock().isLocked()).toBe(false);
     expect(props['LEASE_asignaciones']).toBeUndefined(); // el préstamo se libera
   });
 
-  describe('compuerta (aviso por edición)', () => {
-    it('sin aviso y con barrido reciente sale de inmediato sin abrir ningún libro', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-      a.notificar(); // primera corrida: barrido pendiente
-      const abrir = vi.fn(globalThis.SpreadsheetRegistry_get);
-      globalThis.SpreadsheetRegistry_get = abrir;
-
-      const r = a.notificar();
-      expect(r.omitida).toBe(true);
-      expect(abrir).not.toHaveBeenCalled();
-    });
-
-    it('un aviso de edición reactiva la corrida completa y se limpia al empezar', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-      a.notificar();
-      props['ASIGNACIONES_PENDIENTE'] = String(Date.now());
-      expect(a.hayTrabajo()).toBe(true);
-
-      const r = a.notificar();
-      expect(r.omitida).toBeUndefined();
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeUndefined();
-    });
-
-    it('el barrido de seguridad corre aunque pase una hora sin avisos', () => {
-      setup({ filasAnalisis: [], filasControl: [] });
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(2026, 9, 2, 9, 0));
-      a.notificar();
-      vi.setSystemTime(new Date(2026, 9, 2, 9, 30));
-      expect(a.hayTrabajo()).toBe(false);
-      vi.setSystemTime(new Date(2026, 9, 2, 10, 1));
-      expect(a.hayTrabajo()).toBe(true);
-    });
-
-    it('si el envío falla se vuelve a marcar el aviso para reintentar en el siguiente ciclo', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], falla: true });
-      a.notificar();
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
-      expect(a.hayTrabajo()).toBe(true);
-    });
-
-    it('si otra corrida tiene el préstamo, no hace nada pero deja el aviso para después', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-      props['LEASE_asignaciones'] = JSON.stringify({ token: 'otro', hasta: Date.now() + 60000 });
-      const r = a.notificar();
-      expect(r.ok).toBe(false);
-      expect(enviados).toHaveLength(0);
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
-    });
-
-    it('simular y forzar ignoran la compuerta', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-      a.notificar();
-      expect(a.notificar({ simular: true }).correos).toBe(0); // ya notificado, pero sí leyó
-      expect(a.notificar({ simular: true }).omitida).toBeUndefined();
-      expect(a.notificar({ forzar: true }).omitida).toBeUndefined();
-    });
+  it('si otra corrida tiene el préstamo, no hace nada y la cola queda intacta', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], cola: ['u1'] });
+    props['LEASE_asignaciones'] = JSON.stringify({ token: 'otro', hasta: Date.now() + 60000 });
+    const r = a.notificar();
+    expect(r.ok).toBe(false);
+    expect(enviados).toHaveLength(0);
+    expect(props['ASIGNACIONES_COLA']).toBe('u1');
   });
 
-  describe('marcarAsignacionPendiente (onEdit liviano)', () => {
-    const edicion = (fila, col, nombreHoja = 'registro analisis') => {
+  it('con otra corrida en curso (lock global ocupado) no pierde el trabajo', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], cola: ['u1'] });
+    globalThis.LockService = createLockService({ simulateContention: true });
+    const r = a.notificar();
+    expect(r.ok).toBe(false);
+    expect(enviados).toHaveLength(0);
+    expect(props['ASIGNACIONES_COLA']).toBe('u1');
+  });
+
+  it('lo que el admin anota mientras corre el envío no se pierde al limpiar la cola', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez')],
+      filasControl: [['L1', 'u1'], ['L1', 'u2']], cola: ['u1'] });
+    const envio = globalThis.MailApp.sendEmail;
+    globalThis.MailApp.sendEmail = vi.fn((o) => {
+      envio(o);
+      props['ASIGNACIONES_COLA'] += ',u2'; // edición durante el envío
+    });
+    a.notificar();
+    expect(props['ASIGNACIONES_COLA']).toBe('u2');
+  });
+
+  describe('marcarAsignacionPendiente (onEdit): anota las filas asignadas', () => {
+    const edicion = (fila, col, { filas = 1, nombreHoja = 'registro analisis', columnas = 1 } = {}) => {
       const hoja = hojaAnalisis();
-      const range = hoja.getRange(fila, col, 1, 1);
+      const range = hoja.getRange(fila, col, filas, columnas);
       range.getSheet = () => (nombreHoja === 'registro analisis' ? hoja : { getName: () => nombreHoja });
       return { range };
     };
 
-    it('editar ASIGNADA A… deja el aviso', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+    it('escribir un nombre en ASIGNADA A… anota el UUID de esa fila', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', '')], filasControl: [['L1', 'u1'], ['L1', 'u2']] });
       a.marcar(edicion(2, 7)); // ASIGNADA A… es la columna 7
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
+      expect(props['ASIGNACIONES_COLA']).toBe('u1');
     });
 
-    it('editar otra columna, otra hoja o el encabezado no deja aviso', () => {
+    it('pegar varias filas anota todas las que traen nombre y no repite', () => {
+      setup({
+        filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez'), filaAnalisis('u3', ''), filaAnalisis('u4', 'Luis Mora')],
+        filasControl: []
+      });
+      a.marcar(edicion(2, 7, { filas: 4 }));
+      a.marcar(edicion(2, 7, { filas: 2 }));
+      expect(props['ASIGNACIONES_COLA']).toBe('u1,u2,u4');
+    });
+
+    it('borrar el nombre (celda vacía) no anota nada', () => {
       setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+      a.marcar(edicion(2, 7));
+      expect(props['ASIGNACIONES_COLA']).toBeUndefined();
+    });
+
+    it('editar otra columna, otra hoja o el encabezado no anota nada', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
       a.marcar(edicion(2, 3));
-      a.marcar(edicion(2, 7, 'otra hoja'));
+      a.marcar(edicion(2, 7, { nombreHoja: 'otra hoja' }));
       a.marcar(edicion(1, 7));
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeUndefined();
+      expect(props['ASIGNACIONES_COLA']).toBeUndefined();
     });
 
-    it('con la columna ya recordada no lee ninguna celda de la hoja', () => {
-      setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+    it('una edición de rango que incluye la columna (pegar un bloque) también cuenta', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      a.marcar(edicion(2, 5, { columnas: 4 })); // columnas 5 a 8
+      expect(props['ASIGNACIONES_COLA']).toBe('u1');
+    });
+
+    it('con las columnas ya recordadas no lee el encabezado', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
       props['ASIGNACIONES_COL_ASIGNADA'] = '7';
+      props['ASIGNACIONES_COL_UUID'] = '1';
       const hoja = hojaAnalisis();
       const e = edicion(2, 7);
       hoja.resetCallLog();
       a.marcar(e);
-      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
-      expect(hoja.getCallLog('getValues')).toHaveLength(0);
+      expect(props['ASIGNACIONES_COLA']).toBe('u1');
+      const lecturas = hoja.getCallLog('getValues');
+      expect(lecturas).toHaveLength(2); // solo ASIGNADA A… y UUID de la fila editada
     });
 
     it('nunca lanza aunque el evento venga incompleto', () => {
@@ -468,14 +564,13 @@ describe('notificarAsignacionesPendientes()', () => {
       expect(() => a.marcar(undefined)).not.toThrow();
       expect(() => a.marcar({})).not.toThrow();
     });
-  });
 
-  it('con otra corrida en curso no hace nada', () => {
-    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
-    globalThis.LockService = createLockService({ simulateContention: true });
-    const r = a.notificar();
-    expect(r.ok).toBe(false);
-    expect(enviados).toHaveLength(0);
+    it('la cola tiene un tope para no pasar el límite de una propiedad', () => {
+      const filas = Array.from({ length: 260 }, (_, i) => filaAnalisis('u' + (i + 1), 'María Pérez'));
+      setup({ filasAnalisis: filas, filasControl: [] });
+      a.marcar(edicion(2, 7, { filas: 260 }));
+      expect(props['ASIGNACIONES_COLA'].split(',')).toHaveLength(200);
+    });
   });
 });
 
