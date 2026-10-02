@@ -4,12 +4,16 @@
  *
  * Fuente única: Control_General (una fila por solicitud).
  *
- *   T1  Ingreso → Radicación      F.H Radicación SAI − Fecha ingreso
- *   T2  Radicación → Asignación   F.H Asignacion − F.H Radicación SAI
- *   T3  Análisis → Resultado      F.H Resultado SAI − F.H Asignacion
- *       (la asignación es el inicio del análisis: la fecha de asignación
- *        siempre es la fecha del análisis, por eso no hay tramo
- *        "Asignación → Análisis")
+ *   T1  Ingreso → Radicación        F.H Radicación SAI − Fecha ingreso
+ *   T2  Radicación → Asignación     F.H Asignacion − F.H Radicación SAI
+ *   T3  Asignación → Análisis       Inicio Analisis − F.H Asignacion
+ *   T4  Duración del análisis       Fin Analisis − Inicio Analisis
+ *   T5  Análisis → Resultado        F.H Resultado SAI − Fin Analisis
+ *   T6  Resultado → Envío           F.H Envio Resultado − F.H Resultado SAI
+ *
+ * Inicio/Fin Analisis: primera y última edición de un campo del analista
+ * (Tiempos_Analisis.js). "Envío" = correo "Resultados de inducción" al
+ * comercial (registrarEnvioResultadoLote).
  *
  * "F.H Asignacion" la sella Asignaciones.js (hora de envío del correo al
  * analista). "F.H Radicación SAI" y "F.H Resultado SAI" se digitan a mano,
@@ -25,7 +29,8 @@
 /** Sucursales cuyo detalle por ciudad se muestra en la vista (claves normalizadas). */
 var TIEMPOS_SUCURSALES_DETALLE_CIUDAD = ['EJE CAFETERO'];
 
-var TIEMPOS_TRAMOS = ['t1', 't2', 't3'];
+var TIEMPOS_TRAMOS = ['t1', 't2', 't3', 't4', 't5', 't6'];
+var TIEMPOS_COL_ENVIO_RESULTADO = 'F.H Envio Resultado';
 var TIEMPOS_HORA_MS = 3600000;
 
 // ============================================================
@@ -118,7 +123,10 @@ function TiemposEtapas_agregarFila_(acc, fechas) {
   var pares = {
     t1: [fechas.ingreso, fechas.radicacion],
     t2: [fechas.radicacion, fechas.asignacion],
-    t3: [fechas.asignacion, fechas.resultado]
+    t3: [fechas.asignacion, fechas.inicioAnalisis],
+    t4: [fechas.inicioAnalisis, fechas.finAnalisis],
+    t5: [fechas.finAnalisis, fechas.resultado],
+    t6: [fechas.resultado, fechas.envioResultado]
   };
   TIEMPOS_TRAMOS.forEach(function (t) {
     var inicio = pares[t][0];
@@ -156,7 +164,10 @@ function TiemposEtapas_calcular_(filas) {
       ingreso: TiemposEtapas_parsearFecha_(f.ingreso),
       radicacion: TiemposEtapas_parsearFecha_(f.radicacion),
       asignacion: TiemposEtapas_parsearFecha_(f.asignacion),
-      resultado: TiemposEtapas_parsearFecha_(f.resultado)
+      inicioAnalisis: TiemposEtapas_parsearFecha_(f.inicioAnalisis),
+      finAnalisis: TiemposEtapas_parsearFecha_(f.finAnalisis),
+      resultado: TiemposEtapas_parsearFecha_(f.resultado),
+      envioResultado: TiemposEtapas_parsearFecha_(f.envioResultado)
     };
 
     var nombreSuc = TiemposEtapas_normalizarClave_(f.sucursal) || 'SIN SUCURSAL';
@@ -236,6 +247,9 @@ function TiemposEtapas_leerFilas_(desde, hastaExclusivo, nombresComercial) {
     radicacion: TiemposEtapas_buscarColumna_(encabezados, ['F.H Radicación SAI']),
     asignacion: TiemposEtapas_buscarColumna_(encabezados, ['F.H Asignacion']),
     resultado: TiemposEtapas_buscarColumna_(encabezados, ['F.H Resultado SAI']),
+    inicioAnalisis: TiemposEtapas_buscarColumna_(encabezados, ['Inicio Analisis']),
+    finAnalisis: TiemposEtapas_buscarColumna_(encabezados, ['Fin Analisis']),
+    envioResultado: TiemposEtapas_buscarColumna_(encabezados, [TIEMPOS_COL_ENVIO_RESULTADO]),
     comercial: TiemposEtapas_buscarColumna_(encabezados, ['Comercial']) || 11,
     sucursal: TiemposEtapas_buscarColumna_(encabezados, ['Sucursal']) || 57,
     ciudad: TiemposEtapas_buscarColumna_(encabezados, ['Ciudad del inmueble']) || 19
@@ -262,6 +276,9 @@ function TiemposEtapas_leerFilas_(desde, hastaExclusivo, nombresComercial) {
   var radicaciones = leer(col.radicacion);
   var asignaciones = leer(col.asignacion);
   var resultados = leer(col.resultado);
+  var enviosResultado = leer(col.envioResultado);
+  var iniciosAnalisis = leer(col.inicioAnalisis);
+  var finesAnalisis = leer(col.finAnalisis);
   var comerciales = nombresComercial ? leer(col.comercial) : null;
   var sucursales = leer(col.sucursal);
   var ciudades = leer(col.ciudad);
@@ -276,6 +293,9 @@ function TiemposEtapas_leerFilas_(desde, hastaExclusivo, nombresComercial) {
       radicacion: radicaciones[j],
       asignacion: asignaciones[j],
       resultado: resultados[j],
+      envioResultado: enviosResultado[j],
+      inicioAnalisis: iniciosAnalisis[j],
+      finAnalisis: finesAnalisis[j],
       sucursal: sucursales[j],
       ciudad: ciudades[j]
     });
@@ -305,4 +325,70 @@ function calcularTiemposEtapas(fechaDesde, fechaHasta, emailsAlcance) {
   var resultado = TiemposEtapas_calcular_(filas);
   resultado.sucursalesConDetalleCiudad = TIEMPOS_SUCURSALES_DETALLE_CIUDAD.slice();
   return resultado;
+}
+
+/**
+ * Sella la hora de envío del correo "Resultados de inducción" en todas las filas
+ * de Control_General del lote (columna "F.H Envio Resultado", se crea si no existe).
+ * Solo escribe donde está vacía: si el correo se reenvía se conserva el primer envío.
+ * Nunca lanza: el envío del correo ya ocurrió y no debe abortarse por esto.
+ *
+ * @param {string} idLote Código de lote (se compara sin espacios ni mayúsculas).
+ * @param {Date} [fechaEnvio] Por defecto, ahora.
+ * @returns {{ok:boolean, filas:number}}
+ */
+function registrarEnvioResultadoLote(idLote, fechaEnvio) {
+  try {
+    var objetivo = TiemposEtapas_normalizarIdLote_(idLote);
+    if (!objetivo) return { ok: false, filas: 0 };
+
+    var hoja = SpreadsheetRegistry_get(getHojaControlId()).getSheetByName('Control_General');
+    if (!hoja) return { ok: false, filas: 0 };
+
+    // Columnas con el creador seguro (no se pisa con Tiempos_Analisis / Asignaciones).
+    var colEnvio = Columnas_asegurar_(hoja, [TIEMPOS_COL_ENVIO_RESULTADO])[TIEMPOS_COL_ENVIO_RESULTADO];
+    // "ID Lote" solo se busca (nunca se crea): si no está por nombre, es la columna A.
+    var encabezados = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+    var colId = TiemposEtapas_buscarColumna_(encabezados, ['ID Lote']) || 1;
+
+    var n = hoja.getLastRow() - 1;
+    if (n < 1) return { ok: true, filas: 0 };
+
+    var ids = TiemposEtapas_leerColumna_(hoja, colId, 2, n);
+    var actuales = TiemposEtapas_leerColumna_(hoja, colEnvio, 2, n);
+
+    var primera = -1;
+    var ultimaFila = -1;
+    var coinciden = [];
+    for (var i = 0; i < n; i++) {
+      if (TiemposEtapas_normalizarIdLote_(ids[i]) !== objetivo) continue;
+      coinciden.push(i);
+      if (primera === -1) primera = i;
+      ultimaFila = i;
+    }
+    if (!coinciden.length) return { ok: true, filas: 0 };
+
+    var ahora = fechaEnvio || new Date();
+    var bloque = [];
+    for (var j = primera; j <= ultimaFila; j++) bloque.push([actuales[j]]);
+    var escritas = 0;
+    coinciden.forEach(function (idx) {
+      if (String(actuales[idx] === undefined || actuales[idx] === null ? '' : actuales[idx]).trim()) return;
+      bloque[idx - primera][0] = ahora;
+      escritas++;
+    });
+
+    if (escritas) {
+      hoja.getRange(primera + 2, colEnvio, bloque.length, 1).setValues(bloque);
+    }
+    return { ok: true, filas: escritas };
+  } catch (e) {
+    _registrarEvento_('WARN', 'Servicios_TiemposEtapas.js', 'No se pudo sellar F.H Envio Resultado', 'Lote: ' + idLote + ' | ' + e.message);
+    return { ok: false, filas: 0 };
+  }
+}
+
+/** ID de lote comparable: mayúsculas y sin espacios. */
+function TiemposEtapas_normalizarIdLote_(valor) {
+  return String(valor === undefined || valor === null ? '' : valor).trim().toUpperCase().replace(/\s+/g, '');
 }

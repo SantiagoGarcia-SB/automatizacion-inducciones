@@ -262,6 +262,53 @@
   .metricas-lotes__resumen-bloque .metrics-row-detail { grid-template-columns: 1fr !important; }
 }
 
+/* ═══ Tiempos por etapa ═══ */
+.tiempos__head { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin-bottom:12px; }
+.tiempos__head .metricas-lotes__section-label { margin:0; }
+.tiempos__chip {
+  font-size:0.7rem; font-weight:700; color:var(--azul, #253150); background:var(--bg-card);
+  border:1px solid var(--border); border-radius:var(--radius-full, 9999px); padding:3px 10px;
+}
+.tiempos__nota { font-size:0.7rem; color:var(--text-muted); margin-left:auto; }
+.tiempos__grid {
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:14px; margin-bottom:20px;
+}
+.tiempos-card {
+  display:flex; flex-direction:column; gap:6px; min-width:0;
+  background:var(--bg-card); border:1px solid var(--border); border-radius:14px;
+  padding:16px 18px; box-shadow:var(--shadow);
+}
+.tiempos-card--vacia { opacity:0.72; }
+.tiempos-card__top { display:flex; align-items:center; gap:10px; }
+.tiempos-card__paso {
+  flex-shrink:0; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:0.7rem; font-weight:800; color:#fff; background:var(--azul, #253150);
+}
+.tiempos-card--vacia .tiempos-card__paso { background:var(--text-light, #94a3b8); }
+.tiempos-card__titulo { font-size:0.78rem; font-weight:800; color:var(--text-main); line-height:1.25; }
+.tiempos-card__valor { font-size:1.9rem; font-weight:800; color:var(--text-main); line-height:1.15; margin-top:4px; }
+.tiempos-card__valor--vacio { font-size:1.1rem; font-weight:700; color:var(--text-muted); padding:6px 0; }
+.tiempos-card__prom { font-size:0.75rem; color:var(--text-muted); }
+.tiempos-card__desc { font-size:0.7rem; color:var(--text-light, #94a3b8); line-height:1.35; }
+.tiempos-card__cobertura { margin-top:6px; }
+.tiempos-card__barra { height:5px; border-radius:3px; background:var(--border); overflow:hidden; }
+.tiempos-card__barra > span { display:block; height:100%; background:var(--verde, #14b8a6); border-radius:3px; }
+.tiempos-card__cob-texto { font-size:0.68rem; color:var(--text-muted); margin-top:4px; display:flex; justify-content:space-between; gap:8px; }
+.tiempos-card__invalidos { color:var(--rojo, #bd0f14); font-weight:700; }
+
+.tiempos-tabla-wrap { overflow-x:auto; }
+.tiempos-tabla { width:100%; border-collapse:collapse; font-size:0.78rem; min-width:720px; }
+.tiempos-tabla th {
+  text-align:right; padding:8px 10px; font-size:0.68rem; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.3px; color:var(--text-muted); border-bottom:2px solid var(--border); white-space:nowrap;
+}
+.tiempos-tabla th:first-child, .tiempos-tabla td:first-child { text-align:left; }
+.tiempos-tabla td { padding:9px 10px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap; color:var(--text-main); }
+.tiempos-tabla tbody tr:nth-child(even) { background:rgba(127,127,127,0.05); }
+.tiempos-tabla td:first-child { font-weight:700; }
+.tiempos-tabla .tiempos-n { color:var(--text-light, #94a3b8); font-size:0.68rem; margin-left:3px; }
+.tiempos-tabla .tiempos-vacio { color:var(--text-light, #94a3b8); }
+
 /* .metricas-lotes__kpi es ahora solo un hook funcional (selector de JS para
    click-to-filter) sobre .metric-detail-card — sin estilos de caja propios
    para no pelear con los de esa clase. Solo aporta el estado "activo". */
@@ -1464,58 +1511,84 @@ var MetricasLotesView = (function() {
     return { resumen: suc.resumen, ciudades: conDetalle ? suc.ciudades : null, nombre: _sucursalActiva };
   }
 
-  function _htmlTarjetaTiempo(titulo, subtitulo, tramo) {
-    var sinDatos = !tramo || !tramo.n;
-    var omitidos = tramo ? (tramo.sinDato || 0) + (tramo.invalidos || 0) : 0;
-    return '<div class="metric-detail-card" style="min-width:0;">'
-      + '<div style="font-size:12px;font-weight:700;color:var(--azul);">' + _escapeHtml(titulo) + '</div>'
-      + '<div style="font-size:11px;color:var(--gris-texto,#64748b);margin-bottom:8px;">' + _escapeHtml(subtitulo) + '</div>'
-      + (sinDatos
-          ? '<div style="font-size:20px;font-weight:800;color:var(--gris-texto,#94a3b8);">—</div>'
-          : '<div style="font-size:22px;font-weight:800;color:var(--azul);">' + _formatearDuracion(tramo.medianaHoras) + '</div>'
-            + '<div style="font-size:11px;color:var(--gris-texto,#64748b);">mediana · promedio ' + _formatearDuracion(tramo.promedioHoras) + '</div>')
-      + '<div style="font-size:10px;color:var(--gris-texto,#94a3b8);margin-top:6px;">'
-      + (tramo ? tramo.n : 0) + ' con dato' + (omitidos ? ' · ' + omitidos + ' sin dato/inválidos' : '') + '</div>'
-      + '</div>';
+  var _TIEMPOS_TRAMOS = [
+    { clave: 't1', titulo: 'Ingreso → Radicación', desc: 'Desde que se sube el Excel hasta la radicación en SAI' },
+    { clave: 't2', titulo: 'Radicación → Asignación', desc: 'Desde la radicación hasta el correo al analista' },
+    { clave: 't3', titulo: 'Asignación → Análisis', desc: 'Desde la asignación al analista hasta el inicio del análisis' },
+    { clave: 't4', titulo: 'Duración del análisis', desc: 'Duración del proceso de análisis' },
+    { clave: 't5', titulo: 'Análisis → Resultado', desc: 'Desde la finalización del análisis hasta el resultado en SAI' },
+    { clave: 't6', titulo: 'Resultado → Envío', desc: 'Desde el resultado en SAI hasta el correo de resultados' }
+  ];
+
+  function _formatearNumero(n) {
+    return (Number(n) || 0).toLocaleString('es-CO');
+  }
+
+  function _htmlTarjetaTiempo(paso, def, tramo, totalSolicitudes) {
+    var n = tramo ? (tramo.n || 0) : 0;
+    var invalidos = tramo ? (tramo.invalidos || 0) : 0;
+    var vacia = !n;
+    var pct = totalSolicitudes > 0 ? Math.min(100, Math.round(n * 100 / totalSolicitudes)) : 0;
+
+    var cuerpo = vacia
+      ? '<div class="tiempos-card__valor tiempos-card__valor--vacio">Sin datos aún</div>'
+      : '<div class="tiempos-card__valor">' + _formatearDuracion(tramo.medianaHoras) + '</div>'
+        + '<div class="tiempos-card__prom">mediana · promedio ' + _formatearDuracion(tramo.promedioHoras) + '</div>';
+
+    return '<div class="tiempos-card' + (vacia ? ' tiempos-card--vacia' : '') + '" title="' + _escapeHtml(def.desc) + '">'
+      + '<div class="tiempos-card__top"><span class="tiempos-card__paso">' + paso + '</span>'
+      + '<span class="tiempos-card__titulo">' + _escapeHtml(def.titulo) + '</span></div>'
+      + cuerpo
+      + '<div class="tiempos-card__desc">' + _escapeHtml(def.desc) + '</div>'
+      + '<div class="tiempos-card__cobertura">'
+      + '<div class="tiempos-card__barra"><span style="width:' + pct + '%;"></span></div>'
+      + '<div class="tiempos-card__cob-texto"><span>' + _formatearNumero(n) + ' de ' + _formatearNumero(totalSolicitudes) + ' solicitudes</span>'
+      + (invalidos ? '<span class="tiempos-card__invalidos">' + _formatearNumero(invalidos) + ' inválidos</span>' : '')
+      + '</div></div></div>';
   }
 
   function _htmlTiempos() {
     var info = _tiemposSucursalActiva();
     if (!_datosTiempos) {
-      return '<div class="metricas-lotes__section-label">Tiempos por etapa</div>'
-        + '<div style="font-size:12px;color:var(--gris-texto,#64748b);padding:8px 0 16px;">Cargando tiempos…</div>';
+      return '<div class="tiempos__head"><div class="metricas-lotes__section-label">Tiempos por etapa</div></div>'
+        + '<div style="font-size:12px;color:var(--text-muted);padding:8px 0 16px;">Cargando tiempos…</div>';
     }
+
     var r = info && info.resumen;
-    var html = '<div class="metricas-lotes__section-label">Tiempos por etapa · ' + _escapeHtml(info ? info.nombre : '') + '</div>'
-      + '<div class="metrics-row-detail" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">'
-      + _htmlTarjetaTiempo('Ingreso → Radicación', 'Fecha ingreso a F.H Radicación SAI', r && r.t1)
-      + _htmlTarjetaTiempo('Radicación → Asignación', 'Radicación a envío del correo al analista', r && r.t2)
-      + _htmlTarjetaTiempo('Análisis → Resultado', 'Asignación a F.H Resultado SAI', r && r.t3)
-      + '</div>';
+    var total = r ? (r.solicitudes || 0) : 0;
+    var html = '<div class="tiempos__head">'
+      + '<div class="metricas-lotes__section-label">Tiempos por etapa</div>'
+      + '<span class="tiempos__chip">' + _escapeHtml(info ? info.nombre : '') + '</span>'
+      + '<span class="tiempos__nota">Horas calendario · la cifra grande es la mediana</span></div>'
+      + '<div class="tiempos__grid">';
+    for (var i = 0; i < _TIEMPOS_TRAMOS.length; i++) {
+      html += _htmlTarjetaTiempo(i + 1, _TIEMPOS_TRAMOS[i], r && r[_TIEMPOS_TRAMOS[i].clave], total);
+    }
+    html += '</div>';
 
     if (info && info.ciudades) {
       var claves = Object.keys(info.ciudades).sort();
       var celda = function(t) {
         return t && t.n
-          ? '<td style="padding:6px 8px;text-align:right;">' + _formatearDuracion(t.medianaHoras)
-            + ' <span style="color:var(--gris-texto,#94a3b8);font-size:10px;">(' + t.n + ')</span></td>'
-          : '<td style="padding:6px 8px;text-align:right;color:var(--gris-texto,#94a3b8);">—</td>';
+          ? '<td>' + _formatearDuracion(t.medianaHoras) + '<span class="tiempos-n">(' + _formatearNumero(t.n) + ')</span></td>'
+          : '<td class="tiempos-vacio">—</td>';
       };
       var filas = '';
-      for (var i = 0; i < claves.length; i++) {
-        var c = info.ciudades[claves[i]];
-        filas += '<tr style="border-top:1px solid var(--borde,#e2e8f0);">'
-          + '<td style="padding:6px 8px;font-weight:600;">' + _escapeHtml(claves[i]) + '</td>'
-          + '<td style="padding:6px 8px;text-align:right;">' + c.solicitudes + '</td>'
-          + celda(c.t1) + celda(c.t2) + celda(c.t3) + '</tr>';
+      for (var k = 0; k < claves.length; k++) {
+        var c = info.ciudades[claves[k]];
+        filas += '<tr><td>' + _escapeHtml(claves[k]) + '</td><td>' + _formatearNumero(c.solicitudes) + '</td>';
+        for (var j = 0; j < _TIEMPOS_TRAMOS.length; j++) filas += celda(c[_TIEMPOS_TRAMOS[j].clave]);
+        filas += '</tr>';
       }
-      html += '<div class="table-container" style="padding:16px;margin-bottom:16px;overflow-x:auto;">'
-        + '<div class="table-title" style="margin-bottom:8px;">' + _escapeHtml(info.nombre) + ' por ciudad (mediana y n)</div>'
-        + '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
-        + '<thead><tr style="text-align:right;color:var(--gris-texto,#64748b);">'
-        + '<th style="padding:6px 8px;text-align:left;">Ciudad</th><th style="padding:6px 8px;">Solicitudes</th>'
-        + '<th style="padding:6px 8px;">Ingreso → Radicación</th><th style="padding:6px 8px;">Radicación → Asignación</th>'
-        + '<th style="padding:6px 8px;">Análisis → Resultado</th></tr></thead><tbody>' + filas + '</tbody></table></div>';
+      var cabeceras = '';
+      for (var h = 0; h < _TIEMPOS_TRAMOS.length; h++) cabeceras += '<th>' + _escapeHtml(_TIEMPOS_TRAMOS[h].titulo) + '</th>';
+
+      html += '<div class="table-container" style="margin-top:0;padding:18px 20px;margin-bottom:20px;">'
+        + '<div class="table-header" style="margin-bottom:12px;"><div>'
+        + '<div class="table-title">' + _escapeHtml(info.nombre) + ' por ciudad</div>'
+        + '<div class="table-sub">Mediana de cada etapa y, entre paréntesis, solicitudes con dato</div></div></div>'
+        + '<div class="tiempos-tabla-wrap"><table class="tiempos-tabla"><thead><tr><th>Ciudad</th><th>Solicitudes</th>'
+        + cabeceras + '</tr></thead><tbody>' + filas + '</tbody></table></div></div>';
     }
     return html;
   }
@@ -2640,6 +2713,11 @@ var MetricasLotesView = (function() {
     if (desglose) {
       _desglosePrecargado = desglose;
     }
+
+    // Los tiempos por etapa no vienen en la precarga: se piden aparte
+    // (sin esto la sección quedaba en "Cargando tiempos…" para siempre).
+    var rangoTiempos = _obtenerRangoFechas();
+    if (rangoTiempos) _cargarTiempos(rangoTiempos.fechaDesde, rangoTiempos.fechaHasta);
 
     // Renderizar resultados directamente sin llamar al server
     _renderizarResultados(metricasLotes);

@@ -8,7 +8,7 @@
  *   - SpreadsheetRegistry_get (apertura única de libros)
  *   - retry() (reintentos ante fallos transitorios)
  *   - _registrarEvento_ (logging estructurado)
- *   - LockService (concurrencia)
+ *   - Lease (Infraestructura_Concurrencia.js): serializa envíos sin retener el lock global
  *   - Notificaciones.js (bloques HTML del correo)
  *   - _verificarCuotaEmail_ (cuota diaria)
  *
@@ -19,6 +19,40 @@
  * @see Requirements 8.1, 8.2
  * ============================================================
  */
+
+
+/** Préstamo que serializa los envíos de resultados (no bloquea el resto del proyecto). */
+var RESULTADOS_LEASE = "resultados_envio";
+var RESULTADOS_LEASE_TTL_MS = 5 * 60 * 1000;
+/** Tras enviar un lote, se bloquea reenviarlo durante este tiempo (doble clic). */
+var RESULTADOS_REENVIO_MIN = 10;
+
+/**
+ * ¿Ese lote ya se envió hace poco? Devuelve los minutos transcurridos o 0.
+ * Usa CacheService (con vencimiento): no deja claves acumuladas por lote.
+ * @param {string} idLote
+ * @returns {number}
+ */
+function _resultadosEnvioReciente_(idLote) {
+  try {
+    var ts = CacheService.getScriptCache().get("RESULTADOS_ENVIO_" + String(idLote).trim().toUpperCase());
+    if (!ts) return 0;
+    return Math.max(1, Math.round((Date.now() - Number(ts)) / 60000));
+  } catch (e) {
+    return 0;
+  }
+}
+
+/** Marca el lote como enviado ahora (vigente RESULTADOS_REENVIO_MIN minutos). */
+function _resultadosMarcarEnvio_(idLote) {
+  try {
+    CacheService.getScriptCache().put(
+      "RESULTADOS_ENVIO_" + String(idLote).trim().toUpperCase(),
+      String(Date.now()),
+      RESULTADOS_REENVIO_MIN * 60
+    );
+  } catch (e) { /* protección adicional: si falla, el préstamo sigue evitando el doble clic */ }
+}
 
 
 // ════════════════════════════════════════════════════════════════
@@ -45,11 +79,12 @@ function enviarResultadosLote() {
 
   var MODULO = "Servicios_Resultados.js";
 
-  // 1. Adquirir lock para evitar ejecuciones concurrentes
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
-    _registrarEvento_("WARN", MODULO, "No se pudo adquirir lock", "Timeout 30s");
-    return { ok: false, mensaje: "Otra ejecución en curso. Intente en unos segundos." };
+  // 1. Préstamo en vez del lock global: evita dos envíos simultáneos (doble clic) SIN
+  //    bloquear radicación, asignaciones ni el resto mientras se generan los PDF.
+  var lease = Lease_adquirir(RESULTADOS_LEASE, RESULTADOS_LEASE_TTL_MS);
+  if (!lease) {
+    _registrarEvento_("WARN", MODULO, "Envío de resultados ya en curso", "Segundo clic o ejecución simultánea");
+    return { ok: false, mensaje: "Ya hay un envío de resultados en curso. Espera a que termine y no vuelvas a presionar el botón." };
   }
 
   try {
@@ -58,12 +93,23 @@ function enviarResultadosLote() {
     if (!resultado.ok) return resultado;
     var datosLote = resultado.datos;
 
+    // 2b. Protección contra reenvío inmediato del mismo lote (el primer envío ya terminó)
+    var haceMin = _resultadosEnvioReciente_(datosLote.idLote);
+    if (haceMin) {
+      return {
+        ok: false,
+        mensaje: "El resultado del lote " + datosLote.idLote + " ya se envió hace " + haceMin +
+          " min. Si necesitas reenviarlo, espera " + RESULTADOS_REENVIO_MIN + " minutos."
+      };
+    }
+
     // 3. Resolver contacto del ejecutivo comercial (busca por ID lote en Hoja_Control)
     var contacto = _resolverContactoComercial_(datosLote.idLote);
     if (!contacto.ok) return contacto;
 
-    // 4. Resolver backup email (degradación graciosa: null si no aplica)
-    var backup = _resolverBackupEmail_(contacto.ejecutivo);
+    // 4. Resolver backup email (degradación graciosa: null si no aplica).
+    //    Reutiliza la hoja CORREOS ya leída en el paso 3.
+    var backup = _resolverBackupEmail_(contacto.ejecutivo, contacto.datosCorrNos);
 
     // 5. Verificar cuota de email antes de enviar
     if (!_verificarCuotaEmail_(1)) {
@@ -96,6 +142,18 @@ function enviarResultadosLote() {
       name: "Inducciones \u00B7 El Libertador"
     });
 
+    // Lo primero tras enviar: bloquear el reenvío inmediato de este lote.
+    _resultadosMarcarEnvio_(datosLote.idLote);
+
+    // Hora exacta de envío: base del tiempo "Resultado → Envío" en Métricas.
+    // Se sella en Control_General. El try/catch es a propósito: un fallo aquí (incluso
+    // que la función no esté desplegada) jamás debe impedir el registro en Historico_Envios.
+    try {
+      registrarEnvioResultadoLote(datosLote.idLote, new Date());
+    } catch (eSello) {
+      _registrarEvento_("WARN", MODULO, "No se pudo sellar F.H Envio Resultado", "Lote: " + datosLote.idLote + " | " + eSello.message);
+    }
+
     // 9. Registrar en histórico (TO + CC, sin BCC)
     var destinatarios = [contacto.ejecutivo].concat(listaCC);
     _registrarEnHistorico_(datosLote, destinatarios);
@@ -107,7 +165,7 @@ function enviarResultadosLote() {
     _registrarEvento_("ERROR", MODULO, "Error en enviarResultadosLote", e.message);
     return { ok: false, mensaje: "No se pudo completar el envío de resultados." };
   } finally {
-    lock.releaseLock();
+    Lease_liberar(RESULTADOS_LEASE, lease);
   }
 }
 
@@ -161,7 +219,7 @@ function menuEnviarResultadosLote() {
  */
 function _alertaSegura_(mensaje) {
   try {
-    _alertaSegura_(mensaje);
+    SpreadsheetApp.getUi().alert(mensaje);
   } catch (e) {
     Logger.log("⚠️ " + mensaje);
   }
@@ -196,26 +254,31 @@ function _leerDatosLote_() {
       return { ok: false, error: "No se encontró la hoja 'Calculo Lote'." };
     }
 
-    // 1. Leer ID del lote desde A2
-    var idLote = retry(function() { return hoja.getRange("A2").getDisplayValue(); }).toString().trim();
+    // 1-2. Una sola lectura del bloque A1:G23 (antes eran 11 lecturas de una celda)
+    var cabecera = retry(function() { return hoja.getRange("A1:G23").getDisplayValues(); });
+    var celda = function(fila, col) {
+      var f = cabecera[fila - 1] || [];
+      return String(f[col - 1] === undefined || f[col - 1] === null ? "" : f[col - 1]).trim();
+    };
+
+    var idLote = celda(2, 1); // A2
     if (!idLote) {
       _registrarEvento_("ERROR", MODULO, "ID de Lote vacío", "Celda A2 vacía");
       _alertaSegura_("El código de lote (Celda A2) está vacío. Seleccione un lote antes de continuar.");
       return { ok: false, error: "El código de lote (Celda A2) está vacío." };
     }
 
-    // 2. Leer datos fijos de la hoja
-    var poliza = retry(function() { return hoja.getRange("B8").getDisplayValue(); }).toString().trim();
-    var inmobiliaria = retry(function() { return hoja.getRange("B9").getDisplayValue(); }).toString().trim();
-    var solicitudesPresentadas = retry(function() { return hoja.getRange("B10").getDisplayValue(); }).toString().trim();
-    var valorPresentado = retry(function() { return hoja.getRange("B12").getDisplayValue(); }).toString().trim();
-    var anteriorAseguradora = retry(function() { return hoja.getRange("B15").getDisplayValue(); }).toString().trim() || "No especificado";
-    var resultadoLote = retry(function() { return hoja.getRange("B23").getDisplayValue(); }).toString().trim();
+    var poliza = celda(8, 2);                                       // B8
+    var inmobiliaria = celda(9, 2);                                 // B9
+    var solicitudesPresentadas = celda(10, 2);                      // B10
+    var valorPresentado = celda(12, 2);                             // B12
+    var anteriorAseguradora = celda(15, 2) || "No especificado";    // B15
+    var resultadoLote = celda(23, 2);                               // B23
+    var tasaSolicitada = celda(9, 5);                               // E9
+    var tasaAprobada = celda(12, 5);                                // E12
+    var margenLote = celda(23, 6);                                  // F23
+    var margenGlobal = celda(23, 7);                                // G23
     var sucursal = retry(function() { return hoja.getRange("G187").getDisplayValue(); }).toString().trim();
-    var tasaSolicitada = retry(function() { return hoja.getRange("E9").getDisplayValue(); }).toString().trim();
-    var tasaAprobada = retry(function() { return hoja.getRange("E12").getDisplayValue(); }).toString().trim();
-    var margenLote = retry(function() { return hoja.getRange("F23").getDisplayValue(); }).toString().trim();
-    var margenGlobal = retry(function() { return hoja.getRange("G23").getDisplayValue(); }).toString().trim();
 
     // Validar campos obligatorios
     if (!poliza) {
@@ -324,7 +387,12 @@ function _resolverContactoComercial_(idLote) {
       return { ok: false, error: "No se encontró la hoja 'Hoja_Control'." };
     }
 
-    var datosControl = retry(function() { return hojaControl.getDataRange().getValues(); });
+    // Solo se usan las columnas B (comercial) y F (ID lote): se leen las 6 primeras, no toda la hoja.
+    var filasControl = hojaControl.getLastRow();
+    var colsControl = Math.min(6, hojaControl.getMaxColumns());
+    var datosControl = filasControl
+      ? retry(function() { return hojaControl.getRange(1, 1, filasControl, colsControl).getValues(); })
+      : [];
     var correoComercial = null;
 
     for (var i = 1; i < datosControl.length; i++) {
@@ -386,31 +454,36 @@ function _resolverContactoComercial_(idLote) {
  * Degradación graciosa: cualquier error retorna null + log WARN sin abortar flujo.
  *
  * @param {string} emailEjecutivo — Email del ejecutivo comercial resuelto
+ * @param {Array} [datosPrecargados] — Matriz de CORREOS (con encabezado) ya leída; evita releer la hoja
  * @returns {string|null} Email de backup válido o null si no aplica.
  */
-function _resolverBackupEmail_(emailEjecutivo) {
+function _resolverBackupEmail_(emailEjecutivo, datosPrecargados) {
   var MODULO = "Servicios_Resultados._resolverBackupEmail_";
 
   try {
-    var ssRad = SpreadsheetRegistry_get(ID_RADICACION_SHEET);
-    var hojaCorreos = ssRad.getSheetByName("CORREOS");
+    var datos;
+    if (Array.isArray(datosPrecargados) && datosPrecargados.length > 0) {
+      // Ya leída por _resolverContactoComercial_ (la fila 0 es el encabezado)
+      datos = datosPrecargados.slice(1);
+    } else {
+      var ssRad = SpreadsheetRegistry_get(ID_RADICACION_SHEET);
+      var hojaCorreos = ssRad.getSheetByName("CORREOS");
 
-    if (!hojaCorreos) {
-      _registrarEvento_("WARN", MODULO, "Hoja CORREOS no accesible", "No se encontró la hoja CORREOS en Radicacion_Sheet");
-      return null;
+      if (!hojaCorreos) {
+        _registrarEvento_("WARN", MODULO, "Hoja CORREOS no accesible", "No se encontró la hoja CORREOS en Radicacion_Sheet");
+        return null;
+      }
+
+      var ultimaFila = retry(function() { return hojaCorreos.getLastRow(); });
+      if (ultimaFila < 2) {
+        // Solo encabezado o vacía, no hay datos
+        return null;
+      }
+
+      datos = retry(function() {
+        return hojaCorreos.getRange(2, 1, ultimaFila - 1, 4).getValues();
+      });
     }
-
-    // Leer todos los datos de la hoja CORREOS
-    var ultimaFila = retry(function() { return hojaCorreos.getLastRow(); });
-
-    if (ultimaFila < 2) {
-      // Solo encabezado o vacía, no hay datos
-      return null;
-    }
-
-    var datos = retry(function() {
-      return hojaCorreos.getRange(2, 1, ultimaFila - 1, 4).getValues();
-    });
 
     // Buscar la fila donde el email del ejecutivo coincida (columnas A o B)
     var emailBuscado = String(emailEjecutivo || "").trim().toLowerCase();
@@ -670,7 +743,6 @@ function _aplicarColorGlobal_(body, palabra, color) {
  * Lógica idéntica al script antiguo:
  *   - PDF Comercial: busca tabla con encabezado "SOLICITUD" → inyecta [solicitud, detalleCY]
  *   - PDF Inmobiliaria: usa la tabla de detalle individual → inyecta [poliza, nombre, solicitud, estado]
- * Luego aplica colores a texto (NEGADO=rojo, APROBADO/ASEGURABLE=verde) con findText.
  *
  * @param {GoogleAppsScript.Document.Body} body
  * @param {Object} datosLote
@@ -730,30 +802,8 @@ function _inyectarDatosEnTablaExistente_(body, datosLote, solicitudes, idPlantil
     }
   }
 
-  // Aplicar colores globales al texto (igual que el script antiguo)
-  _aplicarColorGlobal_(body, "NEGADO", "#FF0000");
-  _aplicarColorGlobal_(body, "APROBADO", "#008000");
-  _aplicarColorGlobal_(body, "ASEGURABLE", "#008000");
-}
-
-/**
- * Aplica formato bold + color a todas las ocurrencias de una palabra en el body.
- * Réplica exacta de la función del script antiguo.
- *
- * @param {GoogleAppsScript.Document.Body} body
- * @param {string} palabra — Texto a buscar
- * @param {string} color — Color hex a aplicar
- */
-function _aplicarColorGlobal_(body, palabra, color) {
-  var found = body.findText(palabra);
-  while (found !== null) {
-    var element = found.getElement().asText();
-    var start = found.getStartOffset();
-    var end = found.getEndOffsetInclusive();
-    element.setBold(start, end, true);
-    element.setForegroundColor(start, end, color);
-    found = body.findText(palabra, found);
-  }
+  // Los colores (NEGADO/APROBADO/ASEGURABLE) los aplica una sola vez el llamador
+  // (_generarPdfDesdeTemplate_, paso 4b), también cuando no hay solicitudes que inyectar.
 }
 
 /**

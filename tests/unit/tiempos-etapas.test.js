@@ -7,10 +7,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createSpreadsheetApp } from '../mocks/spreadsheet-app.mock.js';
+import { createLockService } from '../mocks/lock-service.mock.js';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-const sourceCode = readFileSync(resolve(__dirname, '../../Servicios_TiemposEtapas.js'), 'utf-8');
+const sourceCode = readFileSync(resolve(__dirname, '../../Infraestructura_Concurrencia.js'), 'utf-8') + '\n' +
+  readFileSync(resolve(__dirname, '../../Servicios_TiemposEtapas.js'), 'utf-8');
 
 function loadSource() {
   const wrapped = `(function() { ${sourceCode}
@@ -19,7 +21,8 @@ function loadSource() {
     estadistica: TiemposEtapas_estadistica_,
     calcular: TiemposEtapas_calcular_,
     calcularTiemposEtapas: calcularTiemposEtapas,
-    buscarColumna: TiemposEtapas_buscarColumna_
+    buscarColumna: TiemposEtapas_buscarColumna_,
+    registrarEnvio: registrarEnvioResultadoLote
   }; })()`;
   return eval(wrapped);
 }
@@ -76,36 +79,63 @@ describe('TiemposEtapas_estadistica_', () => {
 });
 
 describe('TiemposEtapas_calcular_', () => {
-  const fila = (o) => ({ ingreso: d(1, 8), radicacion: d(1, 10), asignacion: d(1, 12), resultado: d(2, 12), sucursal: 'BOGOTA', ciudad: 'BOGOTA', ...o });
+  // Cadena completa: ingreso 8h -> radicacion 10h -> asignacion 12h -> inicio 13h -> fin 17h
+  // (dia 1) -> resultado 9h -> envio 12h (dia 2)
+  const fila = (o) => ({
+    ingreso: d(1, 8), radicacion: d(1, 10), asignacion: d(1, 12),
+    inicioAnalisis: d(1, 13), finAnalisis: d(1, 17),
+    resultado: d(2, 9), envioResultado: d(2, 12),
+    sucursal: 'BOGOTA', ciudad: 'BOGOTA', ...o
+  });
 
-  it('calcula T1, T2 y T3 en horas', () => {
+  it('calcula los 6 tramos en horas', () => {
     const r = t.calcular([fila({})]);
-    expect(r.total.t1.medianaHoras).toBe(2);
-    expect(r.total.t2.medianaHoras).toBe(2);
-    expect(r.total.t3.medianaHoras).toBe(24);
+    expect(r.total.t1.medianaHoras).toBe(2);   // Ingreso a Radicacion
+    expect(r.total.t2.medianaHoras).toBe(2);   // Radicacion a Asignacion
+    expect(r.total.t3.medianaHoras).toBe(1);   // Asignacion a Analisis (inicio)
+    expect(r.total.t4.medianaHoras).toBe(4);   // Duracion del analisis
+    expect(r.total.t5.medianaHoras).toBe(16);  // Analisis (fin) a Resultado
+    expect(r.total.t6.medianaHoras).toBe(3);   // Resultado a Envio
     expect(r.total.solicitudes).toBe(1);
+  });
+
+  it('un tramo sin su fecha cuenta como sin dato, no como invalido', () => {
+    const r = t.calcular([fila({ envioResultado: '', inicioAnalisis: '' })]);
+    expect(r.total.t6.n).toBe(0);
+    expect(r.total.t6.sinDato).toBe(1);
+    expect(r.total.t6.invalidos).toBe(0);
+    // Sin inicio: se pierden T3 y T4, pero T5 (fin a resultado) sigue
+    expect(r.total.t3.sinDato).toBe(1);
+    expect(r.total.t4.sinDato).toBe(1);
+    expect(r.total.t5.n).toBe(1);
+  });
+
+  it('inicio de analisis anterior a la asignacion es invalido (edicion antes de asignar)', () => {
+    const r = t.calcular([fila({ inicioAnalisis: d(1, 11) })]);
+    expect(r.total.t3.n).toBe(0);
+    expect(r.total.t3.invalidos).toBe(1);
   });
 
   it('descarta tramos con dato faltante o negativo y los reporta', () => {
     const r = t.calcular([
       fila({}),
       fila({ radicacion: '' }),                // T1 y T2 sin dato
-      fila({ asignacion: d(1, 9) }),           // T2 negativo (asignación antes de radicar)
-      fila({ resultado: 'sin fecha' })         // T3 sin dato (texto inválido)
+      fila({ asignacion: d(1, 9) }),           // T2 negativo (asignacion antes de radicar)
+      fila({ resultado: 'sin fecha' })         // T5 y T6 sin dato (texto invalido)
     ]);
     expect(r.total.t1.n).toBe(3);
     expect(r.total.t1.sinDato).toBe(1);
     expect(r.total.t2.n).toBe(2);
     expect(r.total.t2.sinDato).toBe(1);
     expect(r.total.t2.invalidos).toBe(1);
-    expect(r.total.t3.n).toBe(3); // T3 no depende de la radicación
-    expect(r.total.t3.sinDato).toBe(1);
+    expect(r.total.t5.n).toBe(3);
+    expect(r.total.t5.sinDato).toBe(1);
   });
 
   it('acepta fechas digitadas como texto', () => {
-    const r = t.calcular([fila({ radicacion: '01/09/2026 10:00', resultado: '2026-09-02 12:00:00' })]);
+    const r = t.calcular([fila({ radicacion: '01/09/2026 10:00', resultado: '2026-09-02 09:00:00' })]);
     expect(r.total.t1.medianaHoras).toBe(2);
-    expect(r.total.t3.medianaHoras).toBe(24);
+    expect(r.total.t5.medianaHoras).toBe(16);
   });
 
   it('agrupa por sucursal normalizada y por ciudad dentro de la sucursal', () => {
@@ -182,5 +212,53 @@ describe('calcularTiemposEtapas() — lectura de Control_General', () => {
     expect(t.buscarColumna(['a', 'F.H Radicacion SAI'], ['F.H Radicación SAI'])).toBe(2);
     expect(t.buscarColumna(['a', 'FH radicación sai'], ['F.H Radicación SAI'])).toBe(2);
     expect(t.buscarColumna(['a'], ['F.H Radicación SAI'])).toBe(0);
+  });
+});
+
+describe('registrarEnvioResultadoLote()', () => {
+  const headers = ['ID Lote', 'x', 'Fecha ingreso'];
+
+  function setup(filas) {
+    const app = createSpreadsheetApp({ Control_General: [headers, ...filas] });
+    globalThis.getHojaControlId = () => 'ctrl';
+    globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
+    globalThis._registrarEvento_ = () => {};
+    globalThis.LockService = createLockService();
+    return app._spreadsheet.getSheetByName('Control_General');
+  }
+  const hora = new Date(2026, 9, 1, 9, 30);
+
+  it('crea la columna y sella todas las filas del lote (sin tocar otros lotes)', () => {
+    const hoja = setup([['L1', '', 'a'], ['L2', '', 'b'], ['l1 ', '', 'c'], ['L1', '', 'd']]);
+    const r = t.registrarEnvio('L1', hora);
+
+    expect(r).toEqual({ ok: true, filas: 3 });
+    expect(hoja._fullData[0][3]).toBe('F.H Envio Resultado');
+    expect(hoja._fullData[1][3]).toBe(hora);
+    expect(hoja._fullData[2][3]).toBeFalsy(); // L2 intacto
+    expect(hoja._fullData[3][3]).toBe(hora);  // coincide aunque cambien mayúsculas/espacios
+    expect(hoja._fullData[4][3]).toBe(hora);
+  });
+
+  it('conserva el primer envío si el correo se reenvía', () => {
+    const hoja = setup([['L1', '', 'a']]);
+    const primero = new Date(2026, 9, 1, 9, 0);
+    t.registrarEnvio('L1', primero);
+    const r = t.registrarEnvio('L1', hora);
+    expect(r.filas).toBe(0);
+    expect(hoja._fullData[1][3]).toBe(primero);
+  });
+
+  it('lote inexistente o vacío no escribe y no lanza', () => {
+    setup([['L1', '', 'a']]);
+    expect(t.registrarEnvio('NOPE', hora)).toEqual({ ok: true, filas: 0 });
+    expect(t.registrarEnvio('', hora)).toEqual({ ok: false, filas: 0 });
+  });
+
+  it('si algo falla devuelve ok:false sin lanzar (el correo ya salió)', () => {
+    globalThis.getHojaControlId = () => 'ctrl';
+    globalThis.SpreadsheetRegistry_get = () => { throw new Error('sin acceso'); };
+    globalThis._registrarEvento_ = () => {};
+    expect(t.registrarEnvio('L1', hora)).toEqual({ ok: false, filas: 0 });
   });
 });

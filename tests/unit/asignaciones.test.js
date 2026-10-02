@@ -11,7 +11,8 @@ import { createLockService } from '../mocks/lock-service.mock.js';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-const sourceCode = readFileSync(resolve(__dirname, '../../Asignaciones.js'), 'utf-8');
+const leerFuente = (f) => readFileSync(resolve(__dirname, '../../' + f), 'utf-8');
+const sourceCode = leerFuente('Infraestructura_Concurrencia.js') + '\n' + leerFuente('Asignaciones.js');
 
 function loadSource() {
   const wrapped = `(function() { ${sourceCode}
@@ -20,8 +21,11 @@ function loadSource() {
     buscarColumna: Asignaciones_buscarColumna_,
     construirMapa: Asignaciones_construirMapaAnalistas_,
     detectar: Asignaciones_detectarPendientes_,
+    esHistorica: Asignaciones_esAsignacionHistorica_,
     construirCorreo: Asignaciones_construirCorreo_,
-    notificar: notificarAsignacionesPendientes
+    notificar: notificarAsignacionesPendientes,
+    marcar: marcarAsignacionPendiente,
+    hayTrabajo: Asignaciones_hayTrabajo_
   }; })()`;
   return eval(wrapped);
 }
@@ -125,6 +129,41 @@ describe('utilidades puras', () => {
       expect(r.porEmail).toEqual({});
     });
 
+    it('con fecha de corte: Fecha Evaluacion digitada a mano de HOY cuenta como nueva; anterior al corte es histórica', () => {
+      const corte = new Date(2026, 9, 2);
+      const hoy = a.detectar(base({ fechasEvaluacion: [new Date(2026, 9, 2)], fechaCorte: corte }));
+      expect(hoy.porEmail['maria@x.co'].casos).toHaveLength(1);
+
+      const ayer = a.detectar(base({ fechasEvaluacion: [new Date(2026, 9, 1)], fechaCorte: corte }));
+      expect(ayer.porEmail).toEqual({});
+      expect(ayer.omitidas.historicas).toBe(1);
+
+      const texto = a.detectar(base({ fechasEvaluacion: ['02/10/2026'], fechaCorte: corte }));
+      expect(texto.porEmail['maria@x.co'].casos).toHaveLength(1);
+    });
+
+    it('las omitidas se cuentan por motivo para diagnosticar', () => {
+      const r = a.detectar(base({
+        asignadas: ['María Pérez', 'María Pérez', 'María Pérez', 'María Pérez'],
+        fechasEvaluacion: ['', new Date(2026, 8, 1), '', ''],
+        registroSai: ['', '', 'x@x.co', ''],
+        uuids: ['u1', 'u2', 'u3', 'uX'],
+        indiceControl: {
+          u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' },
+          u2: { fila: 6 },
+          u3: { fila: 7 }
+        },
+        fechaCorte: new Date(2026, 9, 2)
+      }));
+      expect(r.omitidas).toEqual({ analizadas: 1, sinFilaControl: 1, historicas: 1, yaNotificadas: 1 });
+    });
+
+    it('fecha ilegible o sin corte se trata como histórica (prudencia)', () => {
+      expect(a.esHistorica('pendiente', new Date(2026, 9, 2))).toBe(true);
+      expect(a.esHistorica(new Date(2026, 9, 2), null)).toBe(true);
+      expect(a.esHistorica('', new Date(2026, 9, 2))).toBe(false);
+    });
+
     it('ignora lo ya notificado al mismo analista', () => {
       const r = a.detectar(base({ indiceControl: { u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' } } }));
       expect(r.porEmail).toEqual({});
@@ -171,7 +210,7 @@ describe('notificarAsignacionesPendientes()', () => {
   const HDR_ANALISIS = ['UUID_SISTEMA', 'codigo lote', 'Arrendatario', 'Póliza', 'ciudad', 'sucursal', 'ASIGNADA A…', 'REGISTRO ANALISTA SAI', 'Fecha Evaluacion', 'Solicitud Inquilino'];
   const HDR_CONTROL = ['ID Lote', 'UUID_SISTEMA'];
 
-  let analisis, control, config, enviados, a;
+  let analisis, control, config, enviados, a, props, lockRetenidoAlEnviar;
 
   function setup({ filasAnalisis, filasControl, filasConfig, falla = false }) {
     analisis = createSpreadsheetApp({ 'registro analisis': [HDR_ANALISIS, ...filasAnalisis] });
@@ -183,18 +222,30 @@ describe('notificarAsignacionesPendientes()', () => {
       ]
     });
     enviados = [];
+    lockRetenidoAlEnviar = [];
     globalThis.getArchivoAnalisisId = () => 'analisis';
     globalThis.getHojaControlId = () => 'control';
     globalThis.SpreadsheetRegistry_get = (id) => (id === 'analisis' ? analisis._spreadsheet : control._spreadsheet);
     globalThis.LockService = createLockService();
     globalThis.MailApp = {
       getRemainingDailyQuota: () => 100,
-      sendEmail: vi.fn((o) => { if (falla) throw new Error('cuota'); enviados.push(o); })
+      sendEmail: vi.fn((o) => {
+        if (falla) throw new Error('cuota');
+        // Buena práctica: nunca enviar correos reteniendo el lock global del proyecto
+        lockRetenidoAlEnviar.push(globalThis.LockService.getScriptLock().isLocked());
+        enviados.push(o);
+      })
     };
-    const props = {};
+    props = {};
     globalThis.PropertiesService = {
-      getScriptProperties: () => ({ getProperty: (k) => props[k] || null, setProperty: (k, v) => { props[k] = v; } })
+      getScriptProperties: () => ({
+        getProperty: (k) => (k in props ? props[k] : null),
+        setProperty: (k, v) => { props[k] = v; },
+        deleteProperty: (k) => { delete props[k]; }
+      })
     };
+    let uuid = 0;
+    globalThis.Utilities = { getUuid: () => 'tok-' + (++uuid) };
     globalThis._registrarEvento_ = vi.fn();
     globalThis.BCC_AUDITORIA = 'audit@x.co';
     globalThis.obtenerCadenaJerarquica = () => ['admin1@x.co', 'ADMIN2@x.co', 'admin1@x.co', 'maria@x.co'];
@@ -260,11 +311,11 @@ describe('notificarAsignacionesPendientes()', () => {
     expect(control._spreadsheet.getSheetByName('Historial_Asignaciones')._fullData).toHaveLength(3);
   });
 
-  it('segunda corrida no vuelve a enviar lo ya notificado', () => {
+  it('segunda corrida no vuelve a enviar lo ya notificado (ni con la compuerta forzada)', () => {
     setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
     a.notificar();
-    const r = a.notificar();
-    expect(r.correos).toBe(0);
+    expect(a.notificar().correos).toBe(0);
+    expect(a.notificar({ forzar: true }).correos).toBe(0);
     expect(enviados).toHaveLength(1);
   });
 
@@ -287,7 +338,7 @@ describe('notificarAsignacionesPendientes()', () => {
   it('nombre sin correo: no envía, no sella y avisa al admin una sola vez', () => {
     setup({ filasAnalisis: [filaAnalisis('u1', 'Desconocido')], filasControl: [['L1', 'u1']] });
     const r1 = a.notificar();
-    const r2 = a.notificar();
+    const r2 = a.notificar({ forzar: true });
     expect(r1.correos).toBe(0);
     expect(r1.sinCorreo).toEqual({ DESCONOCIDO: 1 });
     const avisos = enviados.filter(e => e.to === 'audit@x.co');
@@ -304,6 +355,113 @@ describe('notificarAsignacionesPendientes()', () => {
     expect(celda(hojaAnalisis(), 2, 9)).toBe('');
   });
 
+  it('no retiene el lock global mientras envía correos ni al terminar', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+    a.notificar();
+    expect(lockRetenidoAlEnviar).toEqual([false]);
+    expect(globalThis.LockService.getScriptLock().isLocked()).toBe(false);
+    expect(props['LEASE_asignaciones']).toBeUndefined(); // el préstamo se libera
+  });
+
+  describe('compuerta (aviso por edición)', () => {
+    it('sin aviso y con barrido reciente sale de inmediato sin abrir ningún libro', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      a.notificar(); // primera corrida: barrido pendiente
+      const abrir = vi.fn(globalThis.SpreadsheetRegistry_get);
+      globalThis.SpreadsheetRegistry_get = abrir;
+
+      const r = a.notificar();
+      expect(r.omitida).toBe(true);
+      expect(abrir).not.toHaveBeenCalled();
+    });
+
+    it('un aviso de edición reactiva la corrida completa y se limpia al empezar', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      a.notificar();
+      props['ASIGNACIONES_PENDIENTE'] = String(Date.now());
+      expect(a.hayTrabajo()).toBe(true);
+
+      const r = a.notificar();
+      expect(r.omitida).toBeUndefined();
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeUndefined();
+    });
+
+    it('el barrido de seguridad corre aunque pase una hora sin avisos', () => {
+      setup({ filasAnalisis: [], filasControl: [] });
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 9, 2, 9, 0));
+      a.notificar();
+      vi.setSystemTime(new Date(2026, 9, 2, 9, 30));
+      expect(a.hayTrabajo()).toBe(false);
+      vi.setSystemTime(new Date(2026, 9, 2, 10, 1));
+      expect(a.hayTrabajo()).toBe(true);
+    });
+
+    it('si el envío falla se vuelve a marcar el aviso para reintentar en el siguiente ciclo', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']], falla: true });
+      a.notificar();
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
+      expect(a.hayTrabajo()).toBe(true);
+    });
+
+    it('si otra corrida tiene el préstamo, no hace nada pero deja el aviso para después', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      props['LEASE_asignaciones'] = JSON.stringify({ token: 'otro', hasta: Date.now() + 60000 });
+      const r = a.notificar();
+      expect(r.ok).toBe(false);
+      expect(enviados).toHaveLength(0);
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
+    });
+
+    it('simular y forzar ignoran la compuerta', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      a.notificar();
+      expect(a.notificar({ simular: true }).correos).toBe(0); // ya notificado, pero sí leyó
+      expect(a.notificar({ simular: true }).omitida).toBeUndefined();
+      expect(a.notificar({ forzar: true }).omitida).toBeUndefined();
+    });
+  });
+
+  describe('marcarAsignacionPendiente (onEdit liviano)', () => {
+    const edicion = (fila, col, nombreHoja = 'registro analisis') => {
+      const hoja = hojaAnalisis();
+      const range = hoja.getRange(fila, col, 1, 1);
+      range.getSheet = () => (nombreHoja === 'registro analisis' ? hoja : { getName: () => nombreHoja });
+      return { range };
+    };
+
+    it('editar ASIGNADA A… deja el aviso', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+      a.marcar(edicion(2, 7)); // ASIGNADA A… es la columna 7
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
+    });
+
+    it('editar otra columna, otra hoja o el encabezado no deja aviso', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+      a.marcar(edicion(2, 3));
+      a.marcar(edicion(2, 7, 'otra hoja'));
+      a.marcar(edicion(1, 7));
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeUndefined();
+    });
+
+    it('con la columna ya recordada no lee ninguna celda de la hoja', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', '')], filasControl: [['L1', 'u1']] });
+      props['ASIGNACIONES_COL_ASIGNADA'] = '7';
+      const hoja = hojaAnalisis();
+      const e = edicion(2, 7);
+      hoja.resetCallLog();
+      a.marcar(e);
+      expect(props['ASIGNACIONES_PENDIENTE']).toBeTruthy();
+      expect(hoja.getCallLog('getValues')).toHaveLength(0);
+    });
+
+    it('nunca lanza aunque el evento venga incompleto', () => {
+      setup({ filasAnalisis: [], filasControl: [] });
+      expect(() => a.marcar(undefined)).not.toThrow();
+      expect(() => a.marcar({})).not.toThrow();
+    });
+  });
+
   it('con otra corrida en curso no hace nada', () => {
     setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
     globalThis.LockService = createLockService({ simulateContention: true });
@@ -318,7 +476,7 @@ describe('configurarHojaConfigAnalistas()', () => {
     const app = createSpreadsheetApp({ Control_General: [['x']] });
     globalThis.getHojaControlId = () => 'control';
     globalThis.SpreadsheetRegistry_get = () => app._spreadsheet;
-    const src = readFileSync(resolve(__dirname, '../../Asignaciones.js'), 'utf-8');
+    const src = sourceCode;
     const fns = eval(`(function(){ ${src}\n; return { cfg: configurarHojaConfigAnalistas, mapa: Asignaciones_construirMapaAnalistas_ }; })()`);
 
     expect(fns.cfg().agregados).toBe(35);
