@@ -68,9 +68,9 @@ describe('utilidades puras', () => {
 
   it('el asunto lleva fecha, analista y cantidad para identificar la asignación', () => {
     const f = new Date(2026, 9, 2, 14, 35);
-    expect(a.construirAsunto('LAURA GÓMEZ', 6, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 6 casos');
-    expect(a.construirAsunto('laura gómez', 1, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 1 caso');
-    expect(a.construirAsunto('', 2, f)).toBe('📋 Asignación · 02/10/2026 · 2 casos');
+    expect(a.construirAsunto('LAURA GÓMEZ', 6, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 6 solicitudes');
+    expect(a.construirAsunto('laura gómez', 1, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 1 solicitud');
+    expect(a.construirAsunto('', 2, f)).toBe('📋 Asignación · 02/10/2026 · 2 solicitudes');
   });
 
   it('el correo agrupa por lote, destaca Solicitud Inquilino, trae el recordatorio y escapa HTML', () => {
@@ -79,7 +79,7 @@ describe('utilidades puras', () => {
       { idLote: 'L1', solicitudInquilino: '1234568', arrendatario: 'Luz', poliza: '123', ciudad: 'PEREIRA', sucursal: 'EJE CAFETERO', reasignado: true },
       { idLote: 'L2', solicitudInquilino: '', arrendatario: 'Sin Num', poliza: '9', ciudad: 'CALI', sucursal: 'OCCIDENTE', reasignado: false }
     ], 'https://sheet');
-    expect(c.asunto).toContain('3 casos');
+    expect(c.asunto).toContain('3 solicitudes');
     expect(c.html).toContain('Hola, Ana &lt;b&gt;');
     expect(c.html).toContain('Pedro &amp; Co');
     expect(c.html).toContain('REASIGNADO');
@@ -295,7 +295,7 @@ describe('notificarAsignacionesPendientes()', () => {
     expect(enviados[0].bcc).toBe('audit@x.co');
     // CC: cadena jerárquica sin duplicados y sin el propio analista
     expect(enviados[0].cc).toBe('admin1@x.co,ADMIN2@x.co');
-    expect(enviados[0].subject).toContain('2 casos');
+    expect(enviados[0].subject).toContain('2 solicitudes');
     // Saludo solo con el primer nombre (derivado del correo), no el nombre del sheet
     expect(enviados[0].htmlBody).toContain('Hola, Maria');
     expect(enviados[0].htmlBody).not.toContain('Hola, María Pérez');

@@ -369,7 +369,7 @@ function Asignaciones_construirAsunto_(nombreCompleto, n, fecha) {
   var nombre = String(nombreCompleto || '').trim().toLowerCase()
     .replace(/(^|\s)\S/g, function (c) { return c.toUpperCase(); });
   return '📋 Asignación · ' + dd + '/' + mm + '/' + f.getFullYear() +
-    (nombre ? ' · ' + nombre : '') + ' · ' + n + (n === 1 ? ' caso' : ' casos');
+    (nombre ? ' · ' + nombre : '') + ' · ' + n + (n === 1 ? ' solicitud' : ' solicitudes');
 }
 
 // ============================================================
