@@ -23,6 +23,7 @@ function loadSource() {
     detectar: Asignaciones_detectarPendientes_,
     esHistorica: Asignaciones_esAsignacionHistorica_,
     construirCorreo: Asignaciones_construirCorreo_,
+    construirAsunto: Asignaciones_construirAsunto_,
     notificar: notificarAsignacionesPendientes,
     marcar: marcarAsignacionPendiente,
     hayTrabajo: Asignaciones_hayTrabajo_
@@ -63,6 +64,13 @@ describe('utilidades puras', () => {
     ]);
     expect(Object.keys(mapa).sort()).toEqual(['LUIS MORA', 'MARIA PEREZ']);
     expect(mapa['MARIA PEREZ']).toEqual({ nombre: 'María Pérez', email: 'maria@x.co' });
+  });
+
+  it('el asunto lleva fecha, analista y cantidad para identificar la asignación', () => {
+    const f = new Date(2026, 9, 2, 14, 35);
+    expect(a.construirAsunto('LAURA GÓMEZ', 6, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 6 casos');
+    expect(a.construirAsunto('laura gómez', 1, f)).toBe('📋 Asignación · 02/10/2026 · Laura Gómez · 1 caso');
+    expect(a.construirAsunto('', 2, f)).toBe('📋 Asignación · 02/10/2026 · 2 casos');
   });
 
   it('el correo agrupa por lote, destaca Solicitud Inquilino, trae el recordatorio y escapa HTML', () => {

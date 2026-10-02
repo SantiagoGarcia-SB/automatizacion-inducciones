@@ -333,7 +333,7 @@ function Asignaciones_bloqueCasos_(casos) {
  * @param {string} urlHoja Enlace a la hoja registro analisis.
  * @returns {{asunto:string, html:string}}
  */
-function Asignaciones_construirCorreo_(nombre, casos, urlHoja) {
+function Asignaciones_construirCorreo_(nombre, casos, urlHoja, nombreCompleto, fecha) {
   var n = casos.length;
   var html = _envolver_([
     _bloque_cabecera_('Nueva asignaci&oacute;n'),
@@ -350,9 +350,26 @@ function Asignaciones_construirCorreo_(nombre, casos, urlHoja) {
   ].join(''));
 
   return {
-    asunto: '📋 Nueva asignación · ' + n + (n === 1 ? ' caso' : ' casos'),
+    asunto: Asignaciones_construirAsunto_(nombreCompleto, n, fecha),
     html: html
   };
+}
+
+/**
+ * Asunto que permite al admin identificar la asignación sin abrir el correo:
+ * "📋 Asignación · 02/10/2026 · Laura Gómez · 6 casos".
+ * @param {string} nombreCompleto Nombre del analista tal como está en Config_Analistas.
+ * @param {number} n Cantidad de casos.
+ * @param {Date} [fecha] Por defecto, ahora.
+ */
+function Asignaciones_construirAsunto_(nombreCompleto, n, fecha) {
+  var f = fecha || new Date();
+  var dd = ('0' + f.getDate()).slice(-2);
+  var mm = ('0' + (f.getMonth() + 1)).slice(-2);
+  var nombre = String(nombreCompleto || '').trim().toLowerCase()
+    .replace(/(^|\s)\S/g, function (c) { return c.toUpperCase(); });
+  return '📋 Asignación · ' + dd + '/' + mm + '/' + f.getFullYear() +
+    (nombre ? ' · ' + nombre : '') + ' · ' + n + (n === 1 ? ' caso' : ' casos');
 }
 
 // ============================================================
@@ -681,7 +698,7 @@ function notificarAsignacionesPendientes(opciones) {
         Asignaciones_enriquecerCasos_(datos.ctx, grupo.casos);
         // Saludo con solo el primer nombre, derivado del correo (como las demás notificaciones).
         var primerNombre = emailANombre(grupo.email, 'PRIMER_NOMBRE') || 'Analista';
-        var correo = Asignaciones_construirCorreo_(primerNombre, grupo.casos, urlHoja);
+        var correo = Asignaciones_construirCorreo_(primerNombre, grupo.casos, urlHoja, grupo.nombre);
         MailApp.sendEmail({
           to: grupo.email,
           cc: Asignaciones_resolverCC_(grupo.email),
