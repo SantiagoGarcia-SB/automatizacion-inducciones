@@ -2,36 +2,36 @@
  * ============================================================
  * Asignaciones — notificación automática de casos asignados
  *
- * El admin asigna escribiendo el NOMBRE del analista en la columna
+ * El admin asigna escribiendo (o arrastrando) el NOMBRE del analista en la columna
  * "ASIGNADA A…" de la hoja "registro analisis". Flujo:
  *
- *   1. onEdit (marcarAsignacionPendiente): anota en una cola SOLO las filas
- *      (por UUID) donde el admin escribió un nombre. Lo ya asignado antes no
- *      se anota, así que nunca genera correo.
- *   2. Trigger por tiempo (notificarAsignacionesPendientes): toma la cola,
- *      revisa cada caso y envía UN correo por analista con todos sus casos.
+ *   1. onEdit (marcarAsignacionPendiente): solo deja constancia de que se editó
+ *      ASIGNADA A… (hora de la última edición). No depende del rango que reporte
+ *      Sheets, que en un arrastre puede ser incompleto.
+ *   2. Trigger por tiempo (procesarAsignacionesProgramado): cuando pasan
+ *      ASIGNACIONES_ESPERA_MS sin nuevas ediciones revisa la columna completa y envía
+ *      UN correo por analista con TODOS sus casos pendientes. Así escribir y
+ *      arrastrar sale en un solo correo.
  *   3. Con el correo enviado escribe:
  *        - "F.H Asignacion"      (Control_General) → hora real de envío.
  *        - "Analista Notificado" (Control_General) → nombre notificado.
  *        - "Fecha Evaluacion"    (registro analisis) → fecha de asignación.
  *        - una línea en Historial_Asignaciones.
  *
- * Reglas al enviar (por caso):
- *   - ASIGNADA A… con nombre y sin REGISTRO ANALISTA SAI (aún en análisis).
- *   - "Fecha Evaluacion" VACÍA. Si ya tiene fecha no se asigna: se avisa al admin
- *     (debe dejarla vacía y volver a escribir el nombre). Excepción: una
- *     reasignación (el caso ya fue notificado a otra persona) — ahí la fecha es
- *     la que puso este mismo módulo.
- *   - Mismo nombre ya notificado → no se reenvía; otro nombre → reasignación.
- *   - Nombre sin correo en Config_Analistas → no se envía, se avisa y el caso
- *     queda en la cola hasta que se agregue el nombre.
- *   - Si el envío falla no se escribe nada y el caso sigue en la cola.
+ * Caso pendiente = fila con nombre en ASIGNADA A…, sin REGISTRO ANALISTA SAI,
+ * con "Fecha Evaluacion" VACÍA y sin "Analista Notificado".
+ *   - Mismo nombre ya notificado → no se reenvía; otro nombre → reasignación
+ *     (ahí la fecha llena es la que puso este módulo).
+ *   - Nombre sin correo en Config_Analistas → no se envía y se avisa al admin;
+ *     se reintenta al agregarlo.
+ *   - Si el envío falla no se escribe nada y se reintenta en el siguiente ciclo.
  *
  * Nombre → correo: pestaña "Config_Analistas" del libro de control
  * (NOMBRE_EN_SHEET | EMAIL | ACTIVO), mantenida por el admin.
  *
- * Configuración: ejecutar UNA VEZ configurarTriggerAsignaciones() desde el editor.
- * Prueba sin enviar nada: previsualizarAsignacionesPendientes().
+ * Puesta en marcha: ejecutar UNA VEZ configurarTriggerAsignaciones(). Para enviar lo pendiente
+ * al instante: ejecutar notificarAsignacionesPendientes(). Para ver qué saldría sin enviar:
+ * previsualizarAsignacionesPendientes().
  * ============================================================
  */
 
@@ -43,22 +43,17 @@ var ASIGNACIONES_COL_FH = 'F.H Asignacion';
 var ASIGNACIONES_COL_NOTIFICADO = 'Analista Notificado';
 var ASIGNACIONES_MODULO = 'Asignaciones.js';
 var ASIGNACIONES_PROP_ULTIMO_AVISO = 'ASIGNACIONES_ULTIMO_AVISO';
-/** Cola de asignaciones por notificar: UUIDs separados por coma. */
-var ASIGNACIONES_PROP_COLA = 'ASIGNACIONES_COLA';
-var ASIGNACIONES_PROP_FIRMA_COLA = 'ASIGNACIONES_FIRMA_COLA';
-var ASIGNACIONES_PROP_ULTIMO_INTENTO = 'ASIGNACIONES_ULTIMO_INTENTO';
+/** Hora (ms) de la última edición de ASIGNADA A… aún sin atender. */
+var ASIGNACIONES_PROP_ULTIMA_EDICION = 'ASIGNACIONES_ULTIMA_EDICION';
+var ASIGNACIONES_PROP_ULTIMO_BARRIDO = 'ASIGNACIONES_ULTIMO_BARRIDO';
 var ASIGNACIONES_PROP_COL_ASIGNADA = 'ASIGNACIONES_COL_ASIGNADA';
-var ASIGNACIONES_PROP_COL_UUID = 'ASIGNACIONES_COL_UUID';
 var ASIGNACIONES_LEASE = 'asignaciones';
-var ASIGNACIONES_LEASE_COLA = 'asignaciones_cola';
 /** Un préstamo vence solo si la corrida muere; GAS corta a los 6 min. */
 var ASIGNACIONES_LEASE_TTL_MS = 5 * 60 * 1000;
-/** Una propiedad admite ~9 KB: 200 UUID (37 caracteres c/u) caben de sobra. */
-var ASIGNACIONES_COLA_MAX = 200;
-/** Máximo de filas que se leen en una sola edición (pegados grandes). */
-var ASIGNACIONES_EDICION_MAX_FILAS = 500;
-/** Casos que esperan un correo (nombre sin Config_Analistas) se reintentan como mucho cada hora. */
-var ASIGNACIONES_REINTENTO_MS = 60 * 60 * 1000;
+/** Calma tras la última edición antes de enviar: el arrastre sale en un solo correo. */
+var ASIGNACIONES_ESPERA_MS = 2 * 60 * 1000;
+/** Pasada de seguridad aunque no haya ediciones (nombres agregados luego a Config_Analistas, etc.). */
+var ASIGNACIONES_BARRIDO_MS = 60 * 60 * 1000;
 
 // ============================================================
 //  UTILIDADES PURAS (testeables)
@@ -128,84 +123,74 @@ function Asignaciones_construirMapaAnalistas_(valores) {
 }
 
 /**
- * Decide qué hacer con cada caso de la cola (sin enviar ni escribir nada).
+ * Decide qué filas de registro analisis tienen una asignación por notificar
+ * (sin enviar ni escribir nada).
+ *
+ * Una fila es pendiente si tiene nombre en ASIGNADA A…, no tiene REGISTRO ANALISTA SAI,
+ * existe en Control_General y:
+ *   - primera asignación: "Fecha Evaluacion" vacía y "Analista Notificado" vacío;
+ *   - reasignación: "Analista Notificado" con otro nombre.
  *
  * @param {Object} d
- * @param {string[]} d.cola            UUIDs anotados por el onEdit.
  * @param {string[]} d.asignadas       ASIGNADA A… por fila de registro (índice 0 = fila 2).
  * @param {Array}    d.fechasEvaluacion
  * @param {Array}    d.registroSai
  * @param {string[]} d.uuids
+ * @param {Array}    [d.lotes]         codigo lote por fila (opcional).
  * @param {Object}   d.indiceControl   UUID → {fila, fh, notificado}
  * @param {Object}   d.mapa            Mapa de analistas (Asignaciones_construirMapaAnalistas_).
- * @returns {{porEmail:Object, sinCorreo:Object, sinCorreoUuids:string[], bloqueadas:Array,
- *            sinFilaControl:number, resueltos:string[], omitidas:Object}}
- *   resueltos: casos que salen de la cola sin enviarse (nada que hacer o ya resueltos).
- *   Los que sí se agrupan en porEmail salen de la cola cuando el envío resulta exitoso.
+ * @returns {{porEmail:Object, sinCorreo:Object, sinCorreoCasos:Array, sinFilaControl:number, omitidas:Object}}
+ *   sinCorreoCasos: filas pendientes cuyo nombre no está en Config_Analistas.
+ *   omitidas: conteo por motivo para diagnosticar por qué una fila no generó correo.
  */
 function Asignaciones_detectarPendientes_(d) {
   var porEmail = {};
   var sinCorreo = {};
-  var sinCorreoUuids = [];
-  var bloqueadas = [];
-  var resueltos = [];
+  var sinCorreoCasos = [];
   var sinFilaControl = 0;
-  var omitidas = { noEncontradas: 0, sinAsignar: 0, analizadas: 0, sinFilaControl: 0, fechaOcupada: 0, yaNotificadas: 0 };
+  var omitidas = { analizadas: 0, sinFilaControl: 0, fechaOcupada: 0, yaNotificadas: 0 };
 
-  var filaPorUuid = {};
-  for (var k = 0; k < d.uuids.length; k++) {
-    var u = String(d.uuids[k] || '').trim();
-    if (u && filaPorUuid[u] === undefined) filaPorUuid[u] = k;
-  }
-
-  (d.cola || []).forEach(function (uuid) {
-    var i = filaPorUuid[uuid];
-    if (i === undefined) { omitidas.noEncontradas++; resueltos.push(uuid); return; }
-
+  for (var i = 0; i < d.asignadas.length; i++) {
     var nombre = String(d.asignadas[i] || '').trim();
-    if (!nombre) { omitidas.sinAsignar++; resueltos.push(uuid); return; }
-    if (String(d.registroSai[i] || '').trim()) { omitidas.analizadas++; resueltos.push(uuid); return; }
+    if (!nombre) continue;
+    if (String(d.registroSai[i] || '').trim()) { omitidas.analizadas++; continue; }
 
-    var ctl = d.indiceControl[uuid];
-    if (!ctl) { sinFilaControl++; omitidas.sinFilaControl++; resueltos.push(uuid); return; }
+    var uuid = String(d.uuids[i] || '').trim();
+    var ctl = uuid ? d.indiceControl[uuid] : null;
+    if (!ctl) { sinFilaControl++; omitidas.sinFilaControl++; continue; }
 
     var nombreNorm = Asignaciones_normalizarNombre_(nombre);
     var notificado = Asignaciones_normalizarNombre_(ctl.notificado);
-    if (notificado === nombreNorm) { omitidas.yaNotificadas++; resueltos.push(uuid); return; }
+    if (notificado === nombreNorm) { omitidas.yaNotificadas++; continue; }
 
     var esReasignacion = !!notificado;
     var fechaEval = d.fechasEvaluacion[i];
     var fechaLlena = !(fechaEval === undefined || fechaEval === null || String(fechaEval).trim() === '');
-    if (!esReasignacion && fechaLlena) {
-      omitidas.fechaOcupada++;
-      bloqueadas.push({ filaRegistro: i + 2, uuid: uuid, nombreEnSheet: nombre });
-      resueltos.push(uuid);
-      return;
-    }
+    if (!esReasignacion && fechaLlena) { omitidas.fechaOcupada++; continue; }
+
+    var caso = {
+      filaRegistro: i + 2,
+      uuid: uuid,
+      nombreEnSheet: nombre,
+      filaControl: ctl.fila,
+      reasignado: esReasignacion,
+      idLote: d.lotes ? String(d.lotes[i] === undefined || d.lotes[i] === null ? '' : d.lotes[i]).trim() : ''
+    };
 
     var analista = d.mapa[nombreNorm];
     if (!analista) {
       sinCorreo[nombreNorm] = (sinCorreo[nombreNorm] || 0) + 1;
-      sinCorreoUuids.push(uuid);
-      return;
+      sinCorreoCasos.push(caso);
+      continue;
     }
 
     if (!porEmail[analista.email]) {
       porEmail[analista.email] = { nombre: analista.nombre, email: analista.email, casos: [] };
     }
-    porEmail[analista.email].casos.push({
-      filaRegistro: i + 2,
-      uuid: uuid,
-      nombreEnSheet: nombre,
-      filaControl: ctl.fila,
-      reasignado: esReasignacion
-    });
-  });
+    porEmail[analista.email].casos.push(caso);
+  }
 
-  return {
-    porEmail: porEmail, sinCorreo: sinCorreo, sinCorreoUuids: sinCorreoUuids, bloqueadas: bloqueadas,
-    sinFilaControl: sinFilaControl, resueltos: resueltos, omitidas: omitidas
-  };
+  return { porEmail: porEmail, sinCorreo: sinCorreo, sinCorreoCasos: sinCorreoCasos, sinFilaControl: sinFilaControl, omitidas: omitidas };
 }
 
 function Asignaciones_escapar_(valor) {
@@ -376,10 +361,9 @@ function Asignaciones_asegurarColumnas_(hojaControl) {
 }
 
 /**
- * Lee lo necesario y decide qué hacer con cada caso de la cola (sin enviar ni escribir).
- * @param {string[]} cola UUIDs anotados por el onEdit.
+ * Lee lo necesario y detecta pendientes (sin enviar ni escribir nada).
  */
-function Asignaciones_recolectar_(cola) {
+function Asignaciones_recolectar_() {
   var libroAnalisis = SpreadsheetRegistry_get(getArchivoAnalisisId());
   var libroControl = SpreadsheetRegistry_get(getHojaControlId());
 
@@ -395,7 +379,8 @@ function Asignaciones_recolectar_(cola) {
     asignada: Asignaciones_buscarColumna_(encAnalisis, 'ASIGNADA A'),
     fechaEval: Asignaciones_buscarColumna_(encAnalisis, 'Fecha Evaluacion'),
     registroSai: Asignaciones_buscarColumna_(encAnalisis, 'REGISTRO ANALISTA SAI'),
-    uuid: Asignaciones_buscarColumna_(encAnalisis, 'UUID_SISTEMA')
+    uuid: Asignaciones_buscarColumna_(encAnalisis, 'UUID_SISTEMA'),
+    lote: Asignaciones_buscarColumna_(encAnalisis, 'codigo lote')
   };
   if (!cols.asignada || !cols.uuid) throw new Error('registro analisis no tiene ASIGNADA A… o UUID_SISTEMA.');
 
@@ -417,11 +402,11 @@ function Asignaciones_recolectar_(cola) {
   }
 
   var resultado = Asignaciones_detectarPendientes_({
-    cola: cola,
     asignadas: Asignaciones_leerColumna_(hojaAnalisis, cols.asignada, ultimaAnalisis),
     fechasEvaluacion: Asignaciones_leerColumna_(hojaAnalisis, cols.fechaEval, ultimaAnalisis),
     registroSai: Asignaciones_leerColumna_(hojaAnalisis, cols.registroSai, ultimaAnalisis),
     uuids: Asignaciones_leerColumna_(hojaAnalisis, cols.uuid, ultimaAnalisis),
+    lotes: Asignaciones_leerColumna_(hojaAnalisis, cols.lote, ultimaAnalisis),
     indiceControl: indiceControl,
     mapa: mapa
   });
@@ -548,99 +533,31 @@ function Asignaciones_avisarSinCorreo_(sinCorreo) {
   props.setProperty(ASIGNACIONES_PROP_ULTIMO_AVISO, firma);
 }
 
-/**
- * Avisa al admin (BCC_AUDITORIA) de asignaciones que NO se notificaron porque la fila
- * ya tenía "Fecha Evaluacion". Salen de la cola: para asignarlas hay que dejar la
- * fecha vacía y volver a escribir el nombre.
- * @param {Array<{filaRegistro:number, nombreEnSheet:string}>} bloqueadas
- */
-function Asignaciones_avisarFechaOcupada_(bloqueadas) {
-  if (!bloqueadas || !bloqueadas.length) return;
-  var detalle = bloqueadas.map(function (b) { return 'fila ' + b.filaRegistro + ' (' + b.nombreEnSheet + ')'; }).join(', ');
-  _registrarEvento_('WARN', ASIGNACIONES_MODULO, 'Asignaciones con Fecha Evaluacion ya diligenciada', detalle);
-
-  var destino = typeof BCC_AUDITORIA === 'string' ? BCC_AUDITORIA : '';
-  if (!destino) return;
-  MailApp.sendEmail({
-    to: destino,
-    subject: '⚠️ Asignaciones sin notificar · Fecha Evaluacion ya diligenciada',
-    htmlBody: '<p>Estas filas de <strong>registro analisis</strong> tienen un nombre en <strong>ASIGNADA A…</strong> ' +
-      'pero <strong>Fecha Evaluacion</strong> ya estaba diligenciada, por lo que no se envi&oacute; el correo ni se registr&oacute; la hora:</p><p>' +
-      Asignaciones_escapar_(detalle) + '</p><p>Para asignarlas: deja <strong>Fecha Evaluacion</strong> vac&iacute;a y vuelve a escribir el nombre.</p>',
-    name: 'Inducciones · El Libertador'
-  });
-}
-
 // ============================================================
 //  ENTRADAS PÚBLICAS
 // ============================================================
 
 // ------------------------------------------------------------
-//  Cola de asignaciones: el onEdit anota, el trigger por tiempo atiende
+//  Aviso por edición y compuerta del trigger
 // ------------------------------------------------------------
 
-function Asignaciones_leerCola_() {
-  var texto = PropertiesService.getScriptProperties().getProperty(ASIGNACIONES_PROP_COLA) || '';
-  return texto.split(',').filter(function (x) { return x; });
-}
-
 /**
- * Lee, modifica y guarda la cola con un préstamo muy corto para que dos ediciones
- * (o una edición y una corrida) no se pisen. Si no se consigue, sigue igual: perder
- * un aviso es mejor que bloquear la edición del admin.
- * @param {function(string[]):string[]} fn Recibe la cola y devuelve la nueva.
- */
-function Asignaciones_modificarCola_(fn) {
-  var token = null;
-  try { token = Lease_adquirir(ASIGNACIONES_LEASE_COLA, 15000); } catch (e) { token = null; }
-  try {
-    var props = PropertiesService.getScriptProperties();
-    var nueva = fn(Asignaciones_leerCola_());
-    if (nueva.length > ASIGNACIONES_COLA_MAX) nueva = nueva.slice(0, ASIGNACIONES_COLA_MAX);
-    if (nueva.length) props.setProperty(ASIGNACIONES_PROP_COLA, nueva.join(','));
-    else props.deleteProperty(ASIGNACIONES_PROP_COLA);
-  } finally {
-    if (token) Lease_liberar(ASIGNACIONES_LEASE_COLA, token);
-  }
-}
-
-function Asignaciones_agregarACola_(uuids) {
-  if (!uuids.length) return;
-  Asignaciones_modificarCola_(function (cola) {
-    var vistos = {};
-    cola.forEach(function (u) { vistos[u] = true; });
-    uuids.forEach(function (u) { if (!vistos[u]) { vistos[u] = true; cola.push(u); } });
-    return cola;
-  });
-}
-
-function Asignaciones_quitarDeCola_(uuids) {
-  if (!uuids.length) return;
-  var quitar = {};
-  uuids.forEach(function (u) { quitar[u] = true; });
-  Asignaciones_modificarCola_(function (cola) {
-    return cola.filter(function (u) { return !quitar[u]; });
-  });
-}
-
-/**
- * ¿Vale la pena abrir los libros? Solo si hay algo en la cola y no es una cola que ya
- * se intentó sin éxito por falta de correo (esa se reintenta cada hora, o antes si
- * entra algo nuevo). Solo lee Script Properties.
+ * ¿Vale la pena abrir los libros? Solo si hay una edición
+ * ya "en calma" (pasaron ASIGNACIONES_ESPERA_MS sin otra), o si pasó una hora desde la
+ * última pasada. Solo lee Script Properties.
  */
 function Asignaciones_hayTrabajo_() {
   var props = PropertiesService.getScriptProperties();
-  var cola = props.getProperty(ASIGNACIONES_PROP_COLA) || '';
-  if (!cola) return false;
-  if (props.getProperty(ASIGNACIONES_PROP_FIRMA_COLA) !== cola) return true;
-  var ultimo = Number(props.getProperty(ASIGNACIONES_PROP_ULTIMO_INTENTO) || 0);
-  return (Date.now() - ultimo) >= ASIGNACIONES_REINTENTO_MS;
+  var ultimaEdicion = Number(props.getProperty(ASIGNACIONES_PROP_ULTIMA_EDICION) || 0);
+  if (ultimaEdicion) return (Date.now() - ultimaEdicion) >= ASIGNACIONES_ESPERA_MS;
+  var ultimoBarrido = Number(props.getProperty(ASIGNACIONES_PROP_ULTIMO_BARRIDO) || 0);
+  return (Date.now() - ultimoBarrido) >= ASIGNACIONES_BARRIDO_MS;
 }
 
 /**
- * onEdit instalable sobre el libro de análisis. Si el admin escribió un nombre en
- * ASIGNADA A…, anota el UUID de esas filas en la cola. No envía correos ni escribe
- * celdas. Ejecutar configurarTriggerAsignaciones() para instalarlo.
+ * onEdit instalable sobre el libro de análisis. Si la edición toca la columna
+ * ASIGNADA A… anota la hora de la última edición; nada más (no lee celdas, no envía,
+ * no depende de qué filas reporte Sheets). Ejecutar configurarTriggerAsignaciones().
  * @param {GoogleAppsScript.Events.SheetsOnEdit} e
  */
 function marcarAsignacionPendiente(e) {
@@ -648,66 +565,46 @@ function marcarAsignacionPendiente(e) {
     if (!e || !e.range) return;
     var hoja = e.range.getSheet();
     if (hoja.getName() !== ASIGNACIONES_HOJA_ANALISIS) return;
+    if (e.range.getRow() + e.range.getNumRows() - 1 < 2) return;
 
     var props = PropertiesService.getScriptProperties();
-    var colAsignada = Number(props.getProperty(ASIGNACIONES_PROP_COL_ASIGNADA) || 0);
-    var colUuid = Number(props.getProperty(ASIGNACIONES_PROP_COL_UUID) || 0);
-    if (!colAsignada || !colUuid) {
+    var col = Number(props.getProperty(ASIGNACIONES_PROP_COL_ASIGNADA) || 0);
+    if (!col) {
       var enc = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
-      colAsignada = Asignaciones_buscarColumna_(enc, 'ASIGNADA A');
-      colUuid = Asignaciones_buscarColumna_(enc, 'UUID_SISTEMA');
-      if (colAsignada) props.setProperty(ASIGNACIONES_PROP_COL_ASIGNADA, String(colAsignada));
-      if (colUuid) props.setProperty(ASIGNACIONES_PROP_COL_UUID, String(colUuid));
+      col = Asignaciones_buscarColumna_(enc, 'ASIGNADA A');
+      if (col) props.setProperty(ASIGNACIONES_PROP_COL_ASIGNADA, String(col));
     }
-    if (!colAsignada || !colUuid) return;
 
     var c1 = e.range.getColumn();
     var c2 = c1 + e.range.getNumColumns() - 1;
-    if (colAsignada < c1 || colAsignada > c2) return;
-
-    var fila1 = Math.max(2, e.range.getRow());
-    var filaN = e.range.getRow() + e.range.getNumRows() - 1;
-    var n = Math.min(filaN - fila1 + 1, ASIGNACIONES_EDICION_MAX_FILAS);
-    if (n < 1) return;
-
-    var nombres = hoja.getRange(fila1, colAsignada, n, 1).getValues();
-    var uuids = hoja.getRange(fila1, colUuid, n, 1).getValues();
-    var anotar = [];
-    for (var i = 0; i < n; i++) {
-      var nombre = String(nombres[i][0] || '').trim();
-      var uuid = String(uuids[i][0] || '').trim();
-      if (nombre && uuid) anotar.push(uuid);
-    }
-    Asignaciones_agregarACola_(anotar);
+    if (col && col >= c1 && col <= c2) props.setProperty(ASIGNACIONES_PROP_ULTIMA_EDICION, String(Date.now()));
   } catch (err) {
     console.warn('marcarAsignacionPendiente: ' + err.message);
   }
 }
 
 /**
- * Trigger por tiempo: notifica las asignaciones anotadas en la cola.
+ * Núcleo: notifica las asignaciones pendientes.
  *
- * Concurrencia: NO retiene el lock global del proyecto. Antes de abrir nada
- * consulta la cola (salida en milisegundos si no hay trabajo) y usa un préstamo
- * (Lease) para no correr dos veces a la vez; correos y sellos van sin bloquear.
+ * Concurrencia: NO retiene el lock global del proyecto. Antes de abrir nada consulta
+ * la compuerta (milisegundos si no hay trabajo) y usa un préstamo (Lease) para no
+ * correr dos veces a la vez; correos y sellos van sin bloquear a las demás funciones.
  *
  * @param {{simular?:boolean, forzar?:boolean}} [opciones]
- *   simular=true no envía ni escribe nada; forzar=true ignora la compuerta.
- * @returns {{ok:boolean, correos:number, casos:number, sinCorreo:Object, bloqueadas:Array, errores:string[], omitida?:boolean, mensaje?:string}}
+ *   simular=true no envía ni escribe nada; forzar=true ignora la compuerta de espera.
+ * @returns {{ok:boolean, correos:number, casos:number, sinCorreo:Object, errores:string[], omitida?:boolean, mensaje?:string}}
  */
-function notificarAsignacionesPendientes(opciones) {
+function Asignaciones_ejecutar_(opciones) {
   var simular = !!(opciones && opciones.simular);
   var forzar = !!(opciones && opciones.forzar);
-  var resumen = { ok: true, correos: 0, casos: 0, sinCorreo: {}, bloqueadas: [], errores: [] };
+  var resumen = { ok: true, correos: 0, casos: 0, sinCorreo: {}, errores: [] };
 
   if (!simular && !forzar && !Asignaciones_hayTrabajo_()) {
     resumen.omitida = true;
     return resumen;
   }
 
-  var cola = Asignaciones_leerCola_();
-  if (!cola.length) return resumen;
-
+  var props = PropertiesService.getScriptProperties();
   var lease = null;
   if (!simular) {
     lease = Lease_adquirir(ASIGNACIONES_LEASE, ASIGNACIONES_LEASE_TTL_MS);
@@ -716,25 +613,31 @@ function notificarAsignacionesPendientes(opciones) {
       resumen.mensaje = 'Otra corrida de asignaciones está en curso.';
       return resumen;
     }
+    // Se limpia ANTES de leer: una edición posterior lo vuelve a marcar.
+    props.deleteProperty(ASIGNACIONES_PROP_ULTIMA_EDICION);
   }
 
+  var reintentar = false;
   try {
-    var datos = Asignaciones_recolectar_(cola);
+    var datos = Asignaciones_recolectar_();
     var grupos = Object.keys(datos.resultado.porEmail).map(function (k) { return datos.resultado.porEmail[k]; });
     resumen.sinCorreo = datos.resultado.sinCorreo;
-    resumen.bloqueadas = datos.resultado.bloqueadas;
     resumen.omitidas = datos.resultado.omitidas;
 
     if (simular) {
       resumen.correos = grupos.length;
       resumen.casos = grupos.reduce(function (s, g) { return s + g.casos.length; }, 0);
-      resumen.detalle = grupos.map(function (g) { return g.nombre + ' <' + g.email + '>: ' + g.casos.length + ' caso/s'; });
+      resumen.detalle = grupos.map(function (g) {
+        var lotes = {};
+        g.casos.forEach(function (c) { if (c.idLote) lotes[c.idLote] = (lotes[c.idLote] || 0) + 1; });
+        return g.nombre + ' <' + g.email + '>: ' + g.casos.length + ' caso/s | lotes: ' +
+          Object.keys(lotes).map(function (l) { return l + ' (' + lotes[l] + ')'; }).join(', ');
+      });
       return resumen;
     }
 
-    var salen = datos.resultado.resueltos.slice(); // salen de la cola sin enviarse
-    Asignaciones_avisarFechaOcupada_(datos.resultado.bloqueadas);
     Asignaciones_avisarSinCorreo_(datos.resultado.sinCorreo);
+    if (!grupos.length) return resumen;
 
     var cuota = MailApp.getRemainingDailyQuota();
     var urlHoja = datos.ctx.libroAnalisis.getUrl ? datos.ctx.libroAnalisis.getUrl() : '';
@@ -742,7 +645,7 @@ function notificarAsignacionesPendientes(opciones) {
     if (urlHoja && gid !== '') urlHoja += '#gid=' + gid;
 
     grupos.forEach(function (grupo) {
-      if (cuota < 1) { resumen.errores.push('Sin cuota de correo para ' + grupo.email); return; }
+      if (cuota < 1) { reintentar = true; resumen.errores.push('Sin cuota de correo para ' + grupo.email); return; }
 
       try {
         Asignaciones_enriquecerCasos_(datos.ctx, grupo.casos);
@@ -760,16 +663,15 @@ function notificarAsignacionesPendientes(opciones) {
         });
         cuota--;
       } catch (errEnvio) {
-        // Sin sello y sigue en la cola: se reintenta en la siguiente corrida.
+        // Sin sello: se reintenta en el siguiente ciclo.
+        reintentar = true;
         resumen.errores.push(grupo.email + ': ' + errEnvio.message);
         _registrarEvento_('ERROR', ASIGNACIONES_MODULO, 'No se pudo enviar correo de asignación', grupo.email + ' | ' + errEnvio.message);
         return;
       }
 
-      // El correo salió: el caso ya no se reenvía aunque falle algún sello.
-      grupo.casos.forEach(function (caso) { salen.push(caso.uuid); });
-
       // Hora real de asignación = justo después del envío exitoso (misma para todo el correo).
+      // Si un sello falla NO se reintenta el correo (se duplicaría): queda en Logs_Sistema.
       var ahora = new Date();
       grupo.casos.forEach(function (caso) {
         try {
@@ -784,14 +686,13 @@ function notificarAsignacionesPendientes(opciones) {
       resumen.casos += grupo.casos.length;
     });
 
-    Asignaciones_quitarDeCola_(salen);
-
     if (resumen.correos) {
       _registrarEvento_('INFO', ASIGNACIONES_MODULO, 'Asignaciones notificadas', resumen.correos + ' correo(s), ' + resumen.casos + ' caso(s)');
     }
     resumen.ok = resumen.errores.length === 0;
     return resumen;
   } catch (e) {
+    reintentar = true;
     _registrarEvento_('ERROR', ASIGNACIONES_MODULO, 'Fallo en notificarAsignacionesPendientes', e.message);
     resumen.ok = false;
     resumen.errores.push(e.message);
@@ -799,19 +700,32 @@ function notificarAsignacionesPendientes(opciones) {
   } finally {
     if (!simular) {
       try {
-        var props = PropertiesService.getScriptProperties();
-        // Sin errores, lo que quede en la cola espera un correo en Config_Analistas: se reintenta cada hora.
-        // Con errores (p. ej. cuota) se reintenta en el siguiente ciclo de 5 min.
-        if (resumen.ok) {
-          props.setProperty(ASIGNACIONES_PROP_FIRMA_COLA, props.getProperty(ASIGNACIONES_PROP_COLA) || '');
-          props.setProperty(ASIGNACIONES_PROP_ULTIMO_INTENTO, String(Date.now()));
-        } else {
-          props.deleteProperty(ASIGNACIONES_PROP_FIRMA_COLA);
-        }
+        props.setProperty(ASIGNACIONES_PROP_ULTIMO_BARRIDO, String(Date.now()));
+        // Reintento en el siguiente ciclo (sin esperar la calma de edición).
+        if (reintentar) props.setProperty(ASIGNACIONES_PROP_ULTIMA_EDICION, String(Date.now() - ASIGNACIONES_ESPERA_MS));
       } catch (errProp) { /* sin consecuencias */ }
       Lease_liberar(ASIGNACIONES_LEASE, lease);
     }
   }
+}
+
+// ------------------------------------------------------------
+//  Puntos de entrada
+// ------------------------------------------------------------
+
+/**
+ * Editor / menú: revisa la hoja y envía AHORA lo pendiente (no espera la calma de edición).
+ * Hace exactamente lo mismo que el trigger, sin la espera.
+ */
+function notificarAsignacionesPendientes() {
+  var r = Asignaciones_ejecutar_({ forzar: true });
+  console.log(JSON.stringify(r, null, 2));
+  return r;
+}
+
+/** Trigger por tiempo (cada 5 min): solo trabaja si hay una edición en calma o toca la pasada de seguridad. */
+function procesarAsignacionesProgramado() {
+  return Asignaciones_ejecutar_({});
 }
 
 /** Equivalencias iniciales nombre en el sheet → correo (entregadas por operación). */
@@ -888,25 +802,25 @@ function configurarHojaConfigAnalistas() {
  * Ejecutar desde el editor para ver qué se enviaría, sin enviar ni escribir nada.
  */
 function previsualizarAsignacionesPendientes() {
-  var r = notificarAsignacionesPendientes({ simular: true });
+  var r = Asignaciones_ejecutar_({ simular: true });
   console.log(JSON.stringify(r, null, 2));
   return r;
 }
 
 /**
  * Crea (idempotente) los triggers de asignaciones. Ejecutar UNA VEZ desde el editor:
- *   - por tiempo (cada `minutos`): notificarAsignacionesPendientes
- *   - onEdit sobre el libro de análisis: marcarAsignacionPendiente (anota las filas asignadas)
+ *   - por tiempo (cada `minutos`): procesarAsignacionesProgramado
+ *   - onEdit sobre el libro de análisis: marcarAsignacionPendiente (marca la hora de la última edición)
  * @param {number} [minutos=5] 1, 5, 10, 15 o 30.
  */
 function configurarTriggerAsignaciones(minutos) {
-  var handlers = ['notificarAsignacionesPendientes', 'marcarAsignacionPendiente'];
+  var handlers = ['notificarAsignacionesPendientes', 'procesarAsignacionesProgramado', 'marcarAsignacionPendiente'];
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
     if (handlers.indexOf(triggers[i].getHandlerFunction()) !== -1) ScriptApp.deleteTrigger(triggers[i]);
   }
   var cada = [1, 5, 10, 15, 30].indexOf(minutos) !== -1 ? minutos : 5;
-  ScriptApp.newTrigger('notificarAsignacionesPendientes').timeBased().everyMinutes(cada).create();
+  ScriptApp.newTrigger('procesarAsignacionesProgramado').timeBased().everyMinutes(cada).create();
   ScriptApp.newTrigger('marcarAsignacionPendiente').forSpreadsheet(getArchivoAnalisisId()).onEdit().create();
-  return { ok: true, mensaje: 'Asignaciones: trigger cada ' + cada + ' min + aviso por edición (cola).' };
+  return { ok: true, mensaje: 'Asignaciones: trigger cada ' + cada + ' min + aviso por edición.' };
 }
