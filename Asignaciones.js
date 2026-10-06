@@ -18,10 +18,12 @@
  *        - "Fecha Evaluacion"    (registro analisis) → fecha de asignación.
  *        - una línea en Historial_Asignaciones.
  *
- * Caso pendiente = fila con nombre en ASIGNADA A…, sin REGISTRO ANALISTA SAI,
- * con "Fecha Evaluacion" VACÍA y sin "Analista Notificado".
- *   - Mismo nombre ya notificado → no se reenvía; otro nombre → reasignación
- *     (ahí la fecha llena es la que puso este módulo).
+ * Caso pendiente = fila con nombre en ASIGNADA A…, sin REGISTRO ANALISTA SAI y con
+ * "Fecha Evaluacion" VACÍA. La fecha vacía es la señal de "caso disponible": la operación puede
+ * borrarla para volver a asignar o cambiar el día, y el caso sale en el siguiente correo.
+ *   - Otro nombre distinto al ya notificado → reasignación (la fecha llena es la del sistema).
+ *   - Fila sellada hace menos de 30 min con la fecha aún vacía → no se reenvía (falló la escritura
+ *     de la fecha; evita repetir el correo en cada ciclo).
  *   - Nombre sin correo en Config_Analistas → no se envía y se avisa al admin;
  *     se reintenta al agregarlo.
  *   - Si el envío falla no se escribe nada y se reintenta en el siguiente ciclo.
@@ -52,6 +54,11 @@ var ASIGNACIONES_LEASE = 'asignaciones';
 var ASIGNACIONES_LEASE_TTL_MS = 5 * 60 * 1000;
 /** Calma tras la última edición antes de enviar: el arrastre sale en un solo correo. */
 var ASIGNACIONES_ESPERA_MS = 2 * 60 * 1000;
+/**
+ * Si una fila quedó sellada hace menos de esto y su Fecha Evaluacion sigue vacía, se asume que la
+ * escritura de la fecha falló (no que la operación la borró): no se reenvía el correo.
+ */
+var ASIGNACIONES_SELLO_RECIENTE_MS = 30 * 60 * 1000;
 /** Pasada de seguridad aunque no haya ediciones (nombres agregados luego a Config_Analistas, etc.). */
 var ASIGNACIONES_BARRIDO_MS = 60 * 60 * 1000;
 
@@ -126,10 +133,13 @@ function Asignaciones_construirMapaAnalistas_(valores) {
  * Decide qué filas de registro analisis tienen una asignación por notificar
  * (sin enviar ni escribir nada).
  *
- * Una fila es pendiente si tiene nombre en ASIGNADA A…, no tiene REGISTRO ANALISTA SAI,
- * existe en Control_General y:
- *   - primera asignación: "Fecha Evaluacion" vacía y "Analista Notificado" vacío;
- *   - reasignación: "Analista Notificado" con otro nombre.
+ * "Fecha Evaluacion" vacía = caso DISPONIBLE: la operación la borra cuando hay que volver a
+ * asignar o cambiar la fecha, y eso no debe bloquear nada. Una fila es pendiente si tiene
+ * nombre en ASIGNADA A…, no tiene REGISTRO ANALISTA SAI, existe en Control_General y:
+ *   - "Fecha Evaluacion" vacía (primera asignación o caso liberado de nuevo), o
+ *   - reasignación: "Analista Notificado" con otro nombre (la fecha llena es la del sistema).
+ * Excepción: fila sellada hace menos de ASIGNACIONES_SELLO_RECIENTE_MS con la fecha todavía vacía
+ * (la escritura de la fecha falló): no se reenvía para no duplicar correos en cada ciclo.
  *
  * @param {Object} d
  * @param {string[]} d.asignadas       ASIGNADA A… por fila de registro (índice 0 = fila 2).
@@ -137,18 +147,27 @@ function Asignaciones_construirMapaAnalistas_(valores) {
  * @param {Array}    d.registroSai
  * @param {string[]} d.uuids
  * @param {Array}    [d.lotes]         codigo lote por fila (opcional).
+ * @param {boolean}  [d.detalle]       true: devuelve también `detalle` (filas con Fecha Evaluacion vacía que no generan correo, y por qué).
  * @param {Object}   d.indiceControl   UUID → {fila, fh, notificado}
  * @param {Object}   d.mapa            Mapa de analistas (Asignaciones_construirMapaAnalistas_).
- * @returns {{porEmail:Object, sinCorreo:Object, sinCorreoCasos:Array, sinFilaControl:number, omitidas:Object}}
+ * @param {number}   [d.ahora]         Hora actual en ms (por defecto Date.now()).
+ * @returns {{porEmail:Object, sinCorreo:Object, sinCorreoCasos:Array, sinFilaControl:number, omitidas:Object,
+ *            conSelloSinFecha:Array, detalle:(Array|null)}}
  *   sinCorreoCasos: filas pendientes cuyo nombre no está en Config_Analistas.
+ *   conSelloSinFecha: filas ya selladas al mismo nombre con la fecha vacía ({filaRegistro, fhAsignacion}),
+ *     para rellenarla (Asignaciones_completarFechas_).
  *   omitidas: conteo por motivo para diagnosticar por qué una fila no generó correo.
  */
 function Asignaciones_detectarPendientes_(d) {
   var porEmail = {};
   var sinCorreo = {};
   var sinCorreoCasos = [];
+  var conSelloSinFecha = [];
   var sinFilaControl = 0;
-  var omitidas = { analizadas: 0, sinFilaControl: 0, fechaOcupada: 0, yaNotificadas: 0 };
+  var omitidas = { analizadas: 0, sinFilaControl: 0, fechaOcupada: 0, selloReciente: 0 };
+  var detalle = d.detalle ? [] : null;
+  var ahora = d.ahora || Date.now();
+  var esFecha = function (v) { return Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime()); };
 
   for (var i = 0; i < d.asignadas.length; i++) {
     var nombre = String(d.asignadas[i] || '').trim();
@@ -157,16 +176,32 @@ function Asignaciones_detectarPendientes_(d) {
 
     var uuid = String(d.uuids[i] || '').trim();
     var ctl = uuid ? d.indiceControl[uuid] : null;
-    if (!ctl) { sinFilaControl++; omitidas.sinFilaControl++; continue; }
+    if (!ctl) {
+      sinFilaControl++; omitidas.sinFilaControl++;
+      if (detalle) detalle.push({ filaRegistro: i + 2, uuid: uuid, nombre: nombre, motivo: uuid ? 'UUID sin fila en Control_General' : 'fila sin UUID_SISTEMA' });
+      continue;
+    }
 
     var nombreNorm = Asignaciones_normalizarNombre_(nombre);
     var notificado = Asignaciones_normalizarNombre_(ctl.notificado);
-    if (notificado === nombreNorm) { omitidas.yaNotificadas++; continue; }
-
-    var esReasignacion = !!notificado;
     var fechaEval = d.fechasEvaluacion[i];
     var fechaLlena = !(fechaEval === undefined || fechaEval === null || String(fechaEval).trim() === '');
-    if (!esReasignacion && fechaLlena) { omitidas.fechaOcupada++; continue; }
+    var mismoNombre = notificado === nombreNorm;
+    var esReasignacion = !!notificado && !mismoNombre;
+
+    if (!fechaLlena && mismoNombre && esFecha(ctl.fh)) {
+      conSelloSinFecha.push({ filaRegistro: i + 2, uuid: uuid, fhAsignacion: ctl.fh });
+    }
+
+    // Con fecha: ya asignada (salvo reasignación, que la notifica aunque la fecha sea la del sistema).
+    if (fechaLlena && !esReasignacion) { omitidas.fechaOcupada++; continue; }
+
+    // Fecha vacía pero sellada hace instantes: la escritura de la fecha falló; no duplicar el correo.
+    if (!fechaLlena && mismoNombre && esFecha(ctl.fh) && (ahora - ctl.fh.getTime()) < ASIGNACIONES_SELLO_RECIENTE_MS) {
+      omitidas.selloReciente++;
+      if (detalle) detalle.push({ filaRegistro: i + 2, uuid: uuid, nombre: nombre, motivo: 'sellada hace menos de 30 min y la fecha sigue vacía', fhAsignacion: ctl.fh });
+      continue;
+    }
 
     var caso = {
       filaRegistro: i + 2,
@@ -190,7 +225,10 @@ function Asignaciones_detectarPendientes_(d) {
     porEmail[analista.email].casos.push(caso);
   }
 
-  return { porEmail: porEmail, sinCorreo: sinCorreo, sinCorreoCasos: sinCorreoCasos, sinFilaControl: sinFilaControl, omitidas: omitidas };
+  return {
+    porEmail: porEmail, sinCorreo: sinCorreo, sinCorreoCasos: sinCorreoCasos, sinFilaControl: sinFilaControl,
+    omitidas: omitidas, conSelloSinFecha: conSelloSinFecha, detalle: detalle
+  };
 }
 
 function Asignaciones_escapar_(valor) {
@@ -363,7 +401,7 @@ function Asignaciones_asegurarColumnas_(hojaControl) {
 /**
  * Lee lo necesario y detecta pendientes (sin enviar ni escribir nada).
  */
-function Asignaciones_recolectar_() {
+function Asignaciones_recolectar_(opciones) {
   var libroAnalisis = SpreadsheetRegistry_get(getArchivoAnalisisId());
   var libroControl = SpreadsheetRegistry_get(getHojaControlId());
 
@@ -407,6 +445,7 @@ function Asignaciones_recolectar_() {
     registroSai: Asignaciones_leerColumna_(hojaAnalisis, cols.registroSai, ultimaAnalisis),
     uuids: Asignaciones_leerColumna_(hojaAnalisis, cols.uuid, ultimaAnalisis),
     lotes: Asignaciones_leerColumna_(hojaAnalisis, cols.lote, ultimaAnalisis),
+    detalle: !!(opciones && opciones.detalle),
     indiceControl: indiceControl,
     mapa: mapa
   });
@@ -458,6 +497,12 @@ function Asignaciones_sellarCaso_(ctx, caso, nombreEnSheet, ahora) {
     var celda = ctx.hojaAnalisis.getRange(caso.filaRegistro, ctx.colFechaEval);
     celda.setValue(ahora);
     if (typeof celda.setNumberFormat === 'function') celda.setNumberFormat('dd/MM/yyyy');
+    // Comprobación: si Sheets aceptó la escritura pero la celda quedó vacía, que quede en el log.
+    if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
+    var quedo = celda.getValue();
+    if (quedo === '' || quedo === null || quedo === undefined) {
+      throw new Error('Fecha Evaluacion no quedó escrita en la fila ' + caso.filaRegistro + ' de registro analisis');
+    }
   }
 }
 
@@ -796,6 +841,68 @@ function configurarHojaConfigAnalistas() {
     agregados++;
   });
   return { ok: true, agregados: agregados };
+}
+
+/**
+ * Editor: explica por qué filas con nombre en ASIGNADA A… y Fecha Evaluacion vacía NO generan correo
+ * (ya notificadas, sin UUID, sin fila en Control_General). No envía ni escribe nada.
+ */
+function diagnosticarAsignaciones() {
+  var datos = Asignaciones_recolectar_({ detalle: true });
+  var r = datos.resultado;
+  var salida = {
+    pendientesParaEnviar: Object.keys(r.porEmail).reduce(function (n, k) { return n + r.porEmail[k].casos.length; }, 0),
+    sinCorreoEnConfig: r.sinCorreo,
+    omitidas: r.omitidas,
+    filasConFechaVaciaQueNoSalen: r.detalle.length,
+    primeras: r.detalle.slice(0, 40)
+  };
+  console.log(JSON.stringify(salida, null, 2));
+  return salida;
+}
+
+/**
+ * Rellena "Fecha Evaluacion" en filas que YA fueron notificadas (tienen F.H Asignacion y
+ * Analista Notificado = nombre actual) pero cuya fecha está vacía. Usa la fecha de F.H Asignacion.
+ * OJO: una fecha vacía también es la señal de "caso disponible" (la operación la borra para volver a
+ * asignar); usar esto solo para recuperar filas cuyo borrado fue accidental. No envía correos.
+ * @returns {{ok:boolean, escritas:number, sinHora:number, noQuedaron:number[]}}
+ */
+function Asignaciones_completarFechas_() {
+  var lease = Lease_adquirir(ASIGNACIONES_LEASE, ASIGNACIONES_LEASE_TTL_MS);
+  if (!lease) return { ok: false, escritas: 0, sinHora: 0, noQuedaron: [], mensaje: 'Otra corrida de asignaciones está en curso.' };
+  try {
+    var datos = Asignaciones_recolectar_();
+    var ctx = datos.ctx;
+    if (!ctx.colFechaEval) throw new Error('registro analisis no tiene la columna Fecha Evaluacion.');
+
+    var filas = [];
+    var sinHora = 0;
+    datos.resultado.conSelloSinFecha.forEach(function (d) {
+      var celda = ctx.hojaAnalisis.getRange(d.filaRegistro, ctx.colFechaEval);
+      celda.setValue(d.fhAsignacion);
+      if (typeof celda.setNumberFormat === 'function') celda.setNumberFormat('dd/MM/yyyy');
+      filas.push(d.filaRegistro);
+    });
+    if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
+
+    var noQuedaron = filas.filter(function (f) {
+      var v = ctx.hojaAnalisis.getRange(f, ctx.colFechaEval).getValue();
+      return v === '' || v === null || v === undefined;
+    });
+    _registrarEvento_(noQuedaron.length ? 'WARN' : 'INFO', ASIGNACIONES_MODULO, 'Fechas de evaluación completadas',
+      filas.length + ' escrita(s), ' + noQuedaron.length + ' no quedaron escritas' + (noQuedaron.length ? ': filas ' + noQuedaron.slice(0, 20).join(', ') : ''));
+    return { ok: noQuedaron.length === 0, escritas: filas.length, sinHora: sinHora, noQuedaron: noQuedaron };
+  } finally {
+    Lease_liberar(ASIGNACIONES_LEASE, lease);
+  }
+}
+
+/** Editor: rellena Fecha Evaluacion de filas ya notificadas que la tienen vacía (ver Asignaciones_completarFechas_). */
+function completarFechasEvaluacion() {
+  var r = Asignaciones_completarFechas_();
+  console.log(JSON.stringify(r, null, 2));
+  return r;
 }
 
 /**

@@ -28,7 +28,8 @@ function loadSource() {
     notificarManual: notificarAsignacionesPendientes,
     programado: procesarAsignacionesProgramado,
     marcar: marcarAsignacionPendiente,
-    hayTrabajo: Asignaciones_hayTrabajo_
+    hayTrabajo: Asignaciones_hayTrabajo_,
+    completarFechas: Asignaciones_completarFechas_
   }; })()`;
   return eval(wrapped);
 }
@@ -147,10 +148,45 @@ describe('utilidades puras', () => {
       expect(a.detectar(base({ fechasEvaluacion: ['pendiente'] })).porEmail).toEqual({});
     });
 
-    it('ignora lo ya notificado al mismo analista', () => {
-      const r = a.detectar(base({ indiceControl: { u1: { fila: 5, fh: new Date(), notificado: 'María Pérez' } } }));
+    it('con la fecha llena, lo ya notificado al mismo analista no se reenvía', () => {
+      const r = a.detectar(base({
+        fechasEvaluacion: [new Date()],
+        indiceControl: { u1: { fila: 5, fh: new Date(2026, 9, 1), notificado: 'María Pérez' } }
+      }));
       expect(r.porEmail).toEqual({});
-      expect(r.omitidas.yaNotificadas).toBe(1);
+      expect(r.omitidas.fechaOcupada).toBe(1);
+    });
+
+    it('si la operación borra la fecha, el caso queda DISPONIBLE y vuelve a salir aunque ya se hubiera notificado', () => {
+      const r = a.detectar(base({
+        fechasEvaluacion: [''],
+        indiceControl: { u1: { fila: 5, fh: new Date(2026, 9, 1), notificado: 'María Pérez' } },
+        ahora: new Date(2026, 9, 6).getTime()
+      }));
+      expect(r.porEmail['maria@x.co'].casos).toHaveLength(1);
+      expect(r.porEmail['maria@x.co'].casos[0].reasignado).toBe(false);
+    });
+
+    it('si quedó sellada hace menos de 30 min con la fecha vacía (falló la escritura) NO se reenvía', () => {
+      const fh = new Date(2026, 9, 6, 10, 0);
+      const r = a.detectar(base({
+        indiceControl: { u1: { fila: 5, fh, notificado: 'María Pérez' } },
+        ahora: fh.getTime() + 10 * 60 * 1000
+      }));
+      expect(r.porEmail).toEqual({});
+      expect(r.omitidas.selloReciente).toBe(1);
+      // pasada la ventana, vuelve a estar disponible
+      const despues = a.detectar(base({
+        indiceControl: { u1: { fila: 5, fh, notificado: 'María Pérez' } },
+        ahora: fh.getTime() + 31 * 60 * 1000
+      }));
+      expect(despues.porEmail['maria@x.co'].casos).toHaveLength(1);
+    });
+
+    it('las filas selladas con la fecha vacía se listan para poder rellenarlas', () => {
+      const fh = new Date(2026, 9, 1, 8, 0);
+      const r = a.detectar(base({ indiceControl: { u1: { fila: 5, fh, notificado: 'María Pérez' } }, ahora: new Date(2026, 9, 6).getTime() }));
+      expect(r.conSelloSinFecha).toEqual([{ filaRegistro: 2, uuid: 'u1', fhAsignacion: fh }]);
     });
 
     it('reasignación: analista distinto al notificado, aunque Fecha Evaluacion tenga la fecha del sistema', () => {
@@ -174,6 +210,29 @@ describe('utilidades puras', () => {
       expect(r.porEmail).toEqual({});
       expect(r.omitidas).toMatchObject({ analizadas: 1, sinFilaControl: 1 });
       expect(r.sinFilaControl).toBe(1);
+    });
+
+    it('con detalle explica por qué una fila con Fecha Evaluacion vacía no genera correo', () => {
+      const ahora = Date.now();
+      const r = a.detectar(base({
+        detalle: true,
+        ahora,
+        asignadas: ['María Pérez', 'María Pérez', 'María Pérez'],
+        fechasEvaluacion: ['', '', new Date()],
+        registroSai: ['', '', ''],
+        uuids: ['u1', 'uX', 'u3'],
+        lotes: ['L-1', 'L-1', 'L-1'],
+        indiceControl: {
+          u1: { fila: 5, fh: new Date(ahora - 60 * 1000), notificado: 'María Pérez' },
+          u3: { fila: 7, fh: new Date(), notificado: 'María Pérez' }
+        }
+      }));
+      expect(r.detalle).toHaveLength(2); // la fila 4 tiene fecha llena: no es de interés
+      expect(r.detalle[0]).toMatchObject({ filaRegistro: 2, uuid: 'u1' });
+      expect(r.detalle[0].motivo).toMatch(/sellada hace menos de 30 min/);
+      expect(r.detalle[1]).toMatchObject({ filaRegistro: 3, uuid: 'uX' });
+      expect(r.detalle[1].motivo).toMatch(/UUID sin fila/);
+      expect(a.detectar(base()).detalle).toBeNull();
     });
 
     it('nombres sin correo se reportan con sus filas y no se notifican', () => {
@@ -325,6 +384,24 @@ describe('notificarAsignacionesPendientes()', () => {
     expect(celda(hojaAnalisis(), 2, 9)).toEqual(new Date(2026, 7, 1)); // no pisa la fecha existente
   });
 
+  it('la operación borra la fecha para volver a asignar: el caso sale de nuevo (pasada la ventana de sello reciente)', () => {
+    setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 9, 6, 9, 0));
+    a.notificar({ forzar: true });
+    expect(enviados).toHaveLength(1);
+
+    hojaAnalisis()._fullData[1][8] = ''; // la operación borra Fecha Evaluacion
+    vi.setSystemTime(new Date(2026, 9, 6, 9, 10));
+    expect(a.notificar({ forzar: true }).correos).toBe(0); // 10 min: se asume fallo de escritura, no se duplica
+
+    vi.setSystemTime(new Date(2026, 9, 6, 11, 0));
+    expect(a.notificar({ forzar: true }).correos).toBe(1);
+    expect(enviados).toHaveLength(2);
+    expect(celda(hojaAnalisis(), 2, 9)).toBeInstanceOf(Date); // la fecha quedó escrita otra vez
+    expect(a.notificar({ forzar: true }).correos).toBe(0);
+  });
+
   it('reasignación: nuevo correo al nuevo analista y nuevo sello', () => {
     setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
     a.notificar({ forzar: true });
@@ -387,6 +464,33 @@ describe('notificarAsignacionesPendientes()', () => {
     const r = a.notificar({ forzar: true });
     expect(r.ok).toBe(false);
     expect(enviados).toHaveLength(0);
+  });
+
+  describe('completar Fecha Evaluacion de filas ya notificadas', () => {
+    it('rellena con la fecha de F.H Asignacion solo las notificadas con la fecha vacía, sin enviar correos', () => {
+      setup({
+        filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez'), filaAnalisis('u3', 'María Pérez')],
+        filasControl: [['L1', 'u1'], ['L1', 'u2'], ['L1', 'u3']]
+      });
+      a.notificar({ forzar: true });
+      expect(enviados).toHaveLength(1);
+      const hora = celda(hojaControl(), 2, 3);
+      hojaAnalisis()._fullData[1][8] = ''; // se perdió la fecha de u1
+      hojaAnalisis()._fullData[2][8] = ''; // se perdió la fecha de u2
+
+      const r = a.completarFechas();
+      expect(r.ok).toBe(true);
+      expect(r.escritas).toBe(2);
+      expect(celda(hojaAnalisis(), 2, 9)).toEqual(hora);
+      expect(celda(hojaAnalisis(), 3, 9)).toEqual(hora);
+      expect(enviados).toHaveLength(1); // ningún correo nuevo
+    });
+
+    it('si no hay nada que completar no escribe', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez')], filasControl: [['L1', 'u1']] });
+      a.notificar({ forzar: true });
+      expect(a.completarFechas().escritas).toBe(0);
+    });
   });
 
   describe('compuerta: espera tras la última edición y barrido de seguridad', () => {
