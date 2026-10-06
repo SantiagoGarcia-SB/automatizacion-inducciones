@@ -59,6 +59,10 @@ var ASIGNACIONES_ESPERA_MS = 2 * 60 * 1000;
  * escritura de la fecha falló (no que la operación la borró): no se reenvía el correo.
  */
 var ASIGNACIONES_SELLO_RECIENTE_MS = 30 * 60 * 1000;
+/** Si una corrida lleva más que esto, deja lo que falte para el siguiente ciclo (GAS corta a los 6 min). */
+var ASIGNACIONES_TIEMPO_MAX_MS = 4.5 * 60 * 1000;
+/** Al leer filas sueltas se juntan en un solo bloque si están separadas por esto o menos. */
+var ASIGNACIONES_HOLGURA_LECTURA = 20;
 /** Pasada de seguridad aunque no haya ediciones (nombres agregados luego a Config_Analistas, etc.). */
 var ASIGNACIONES_BARRIDO_MS = 60 * 60 * 1000;
 
@@ -399,18 +403,87 @@ function Asignaciones_asegurarColumnas_(hojaControl) {
 }
 
 /**
+ * Agrupa números de fila en tramos {inicio, cantidad}. Dos filas cuya separación sea <= holgura
+ * (filas intermedias) caben en el mismo tramo. Escribir: holgura 0 (solo filas seguidas, para no
+ * pisar las de en medio). Leer: holgura > 0 (leer de más es barato; llamar de más no).
+ */
+function Asignaciones_tramos_(filas, holgura) {
+  var ordenadas = filas.slice().sort(function (a, b) { return a - b; });
+  var tramos = [];
+  ordenadas.forEach(function (fila) {
+    var t = tramos[tramos.length - 1];
+    var fin = t ? t.inicio + t.cantidad - 1 : 0;
+    if (t && fila <= fin) return;
+    if (t && fila - fin - 1 <= holgura) t.cantidad = fila - t.inicio + 1;
+    else tramos.push({ inicio: fila, cantidad: 1 });
+  });
+  return tramos;
+}
+
+/**
+ * Escribe una columna en bloques de filas seguidas (una llamada por tramo, no por celda).
+ * @param {Array<{fila:number, valor:*}>} pares
+ * @param {string} [formato] Formato numérico opcional (p. ej. 'dd/MM/yyyy').
+ * @returns {number} Cantidad de llamadas de escritura.
+ */
+function Asignaciones_escribirColumna_(hoja, columna, pares, formato) {
+  var porFila = {};
+  pares.forEach(function (p) { porFila[p.fila] = p.valor; });
+  var tramos = Asignaciones_tramos_(pares.map(function (p) { return p.fila; }), 0);
+  tramos.forEach(function (t) {
+    var valores = [];
+    for (var k = 0; k < t.cantidad; k++) valores.push([porFila[t.inicio + k]]);
+    var rango = hoja.getRange(t.inicio, columna, t.cantidad, 1);
+    rango.setValues(valores);
+    if (formato && typeof rango.setNumberFormat === 'function') rango.setNumberFormat(formato);
+  });
+  return tramos.length;
+}
+
+/**
+ * Lee filas completas (todas las columnas hasta `ancho`) por tramos. Devuelve fila → arreglo.
+ */
+function Asignaciones_leerFilas_(hoja, filas, ancho) {
+  var salida = {};
+  Asignaciones_tramos_(filas, ASIGNACIONES_HOLGURA_LECTURA).forEach(function (t) {
+    var valores = hoja.getRange(t.inicio, 1, t.cantidad, ancho).getValues();
+    for (var k = 0; k < t.cantidad; k++) salida[t.inicio + k] = valores[k];
+  });
+  return salida;
+}
+
+/** Lee una sola columna en las filas pedidas, por tramos. Devuelve fila → valor. */
+function Asignaciones_leerColumnaEnFilas_(hoja, columna, filas) {
+  var salida = {};
+  Asignaciones_tramos_(filas, ASIGNACIONES_HOLGURA_LECTURA).forEach(function (t) {
+    var valores = hoja.getRange(t.inicio, columna, t.cantidad, 1).getValues();
+    for (var k = 0; k < t.cantidad; k++) salida[t.inicio + k] = valores[k][0];
+  });
+  return salida;
+}
+
+function Asignaciones_vacio_(v) {
+  return v === undefined || v === null || String(v).trim() === '';
+}
+
+function Asignaciones_forzarEscritura_() {
+  if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
+}
+
+/**
  * Lee lo necesario y detecta pendientes (sin enviar ni escribir nada).
+ *
+ * Filtro primero: lee solo ASIGNADA A… y Fecha Evaluacion (2 columnas). Con completo=false y sin
+ * ninguna fila con nombre y fecha vacía, termina ahí sin abrir Control_General (pasada de seguridad
+ * barata). Con completo (por defecto) lee además lo necesario para detectar reasignaciones y
+ * diagnosticar.
+ * @param {{detalle?:boolean, completo?:boolean}} [opciones]
  */
 function Asignaciones_recolectar_(opciones) {
+  var completo = !(opciones && opciones.completo === false);
   var libroAnalisis = SpreadsheetRegistry_get(getArchivoAnalisisId());
-  var libroControl = SpreadsheetRegistry_get(getHojaControlId());
-
   var hojaAnalisis = libroAnalisis.getSheetByName(ASIGNACIONES_HOJA_ANALISIS);
-  var hojaControl = libroControl.getSheetByName(ASIGNACIONES_HOJA_CONTROL);
-  if (!hojaAnalisis || !hojaControl) throw new Error('No se encontró registro analisis o Control_General.');
-
-  var hojaConfig = libroControl.getSheetByName(ASIGNACIONES_HOJA_CONFIG);
-  var mapa = hojaConfig ? Asignaciones_construirMapaAnalistas_(hojaConfig.getDataRange().getValues()) : {};
+  if (!hojaAnalisis) throw new Error('No se encontró registro analisis.');
 
   var encAnalisis = hojaAnalisis.getRange(1, 1, 1, hojaAnalisis.getLastColumn()).getValues()[0];
   var cols = {
@@ -422,12 +495,30 @@ function Asignaciones_recolectar_(opciones) {
   };
   if (!cols.asignada || !cols.uuid) throw new Error('registro analisis no tiene ASIGNADA A… o UUID_SISTEMA.');
 
+  var ultimaAnalisis = hojaAnalisis.getLastRow();
+  var asignadas = Asignaciones_leerColumna_(hojaAnalisis, cols.asignada, ultimaAnalisis);
+  var fechasEvaluacion = Asignaciones_leerColumna_(hojaAnalisis, cols.fechaEval, ultimaAnalisis);
+
+  if (!completo) {
+    var hayCandidatas = false;
+    for (var c = 0; c < asignadas.length; c++) {
+      if (!Asignaciones_vacio_(asignadas[c]) && Asignaciones_vacio_(fechasEvaluacion[c])) { hayCandidatas = true; break; }
+    }
+    if (!hayCandidatas) return { sinCandidatas: true, mapa: {}, resultado: Asignaciones_resultadoVacio_(), ctx: null };
+  }
+
+  var libroControl = SpreadsheetRegistry_get(getHojaControlId());
+  var hojaControl = libroControl.getSheetByName(ASIGNACIONES_HOJA_CONTROL);
+  if (!hojaControl) throw new Error('No se encontró Control_General.');
+
+  var hojaConfig = libroControl.getSheetByName(ASIGNACIONES_HOJA_CONFIG);
+  var mapa = hojaConfig ? Asignaciones_construirMapaAnalistas_(hojaConfig.getDataRange().getValues()) : {};
+
   var columnasControl = Asignaciones_asegurarColumnas_(hojaControl);
   var encControl = hojaControl.getRange(1, 1, 1, hojaControl.getLastColumn()).getValues()[0];
   var colUuidControl = Asignaciones_buscarColumna_(encControl, 'UUID_SISTEMA');
   if (!colUuidControl) throw new Error('Control_General no tiene UUID_SISTEMA.');
 
-  var ultimaAnalisis = hojaAnalisis.getLastRow();
   var ultimaControl = hojaControl.getLastRow();
   var uuidsControl = Asignaciones_leerColumna_(hojaControl, colUuidControl, ultimaControl);
   var fhControl = Asignaciones_leerColumna_(hojaControl, columnasControl.fh, ultimaControl);
@@ -440,8 +531,8 @@ function Asignaciones_recolectar_(opciones) {
   }
 
   var resultado = Asignaciones_detectarPendientes_({
-    asignadas: Asignaciones_leerColumna_(hojaAnalisis, cols.asignada, ultimaAnalisis),
-    fechasEvaluacion: Asignaciones_leerColumna_(hojaAnalisis, cols.fechaEval, ultimaAnalisis),
+    asignadas: asignadas,
+    fechasEvaluacion: fechasEvaluacion,
     registroSai: Asignaciones_leerColumna_(hojaAnalisis, cols.registroSai, ultimaAnalisis),
     uuids: Asignaciones_leerColumna_(hojaAnalisis, cols.uuid, ultimaAnalisis),
     lotes: Asignaciones_leerColumna_(hojaAnalisis, cols.lote, ultimaAnalisis),
@@ -460,8 +551,17 @@ function Asignaciones_recolectar_(opciones) {
   };
 }
 
+function Asignaciones_resultadoVacio_() {
+  return {
+    porEmail: {}, sinCorreo: {}, sinCorreoCasos: [], sinFilaControl: 0,
+    omitidas: { analizadas: 0, sinFilaControl: 0, fechaOcupada: 0, selloReciente: 0 },
+    conSelloSinFecha: [], detalle: null
+  };
+}
+
 /**
  * Completa cada caso con datos legibles (lote, arrendatario, póliza, ciudad, sucursal).
+ * Lee las filas por tramos (no una llamada por caso).
  */
 function Asignaciones_enriquecerCasos_(ctx, casos) {
   var enc = ctx.encAnalisis;
@@ -473,8 +573,9 @@ function Asignaciones_enriquecerCasos_(ctx, casos) {
     ciudad: Asignaciones_buscarColumna_(enc, 'ciudad'),
     sucursal: Asignaciones_buscarColumna_(enc, 'sucursal')
   };
+  var filas = Asignaciones_leerFilas_(ctx.hojaAnalisis, casos.map(function (c) { return c.filaRegistro; }), enc.length);
   casos.forEach(function (c) {
-    var fila = ctx.hojaAnalisis.getRange(c.filaRegistro, 1, 1, enc.length).getValues()[0];
+    var fila = filas[c.filaRegistro] || [];
     var v = function (idx) { return idx ? String(fila[idx - 1] === undefined ? '' : fila[idx - 1]).trim() : ''; };
     c.idLote = v(col.lote);
     c.arrendatario = v(col.arrendatario);
@@ -486,24 +587,22 @@ function Asignaciones_enriquecerCasos_(ctx, casos) {
 }
 
 /**
- * Sella un caso: hora de asignación y analista notificado en Control_General,
- * y fecha en "Fecha Evaluacion" de registro analisis.
+ * Sella un grupo de casos en bloques: hora de asignación y analista notificado en Control_General,
+ * y fecha en "Fecha Evaluacion" de registro analisis. Al final comprueba con UNA lectura que la
+ * fecha quedó escrita.
+ * @returns {number[]} Filas de registro analisis cuya fecha NO quedó escrita (vacío si todo bien).
  */
-function Asignaciones_sellarCaso_(ctx, caso, nombreEnSheet, ahora) {
+function Asignaciones_sellarGrupo_(ctx, casos, ahora) {
   var cc = ctx.columnasControl;
-  ctx.hojaControl.getRange(caso.filaControl, cc.fh).setValue(ahora);
-  ctx.hojaControl.getRange(caso.filaControl, cc.notificado).setValue(nombreEnSheet);
-  if (ctx.colFechaEval) {
-    var celda = ctx.hojaAnalisis.getRange(caso.filaRegistro, ctx.colFechaEval);
-    celda.setValue(ahora);
-    if (typeof celda.setNumberFormat === 'function') celda.setNumberFormat('dd/MM/yyyy');
-    // Comprobación: si Sheets aceptó la escritura pero la celda quedó vacía, que quede en el log.
-    if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
-    var quedo = celda.getValue();
-    if (quedo === '' || quedo === null || quedo === undefined) {
-      throw new Error('Fecha Evaluacion no quedó escrita en la fila ' + caso.filaRegistro + ' de registro analisis');
-    }
-  }
+  Asignaciones_escribirColumna_(ctx.hojaControl, cc.fh, casos.map(function (c) { return { fila: c.filaControl, valor: ahora }; }));
+  Asignaciones_escribirColumna_(ctx.hojaControl, cc.notificado, casos.map(function (c) { return { fila: c.filaControl, valor: c.nombreEnSheet }; }));
+  if (!ctx.colFechaEval) return [];
+
+  var filas = casos.map(function (c) { return c.filaRegistro; });
+  Asignaciones_escribirColumna_(ctx.hojaAnalisis, ctx.colFechaEval, filas.map(function (f) { return { fila: f, valor: ahora }; }), 'dd/MM/yyyy');
+  Asignaciones_forzarEscritura_();
+  var leidas = Asignaciones_leerColumnaEnFilas_(ctx.hojaAnalisis, ctx.colFechaEval, filas);
+  return filas.filter(function (f) { return Asignaciones_vacio_(leidas[f]); });
 }
 
 function Asignaciones_registrarHistorial_(libroControl, grupo, casos, ahora) {
@@ -515,9 +614,11 @@ function Asignaciones_registrarHistorial_(libroControl, grupo, casos, ahora) {
       hoja.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#253150').setFontColor('white');
       hoja.setFrozenRows(1);
     }
-    casos.forEach(function (c) {
-      hoja.appendRow([ahora, c.uuid, c.idLote || '', grupo.nombre, grupo.email, c.reasignado ? 'REASIGNACION' : 'ASIGNACION']);
+    if (!casos.length) return;
+    var filas = casos.map(function (c) {
+      return [ahora, c.uuid, c.idLote || '', grupo.nombre, grupo.email, c.reasignado ? 'REASIGNACION' : 'ASIGNACION'];
     });
+    hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, 6).setValues(filas);
   } catch (e) {
     console.warn('No se pudo registrar Historial_Asignaciones: ' + e.message);
   }
@@ -651,6 +752,7 @@ function Asignaciones_ejecutar_(opciones) {
 
   var props = PropertiesService.getScriptProperties();
   var lease = null;
+  var huboEdicion = false;
   if (!simular) {
     lease = Lease_adquirir(ASIGNACIONES_LEASE, ASIGNACIONES_LEASE_TTL_MS);
     if (!lease) {
@@ -659,12 +761,18 @@ function Asignaciones_ejecutar_(opciones) {
       return resumen;
     }
     // Se limpia ANTES de leer: una edición posterior lo vuelve a marcar.
+    huboEdicion = !!props.getProperty(ASIGNACIONES_PROP_ULTIMA_EDICION);
     props.deleteProperty(ASIGNACIONES_PROP_ULTIMA_EDICION);
   }
+  // Una pasada de seguridad (sin ediciones) solo mira filas con nombre y fecha vacía; tras una edición,
+  // o a mano, se revisa todo (incluye reasignaciones).
+  var completo = simular || forzar || huboEdicion;
 
   var reintentar = false;
+  var inicioMs = Date.now();
   try {
-    var datos = Asignaciones_recolectar_();
+    var datos = Asignaciones_recolectar_({ completo: completo });
+    if (datos.sinCandidatas) return resumen; // filtro: ninguna fila con nombre y fecha vacía
     var grupos = Object.keys(datos.resultado.porEmail).map(function (k) { return datos.resultado.porEmail[k]; });
     resumen.sinCorreo = datos.resultado.sinCorreo;
     resumen.omitidas = datos.resultado.omitidas;
@@ -690,6 +798,12 @@ function Asignaciones_ejecutar_(opciones) {
     if (urlHoja && gid !== '') urlHoja += '#gid=' + gid;
 
     grupos.forEach(function (grupo) {
+      if (Date.now() - inicioMs > ASIGNACIONES_TIEMPO_MAX_MS) {
+        // Tiempo casi agotado: lo que falte sigue pendiente y sale en el siguiente ciclo.
+        reintentar = true;
+        resumen.parcial = true;
+        return;
+      }
       if (cuota < 1) { reintentar = true; resumen.errores.push('Sin cuota de correo para ' + grupo.email); return; }
 
       try {
@@ -716,16 +830,19 @@ function Asignaciones_ejecutar_(opciones) {
       }
 
       // Hora real de asignación = justo después del envío exitoso (misma para todo el correo).
-      // Si un sello falla NO se reintenta el correo (se duplicaría): queda en Logs_Sistema.
+      // Si el sello falla NO se reintenta el correo (se duplicaría): queda en Logs_Sistema.
       var ahora = new Date();
-      grupo.casos.forEach(function (caso) {
-        try {
-          Asignaciones_sellarCaso_(datos.ctx, caso, caso.nombreEnSheet, ahora);
-        } catch (errSello) {
-          resumen.errores.push('Sello fila ' + caso.filaRegistro + ': ' + errSello.message);
-          _registrarEvento_('ERROR', ASIGNACIONES_MODULO, 'Correo enviado pero no se pudo sellar', 'UUID ' + caso.uuid + ' | ' + errSello.message);
+      try {
+        var sinFecha = Asignaciones_sellarGrupo_(datos.ctx, grupo.casos, ahora);
+        if (sinFecha.length) {
+          resumen.errores.push('Fecha Evaluacion no quedó escrita en las filas: ' + sinFecha.slice(0, 20).join(', '));
+          _registrarEvento_('ERROR', ASIGNACIONES_MODULO, 'Correo enviado pero la Fecha Evaluacion no quedó escrita',
+            grupo.email + ' | filas ' + sinFecha.slice(0, 40).join(', '));
         }
-      });
+      } catch (errSello) {
+        resumen.errores.push('Sello ' + grupo.email + ': ' + errSello.message);
+        _registrarEvento_('ERROR', ASIGNACIONES_MODULO, 'Correo enviado pero no se pudo sellar', grupo.email + ' | ' + errSello.message);
+      }
       Asignaciones_registrarHistorial_(datos.ctx.libroControl, grupo, grupo.casos, ahora);
       resumen.correos++;
       resumen.casos += grupo.casos.length;
@@ -876,20 +993,14 @@ function Asignaciones_completarFechas_() {
     var ctx = datos.ctx;
     if (!ctx.colFechaEval) throw new Error('registro analisis no tiene la columna Fecha Evaluacion.');
 
-    var filas = [];
     var sinHora = 0;
-    datos.resultado.conSelloSinFecha.forEach(function (d) {
-      var celda = ctx.hojaAnalisis.getRange(d.filaRegistro, ctx.colFechaEval);
-      celda.setValue(d.fhAsignacion);
-      if (typeof celda.setNumberFormat === 'function') celda.setNumberFormat('dd/MM/yyyy');
-      filas.push(d.filaRegistro);
-    });
-    if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
+    var pares = datos.resultado.conSelloSinFecha.map(function (d) { return { fila: d.filaRegistro, valor: d.fhAsignacion }; });
+    var filas = pares.map(function (p) { return p.fila; });
+    Asignaciones_escribirColumna_(ctx.hojaAnalisis, ctx.colFechaEval, pares, 'dd/MM/yyyy');
+    Asignaciones_forzarEscritura_();
 
-    var noQuedaron = filas.filter(function (f) {
-      var v = ctx.hojaAnalisis.getRange(f, ctx.colFechaEval).getValue();
-      return v === '' || v === null || v === undefined;
-    });
+    var leidas = Asignaciones_leerColumnaEnFilas_(ctx.hojaAnalisis, ctx.colFechaEval, filas);
+    var noQuedaron = filas.filter(function (f) { return Asignaciones_vacio_(leidas[f]); });
     _registrarEvento_(noQuedaron.length ? 'WARN' : 'INFO', ASIGNACIONES_MODULO, 'Fechas de evaluación completadas',
       filas.length + ' escrita(s), ' + noQuedaron.length + ' no quedaron escritas' + (noQuedaron.length ? ': filas ' + noQuedaron.slice(0, 20).join(', ') : ''));
     return { ok: noQuedaron.length === 0, escritas: filas.length, sinHora: sinHora, noQuedaron: noQuedaron };

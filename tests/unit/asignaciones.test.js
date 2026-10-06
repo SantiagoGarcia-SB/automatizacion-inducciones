@@ -29,7 +29,8 @@ function loadSource() {
     programado: procesarAsignacionesProgramado,
     marcar: marcarAsignacionPendiente,
     hayTrabajo: Asignaciones_hayTrabajo_,
-    completarFechas: Asignaciones_completarFechas_
+    completarFechas: Asignaciones_completarFechas_,
+    tramos: Asignaciones_tramos_
   }; })()`;
   return eval(wrapped);
 }
@@ -100,6 +101,24 @@ describe('utilidades puras', () => {
     expect(c.html).toContain('jur&iacute;dico');
     expect(c.html).toContain('AVS');
     expect(c.html.indexOf('Importante tener en cuenta')).toBeLessThan(c.html.indexOf('Casos asignados'));
+  });
+
+  describe('tramos de filas (leer/escribir en bloques)', () => {
+    it('agrupa filas seguidas y separa las que no lo son (escritura: sin holgura)', () => {
+      expect(a.tramos([5, 6, 7, 20, 21, 40], 0)).toEqual([
+        { inicio: 5, cantidad: 3 }, { inicio: 20, cantidad: 2 }, { inicio: 40, cantidad: 1 }
+      ]);
+    });
+    it('ignora el orden y las repetidas', () => {
+      expect(a.tramos([7, 5, 6, 6, 5], 0)).toEqual([{ inicio: 5, cantidad: 3 }]);
+    });
+    it('con holgura (lectura) junta filas cercanas en un solo bloque', () => {
+      expect(a.tramos([5, 8, 29], 20)).toEqual([{ inicio: 5, cantidad: 25 }]);
+      expect(a.tramos([5, 8, 30], 20)).toEqual([{ inicio: 5, cantidad: 4 }, { inicio: 30, cantidad: 1 }]);
+    });
+    it('sin filas no hay tramos', () => {
+      expect(a.tramos([], 0)).toEqual([]);
+    });
   });
 
   describe('detectar pendientes (estado de la hoja)', () => {
@@ -464,6 +483,108 @@ describe('notificarAsignacionesPendientes()', () => {
     const r = a.notificar({ forzar: true });
     expect(r.ok).toBe(false);
     expect(enviados).toHaveLength(0);
+  });
+
+  describe('optimización: filtrar primero y escribir en bloques', () => {
+    const muchas = (n, nombre = 'María Pérez') => ({
+      filasAnalisis: Array.from({ length: n }, (_, i) => filaAnalisis('u' + (i + 1), nombre)),
+      filasControl: Array.from({ length: n }, (_, i) => ['L1', 'u' + (i + 1)])
+    });
+
+    it('pasada de seguridad sin filas candidatas: lee solo 2 columnas y no abre Control_General', () => {
+      setup({ filasAnalisis: [filaAnalisis('u1', 'María Pérez', new Date(2026, 9, 1)), filaAnalisis('u2', '')], filasControl: [['L1', 'u1'], ['L1', 'u2']] });
+      const abrir = vi.fn(globalThis.SpreadsheetRegistry_get);
+      globalThis.SpreadsheetRegistry_get = abrir;
+      props['ASIGNACIONES_ULTIMO_BARRIDO'] = '1'; // barrido vencido, sin marca de edición
+      const hoja = hojaAnalisis();
+      hoja.resetCallLog();
+      const r2 = a.notificar({});
+      expect(r2.correos).toBe(0);
+      expect(abrir).toHaveBeenCalledTimes(1); // solo registro analisis; Control_General no se abrió
+      expect(hoja.getCallLog('getValues').length).toBeLessThanOrEqual(3); // encabezado + 2 columnas
+    });
+
+    it('con candidatas la pasada de seguridad sí envía', () => {
+      setup(muchas(3));
+      props['ASIGNACIONES_ULTIMO_BARRIDO'] = '1';
+      expect(a.notificar({}).correos).toBe(1);
+    });
+
+    it('un arrastre de 60 filas seguidas se sella con pocas llamadas, no con una por caso', () => {
+      setup(muchas(60));
+      a.notificar({ forzar: true });
+      expect(enviados).toHaveLength(1);
+      expect(enviados[0].subject).toContain('60 solicitudes');
+
+      const ctl = hojaControl().getCallLog('setValues').filter(c => c.values && c.values.length === 60);
+      expect(ctl.length).toBe(2); // F.H Asignacion y Analista Notificado: un bloque cada uno
+      const reg = hojaAnalisis().getCallLog('setValues');
+      expect(reg).toHaveLength(1); // Fecha Evaluacion: un bloque
+      expect(reg[0].values).toHaveLength(60);
+      expect(hojaAnalisis().getCallLog('setValue')).toHaveLength(0);
+      expect(hojaControl().getCallLog('setValue')).toHaveLength(0);
+      // Historial: una sola escritura con las 60 líneas (más el encabezado), sin appendRow por caso
+      const hist = control._spreadsheet.getSheetByName('Historial_Asignaciones');
+      expect(hist.getCallLog('setValues')).toHaveLength(1);
+      expect(hist.getCallLog('appendRow')).toHaveLength(1); // solo el encabezado
+      expect(hist._fullData).toHaveLength(61);
+      // y todas quedaron selladas
+      for (let f = 2; f <= 61; f++) {
+        expect(celda(hojaAnalisis(), f, 9)).toBeInstanceOf(Date);
+        expect(celda(hojaControl(), f, 4)).toBe('María Pérez');
+      }
+    });
+
+    it('filas separadas se escriben en bloques separados sin pisar las de en medio', () => {
+      setup({
+        filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'María Pérez', new Date(2026, 8, 1)), filaAnalisis('u3', 'María Pérez')],
+        filasControl: [['L1', 'u1'], ['L1', 'u2'], ['L1', 'u3']]
+      });
+      a.notificar({ forzar: true });
+      expect(celda(hojaAnalisis(), 3, 9)).toEqual(new Date(2026, 8, 1)); // la del medio no se tocó
+      expect(celda(hojaAnalisis(), 2, 9)).toBeInstanceOf(Date);
+      expect(celda(hojaAnalisis(), 4, 9)).toBeInstanceOf(Date);
+      expect(hojaAnalisis().getCallLog('setValues')).toHaveLength(2);
+    });
+
+    it('si el tiempo se agota deja los grupos que faltan para el siguiente ciclo, sin perderlos ni duplicarlos', () => {
+      setup({
+        filasAnalisis: [filaAnalisis('u1', 'María Pérez'), filaAnalisis('u2', 'Luis Mora')],
+        filasControl: [['L1', 'u1'], ['L1', 'u2']]
+      });
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 9, 6, 9, 0, 0));
+      const envio = globalThis.MailApp.sendEmail;
+      globalThis.MailApp.sendEmail = vi.fn((o) => { envio(o); vi.setSystemTime(new Date(2026, 9, 6, 9, 6, 0)); }); // el primer envío "tarda" 6 min
+
+      const r = a.notificar({ forzar: true });
+      expect(r.correos).toBe(1);
+      expect(r.parcial).toBe(true);
+      expect(enviados).toHaveLength(1);
+      expect(a.hayTrabajo()).toBe(true); // reintento en el siguiente ciclo
+
+      globalThis.MailApp.sendEmail = envio;
+      const r2 = a.notificar({ forzar: true });
+      expect(r2.correos).toBe(1);
+      expect(enviados).toHaveLength(2);
+      expect(enviados[0].to).not.toBe(enviados[1].to);
+    });
+
+    it('si la fecha no queda escrita lo registra como error con las filas', () => {
+      setup(muchas(3));
+      // la hoja ignora las escrituras sobre Fecha Evaluacion (simula un borrado inmediato)
+      const hoja = hojaAnalisis();
+      const getRange = hoja.getRange.bind(hoja);
+      hoja.getRange = (f, c, n, m) => {
+        const r = getRange(f, c, n, m);
+        if (c === 9 && typeof n === 'number') r.setValues = () => {};
+        return r;
+      };
+      const res = a.notificar({ forzar: true });
+      expect(res.ok).toBe(false);
+      expect(res.correos).toBe(1);
+      expect(globalThis._registrarEvento_).toHaveBeenCalledWith('ERROR', 'Asignaciones.js', expect.stringContaining('Fecha Evaluacion no quedó escrita'), expect.stringContaining('filas 2, 3, 4'));
+    });
   });
 
   describe('completar Fecha Evaluacion de filas ya notificadas', () => {
